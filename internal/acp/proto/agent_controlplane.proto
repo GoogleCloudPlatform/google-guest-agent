@@ -1,0 +1,313 @@
+//  Copyright 2024 Google LLC
+
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+
+//     https://www.apache.org/licenses/LICENSE-2.0
+
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+
+syntax = "proto3";
+
+// The package contains messages between control plane and a guest agent over
+// Agent Communication Service.
+package agent_controlplane;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "google_guest_agent/acp";
+
+// Continuous State Enforcement system send the message to request agent
+// information.
+message GetAgentInfo {}
+
+// Response from Guest Agent replying to GetAgentInfo
+message AgentInfo {
+  // The name of the agent.
+  string name = 1;
+  // The version of the agent. e.g., "20230913.00"
+  string version = 2;
+  // The architecture of the agent. e.g., "amd64"
+  string architecture = 3;
+  // A list of agent capabilites.
+  repeated AgentCapability agent_capabilities = 4;
+
+  enum AgentCapability {
+    AGENT_CAPABILITY_UNSPECIFIED = 0;
+    // The agent supports returning agent information.
+    GET_AGENT_INFO = 1;
+    // The agent supports returning OS information.
+    GET_OS_INFO = 2;
+    // The agent supports returning plugin states.
+    LIST_PLUGIN_STATES = 3;
+    // The agent supports configuring different plugin states through
+    // install/remove a plugin revision.
+    CONFIGURE_PLUGIN_STATES = 4;
+  }
+}
+
+// Continuous State Enforcement system send the message to request OS
+// information
+message GetOSInfo {}
+
+// Response from Guest Agent replying to GetOSInfo
+message OSInfo {
+  // Type of the operating system for the VM. e.g., "linux" and "windows".
+  string type = 2;
+  // Short name of the operating system. e.g., "rhel" and "windows".
+  string short_name = 3;
+  // Long name of the operating system for the VM. e.g., "Red Hat Enterprise
+  // Linux 9.2 (Plow)", "Windows Server 2022 Datacenter".
+  string long_name = 4;
+  // The version of this operating system. e.g., "9.2" for RHEL, "10.0.20348"
+  // for Windows Server.
+  string version = 5;
+  // The architecture of the operating system. e.g., "amd64"
+  string architecture = 6;
+  // Kernel release of the operating system.
+  // e.g.,
+  // "5.14.0-284.30.1.el9_2.x86_64" for Linux
+  // "10.0.20348.1970" for Windows.
+  string kernel_release = 7;
+  // Kernel verion of the operating system.
+  // e.g.,
+  // "#1 SMP PREEMPT_DYNAMIC Fri Aug 25 09:13:12 EDT 2023" for Linux
+  // "10.0.20348.1970 (WinBuild.160101.0800)" for Windows.
+  string kernel_version = 8;
+}
+
+// Continuous State Enforcement system send the message to request plugin
+// states.
+message ListPluginStates {}
+
+// Response from Guest Agent replying to ListPluginStates.
+message CurrentPluginStates {
+  // The states of all daemon plugins on the resource.
+  repeated DaemonPluginState daemon_plugin_states = 1;
+
+  message DaemonPluginState {
+    // The name of the plugin. e.g., "sap-hana-01"
+    string name = 1;
+    // A randomly generated 8 digit hexa string for current plugin. e.g.,
+    // "67C5640D"
+    string current_revision_id = 2;
+    // Status of the current plugin.
+    Status current_plugin_status = 3;
+    // The revision id for the pending plugin. If this pending revision is
+    // installed and running, the field value should be empty and
+    // current_revision_id should be updated and status set to RUNNING. If
+    // there's an error during the process, this value should remain as is and
+    // the pending_revision_status should update to an error status.
+    string pending_revision_id = 4;
+    // Status of the pending plugin. Available only if pending_revision_id has a
+    // value
+    Status pending_plugin_status = 5;
+    // The metrics of the current plugin.
+    repeated Metric current_plugin_metrics = 6;
+
+    // Detailed plugin status on the resource.
+    //
+    // If there's another revision is running, it will be stopped before
+    // starting this plugin. If any step fails during the process, agent will
+    // retry until retry attempts exhausted.
+    //
+    // During restart of a plugin, it will go through
+    // STOPPING -> STOPPED -> STARTING -> RUNNING
+    // with start_time updated if it restarts successfully.
+    //
+    // When trying to stop the plugin, the agent will first try signal the
+    // plugin to stop itself. If the plugin does not stop after a certain
+    // timeout, it will force kill the process.
+    //
+    // CRASHED and INSTALL_FAILED statuses expect a non-zero response code
+    // indicating an error. Other statuses might have a non-zero response code
+    // indicating a non-fatal error.
+    enum StatusValue {
+      STATE_VALUE_UNSPECIFIED = 0;
+      // Life cycle of a plugin after installed.
+      STARTING = 1;
+      RUNNING = 2;
+      STOPPING = 3;
+      STOPPED = 4;
+      CRASHED = 5;
+      // Installing or failed to install.
+      INSTALLING = 6;
+      INSTALL_FAILED = 7;
+    }
+
+    message Status {
+      StatusValue status = 1;
+      // The response code returned when agent checks plugin health.
+      // Zero indicates running normally. Non-zero code indicates an error.  If
+      // it's a non-fatal error, the status value should be RUNNING.
+      int32 response_code = 2;
+      // A result message returned when agent checks plugin health explaining
+      // potential error reasons.
+      repeated string results = 3;
+      // The time when the agent checks plugin health and gets the
+      // response_code.
+      google.protobuf.Timestamp update_time = 4;
+    }
+
+    // The CPU and Memory usage of the plugin at a specific time.
+    message Metric {
+      // The time when the agent checks for metrics.
+      google.protobuf.Timestamp timestamp = 1;
+      // The value of the metric.
+      // The recent CPU usage of the plugin.
+      float cpu_usage = 6;
+      // The recent memory usage of the plugin.
+      int64 memory_usage = 7;
+    }
+  }
+}
+
+// Continuous State Enforcement system send the message to ask the Guest Agent
+// to configure different plugins. No response from Guest Agent is expected for
+// this message. The system only waits for an acknowledgement from Agent
+// Communication Service.
+message ConfigurePluginStates {
+  repeated ConfigurePlugin configure_plugins = 1;
+
+  message ConfigurePlugin {
+    Action action = 1;
+    Plugin plugin = 2;
+    Manifest manifest = 3;
+  }
+
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    // Instruct the Guest agent to stop the plugin if it finds one already
+    // running. Then install AND run the given plugin_name@revision_id. It's
+    // expected that every plugin should be long running until it's removed. So
+    // we don't have a start/stop, or enable/disable here.
+    INSTALL = 1;
+    // Instruct the Guest Agent to first stop the running plugin then remove the
+    // plugin binary.
+    // When using this action, only the name of the plugin will be specified,
+    // other fields will be empty.
+    REMOVE = 2;
+  }
+
+  message Plugin {
+    // The name of the plugin. e.g., "sap-hana-01"
+    string name = 1;
+    // A system generated string.
+    string revision_id = 2;
+    // The gcs signed url is passed to the Guest Agent to download the plugin
+    // data. Continuous State Enforcement system gets the url from PDM.
+    string gcs_signed_url = 3;
+    // Path to the binary to execute in the plugin archive.
+    string entry_point = 4;
+    // Arguments (subcommands or extra flags like "--foo=bar") to pass in when
+    // launching the plugin process.
+    //
+    // For the payload sent to the plugin in the GuestAgentPlugin.Start()
+    // request, see `config` below.
+    repeated string arguments = 5;
+    // The SHA256 checksum of the plugin data.
+    string checksum = 6;
+  }
+
+  message Manifest {
+    // The maximum allowed memory usage of the plugin in bytes.
+    // If a plugin exceeds the memory usage, the guest agent would restart the
+    // plugin.
+    int64 max_memory_usage_bytes = 1;
+    // The maximum allowed percent CPU usage of the plugin.
+    // This usage is the percentage of CPU cycles the plugin is allowed to use
+    // per time period. If the plugin exceeds the quota, the plugin will be
+    // throttled until the next time period.
+    int32 max_cpu_usage_percentage = 2;
+    // The interval with which to check the plugin's memory and CPU usage.
+    google.protobuf.Duration metrics_interval = 3;
+    // The timeout for downloading the plugin data.
+    google.protobuf.Duration download_timeout = 4;
+    // The number of attempts for downloading the plugin data.
+    int32 download_attempt_count = 5;
+    // The timeout to wait for a plugin to start running.
+    google.protobuf.Duration start_timeout = 6;
+    // The number of attempts for starting a plugin.
+    int32 start_attempt_count = 7;
+    // The timeout to wait for a plugin to stop running.
+    // If the timeout is exceeded, the guest agent will force kill the process
+    // so no stop attempts needed.
+    google.protobuf.Duration stop_timeout = 8;
+    // Maximum number of datapoints to collect/return. If count reaches this
+    // limit before metrics are flushed then oldest datapoints are purged.
+    uint64 max_metric_datapoints = 9;
+    // This is any additional payload handed off to the plugin on every start
+    // request. Payload is optional and defined by the service and plugin
+    // itself.
+    oneof config {
+      // String configuration. Any string payload that the plugin understands.
+      string string_config = 10;
+      // Struct configuration. Usually used for reading file based configuration
+      // like JSON or yaml.
+      google.protobuf.Struct struct_config = 11;
+    }
+  }
+}
+
+message PluginEventMessage {
+  // RevisionID is the ID of the plugin revision related to this event.
+  string revision_id = 1;
+
+  // PluginName is the name of the plugin associated with this event.
+  string plugin_name = 2;
+
+  // Enum for the types of events that can occur to a plugin or a CSE config.
+  enum PluginEventType {
+    // Unspecified event type, used as a default value.
+    PLUGIN_EVENT_TYPE_UNSPECIFIED = 0;
+    // Event indicating that CSE has sent a configuration to install a new
+    // plugin revision. This event type captures the initiation of the
+    // installation process for a plugin.
+    PLUGIN_CONFIG_INSTALL = 1;
+    // Event indicating that CSE has sent a configuration to remove an existing
+    // plugin revision. This event type is used when a plugin is being
+    // uninstalled or removed from the agent.
+    PLUGIN_CONFIG_REMOVE = 2;
+    // Event indicating that the plugin has been successfully installed.
+    PLUGIN_INSTALLED = 3;
+    // Event indicating that the plugin has started successfully.
+    PLUGIN_STARTED = 4;
+    // Event indicating that the plugin has been successfully removed.
+    PLUGIN_REMOVED = 5;
+    // Event indicating that the plugin has been stopped, either as part of a
+    // normal shutdown or due to an error.
+    PLUGIN_STOPPED = 6;
+    // Event indicating that the plugin has crashed. This is typically followed
+    // by a restart if auto-recovery is enabled.
+    PLUGIN_CRASHED = 7;
+    // Event indicating that an attempt to install the plugin has failed.
+    PLUGIN_INSTALL_FAILED = 8;
+    // Event indicating that an attempt to start the plugin has failed.
+    PLUGIN_START_FAILED = 9;
+    // Event indicating that an attempt to remove or uninstall the plugin has
+    // failed.
+    PLUGIN_REMOVE_FAILED = 10;
+  }
+
+  // EventType categorizes the event (e.g., CRASH, STOP, START, INSTALL_FAILED).
+  PluginEventType event_type = 3;
+
+  // EventTimestamp records the time at which the event was generated by the
+  // plugin. This timestamp reflects when the event actually happened in the
+  // guest agent or plugin, not when it was received by ACS. It is critical for
+  // understanding the sequence of events as they occurred on the agent or
+  // within the plugin. If not explicitly set, control plane defaults to January
+  // 1, 1970.
+  google.protobuf.Timestamp event_timestamp = 4;
+
+  // EventDetails contains additional information about the event.
+  // This could be a serialized format like JSON or a protocol buffer.
+  optional bytes event_details = 5;
+}

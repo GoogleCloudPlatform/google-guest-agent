@@ -1,0 +1,16 @@
+[Unit]
+Description=Google Compute Engine Shutdown Scripts
+Wants=network-online.target rsyslog.service
+After=network-online.target rsyslog.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+RemainAfterExit=true
+# This service does nothing on start, and runs shutdown scripts on stop.
+ExecStop=/usr/bin/ggactl guestagent vmevent shutdown
+TimeoutStopSec=0
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
