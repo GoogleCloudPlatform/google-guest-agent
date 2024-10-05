@@ -386,12 +386,14 @@ func TestConfigurePluginStates(t *testing.T) {
 	req := &acpb.ConfigurePluginStates{
 		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
-				Action: acpb.ConfigurePluginStates_INSTALL,
-				Plugin: &acpb.ConfigurePluginStates_Plugin{Name: "PluginA", RevisionId: "1"},
+				Action:   acpb.ConfigurePluginStates_INSTALL,
+				Plugin:   &acpb.ConfigurePluginStates_Plugin{Name: "PluginA", RevisionId: "1"},
+				Manifest: &acpb.ConfigurePluginStates_Manifest{},
 			},
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
-				Action: acpb.ConfigurePluginStates_REMOVE,
-				Plugin: &acpb.ConfigurePluginStates_Plugin{Name: "PluginB", RevisionId: "2"},
+				Action:   acpb.ConfigurePluginStates_REMOVE,
+				Plugin:   &acpb.ConfigurePluginStates_Plugin{Name: "PluginB", RevisionId: "2"},
+				Manifest: &acpb.ConfigurePluginStates_Manifest{},
 			},
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
 				Action: acpb.ConfigurePluginStates_ACTION_UNSPECIFIED,
@@ -1037,6 +1039,7 @@ func TestUpgradePluginError(t *testing.T) {
 			Name:       "PluginB",
 			RevisionId: "RevisionB",
 		},
+		Manifest: &acpb.ConfigurePluginStates_Manifest{},
 	}
 
 	// Duplicate request.
@@ -1046,6 +1049,7 @@ func TestUpgradePluginError(t *testing.T) {
 			Name:       "PluginA",
 			RevisionId: "RevisionA",
 		},
+		Manifest: &acpb.ConfigurePluginStates_Manifest{},
 	}
 
 	// Fail pre-launch requirements, no download setup.
@@ -1055,6 +1059,7 @@ func TestUpgradePluginError(t *testing.T) {
 			Name:       "PluginA",
 			RevisionId: "RevisionA1",
 		},
+		Manifest: &acpb.ConfigurePluginStates_Manifest{},
 	}
 
 	tests := []struct {

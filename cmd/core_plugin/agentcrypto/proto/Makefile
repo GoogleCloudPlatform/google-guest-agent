@@ -6,5 +6,4 @@ buildproto:
 	rm -rf go-tpm-tools
 
 clean:
-	rm -rf credentials
-	rm -rf go-tpm-tools
+	rm -rf credentials go-tpm-tools
