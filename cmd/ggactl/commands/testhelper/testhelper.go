@@ -22,9 +22,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
+	"github.com/spf13/cobra"
 )
 
 // ctxKey is a context key to override stdout/stderr log behavior in tests.

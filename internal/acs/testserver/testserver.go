@@ -32,10 +32,10 @@ import (
 
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	apb "google.golang.org/protobuf/types/known/anypb"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 // acsImplementation struct holds all messages and address ACS server is running on.

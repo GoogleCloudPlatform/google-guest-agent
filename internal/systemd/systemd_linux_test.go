@@ -21,8 +21,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/google/go-cmp/cmp"
 )
 
 type testRunner struct {

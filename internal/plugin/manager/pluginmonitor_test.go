@@ -21,11 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	pcpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/protobuf/testing/protocmp"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 func TestPluginMonitoring(t *testing.T) {

@@ -21,10 +21,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
+	"github.com/spf13/cobra"
 )
 
 // New returns a new guest agent command.

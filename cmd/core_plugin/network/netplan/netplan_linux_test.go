@@ -25,8 +25,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/go-yaml/yaml"
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
@@ -36,6 +34,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	"github.com/go-yaml/yaml"
+	"github.com/google/go-cmp/cmp"
 )
 
 type runMock struct {

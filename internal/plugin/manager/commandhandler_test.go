@@ -19,8 +19,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestValidateRequest(t *testing.T) {

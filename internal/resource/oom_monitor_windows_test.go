@@ -22,17 +22,15 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/windowstypes"
 )
 
 func setupRunTest(t *testing.T, peakMem int64, err bool) *oomWatcher {
 	watcher := &oomWatcher{
 		name:      "test-plugin",
 		pid:       4,
-		maxMemory: 100 * 1024 * 1024,
+		maxMemory: -1,
 	}
 
 	watcher.syscall = func(trap uintptr, args ...uintptr) (uintptr, uintptr, syscall.Errno) {
@@ -41,8 +39,6 @@ func setupRunTest(t *testing.T, peakMem int64, err bool) *oomWatcher {
 		}
 
 		// The second argument is the pointer to the data structure.
-		mem := (*windowstypes.ProcessMemoryCounters)(unsafe.Pointer(args[1]))
-		mem.PeakWorkingSetSize = uint64(peakMem)
 		return 1, 0, syscall.Errno(0)
 	}
 

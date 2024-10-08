@@ -20,9 +20,9 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/exp/slices"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"golang.org/x/exp/slices"
 )
 
 func TestNotAdditionalLoggers(t *testing.T) {

@@ -22,10 +22,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/google/go-cmp/cmp"
 )
 
 // mockRunner is a mock implementation of the run.Runner interface.

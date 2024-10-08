@@ -45,12 +45,15 @@ var (
 	execLookPath = exec.LookPath
 	// listGoogleUsers is a function to list google users, overridden in tests.
 	listGoogleUsers = accounts.ListGoogleUsers
+	// deprovisionUnusedUsers is a function to deprovision unused users,
+	// overridden in tests.
+	deprovisionUnusedUsers = defaultDeprovisionUnusedUsers
 )
 
-// deprovisionUnusedUsers removes accounts which were removed from ssh key
+// defaultDeprovisionUnusedUsers removes accounts which were removed from ssh key
 // metadata from the local system. Depending on user configuration, the account
 // may not be deleted but instead have ssh keys removed.
-func deprovisionUnusedUsers(ctx context.Context, config *cfg.Sections, activeUsers userKeyMap) []error {
+func defaultDeprovisionUnusedUsers(ctx context.Context, config *cfg.Sections, activeUsers userKeyMap) []error {
 	googleUsers, err := listGoogleUsers(ctx)
 	if err != nil {
 		return []error{fmt.Errorf("could not determine which users are unused, failed to list google users: %w", err)}

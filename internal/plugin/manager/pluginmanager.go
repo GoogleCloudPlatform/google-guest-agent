@@ -25,12 +25,12 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	"google.golang.org/protobuf/proto"
-	tpb "google.golang.org/protobuf/types/known/timestamppb"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/boundedlist"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
+	"google.golang.org/protobuf/proto"
+	tpb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (

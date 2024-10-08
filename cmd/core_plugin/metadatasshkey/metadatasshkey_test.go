@@ -21,12 +21,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/google/go-cmp/cmp"
 )
 
 func swapForTest[T any](t *testing.T, old *T, new T) {

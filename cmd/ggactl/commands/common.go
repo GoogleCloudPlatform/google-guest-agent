@@ -22,8 +22,8 @@ import (
 	"io"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/spf13/cobra"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
+	"github.com/spf13/cobra"
 )
 
 // sendlistener returns the command listener for send command.

@@ -21,13 +21,13 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	dpb "google.golang.org/protobuf/types/known/durationpb"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/handler"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/watcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
+	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
 const (

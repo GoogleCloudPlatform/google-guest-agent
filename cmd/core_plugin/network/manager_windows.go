@@ -24,11 +24,11 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/windows/registry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
+	"golang.org/x/sys/windows/registry"
 )
 
 const (

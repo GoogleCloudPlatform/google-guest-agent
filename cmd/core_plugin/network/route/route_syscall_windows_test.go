@@ -44,7 +44,7 @@ func TestDuplicatedObject(t *testing.T) {
 
 	for _, route := range table {
 		if err := createIPForwardEntry2(&route); err == nil {
-			t.Error("createIPForwardEntry2(%v) succeeded, want error", route)
+			t.Errorf("createIPForwardEntry2(%v) succeeded, want error", route)
 		}
 	}
 }

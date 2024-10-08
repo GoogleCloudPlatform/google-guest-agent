@@ -28,11 +28,11 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/google/go-cmp/cmp"
-	"google.golang.org/api/option"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/google/go-cmp/cmp"
+	"google.golang.org/api/option"
 )
 
 func TestMain(m *testing.M) {

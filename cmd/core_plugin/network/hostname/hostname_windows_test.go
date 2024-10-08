@@ -21,10 +21,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"golang.org/x/sys/windows"
 )
 
 func TestNotifyIpInterfaceChange(t *testing.T) {

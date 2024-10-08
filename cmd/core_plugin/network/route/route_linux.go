@@ -22,10 +22,10 @@ import (
 	"sort"
 	"strings"
 
-	"golang.org/x/exp/maps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"golang.org/x/exp/maps"
 )
 
 // linuxClient is the linux implementation of the routeOperations interface.

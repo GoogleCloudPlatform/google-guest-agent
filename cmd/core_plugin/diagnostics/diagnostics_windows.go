@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/windows/registry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
@@ -34,6 +33,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ssh"
+	"golang.org/x/sys/windows/registry"
 )
 
 const (

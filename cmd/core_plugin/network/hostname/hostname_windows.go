@@ -25,9 +25,9 @@ import (
 	"unsafe"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	"golang.org/x/sys/windows"
 )
 
 var platformHostsFile = `C:\Windows\System32\Drivers\etc\hosts`

@@ -18,8 +18,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/testhelper"
+	"github.com/spf13/cobra"
 )
 
 func TestInvalidParent(t *testing.T) {

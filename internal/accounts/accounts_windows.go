@@ -152,7 +152,7 @@ func AddUserToGroup(_ context.Context, u *User, g *Group) error {
 	}
 
 	if err := netLocalGroupAddMembers(osSpecific.SID, g.Name); err != nil {
-		return fmt.Errorf("failed to add user %s to group %v: %w", u.Username, g.Name)
+		return fmt.Errorf("failed to add user %s to group %v: %w", u.Username, g.Name, err)
 	}
 	return nil
 }

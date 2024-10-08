@@ -23,12 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 	structpb "google.golang.org/protobuf/types/known/structpb"

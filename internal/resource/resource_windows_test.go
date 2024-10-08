@@ -24,8 +24,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"golang.org/x/sys/windows"
 )
 
 // constraintTestOpts contains options for setting up the test. This is primarily used for

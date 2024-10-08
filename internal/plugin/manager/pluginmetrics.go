@@ -21,8 +21,8 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	tpb "google.golang.org/protobuf/types/known/timestamppb"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
+	tpb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Metric is a struct to store the plugin's current memory and CPU usage at a

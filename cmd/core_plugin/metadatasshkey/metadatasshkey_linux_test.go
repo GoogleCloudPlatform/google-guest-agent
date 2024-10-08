@@ -22,18 +22,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestDeprovisionUnusedUsers(t *testing.T) {
@@ -429,6 +430,7 @@ func TestUpdateSSHKeysError(t *testing.T) {
 		user          *accounts.User
 		keys          []string
 		restoreconCmd string
+		skipIfRoot    bool
 	}{
 		{
 			name: "no_homedir",
@@ -441,7 +443,8 @@ func TestUpdateSSHKeysError(t *testing.T) {
 				UID:     "0",
 				GID:     "0",
 			},
-			keys: []string{"key1", "key2"},
+			keys:       []string{"key1", "key2"},
+			skipIfRoot: true,
 		},
 		{
 			name: "restorecon_failure",
@@ -459,6 +462,15 @@ func TestUpdateSSHKeysError(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.skipIfRoot {
+				currUser, err := user.Current()
+				if err != nil {
+					t.Fatalf("could not get current user: %v", err)
+				}
+				if currUser.Uid == "0" && currUser.Gid == "0" {
+					t.Skip("skipping test because it fails when run as root")
+				}
+			}
 			if err := os.MkdirAll(tc.user.HomeDir, 0750); err != nil && tc.user.HomeDir != "" {
 				t.Fatalf("os.MkdirAll(%s) = %v want nil", tc.user.HomeDir, err)
 			}
@@ -526,6 +538,11 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 	}
 	ctx := context.Background()
 	_, currentGroup := currentUserAndGroup(ctx, t)
+	deprovisionUnusedUsers = func(ctx context.Context, config *cfg.Sections, activeUsers userKeyMap) []error {
+		return nil
+	}
+	t.Cleanup(func() { deprovisionUnusedUsers = defaultDeprovisionUnusedUsers })
+
 	tests := []struct {
 		name                         string
 		config                       *cfg.Sections

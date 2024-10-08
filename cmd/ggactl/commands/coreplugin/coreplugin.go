@@ -18,9 +18,9 @@ package coreplugin
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
+	"github.com/spf13/cobra"
 )
 
 // New returns a new cobra command for core plugin.

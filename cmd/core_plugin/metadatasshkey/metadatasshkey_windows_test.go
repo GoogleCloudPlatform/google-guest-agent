@@ -22,13 +22,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestDeprovisionUnusedUsers(t *testing.T) {
@@ -198,14 +198,14 @@ func TestServiceImageExeVersion(t *testing.T) {
 
 	major, minor, err := sshdVersion(ctx)
 	if err != nil {
-		t.Fatalf(`serviceImageExeVersion(ctx, %s) = err %v, want nil`, err)
+		t.Fatalf(`sshdVersion(ctx) = err %v, want nil`, err)
 	}
 	// The version of the binary in test should never be 0.0, if this happens it
 	// was probably parsed incorrectly.
 	// To make this test deterministic, figure out how to stamp the test binary
 	// with FileVersionInfo information and check for that.
 	if major == 0 && minor == 0 {
-		t.Errorf(`serviceImageExeVersion(ctx, %s) = %d, %d want one of them to be non-zero`, major, minor)
+		t.Errorf(`sshdVersion(ctx) = %d, %d want one of them to be non-zero`, major, minor)
 	}
 }
 
@@ -358,7 +358,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 			}
 			res, err := run.WithContext(ctx, opts)
 			if err != nil {
-				t.Fatal("run.WithContext(ctx, %+v) = err %v, want nil", opts, err)
+				t.Fatalf("run.WithContext(ctx, %+v) = err %v, want nil", opts, err)
 			}
 			if strings.TrimSpace(res.Output) != tc.wantSSHDState {
 				t.Errorf("%s %v = %s, want %s", opts.Name, opts.Args, strings.TrimSpace(res.Output), tc.wantSSHDState)
