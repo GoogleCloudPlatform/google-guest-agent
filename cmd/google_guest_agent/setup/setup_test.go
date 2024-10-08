@@ -23,9 +23,9 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	dpb "google.golang.org/protobuf/types/known/durationpb"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
+	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
 type plugin struct {

@@ -24,8 +24,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/google/go-cmp/cmp"
 )
 
 const (

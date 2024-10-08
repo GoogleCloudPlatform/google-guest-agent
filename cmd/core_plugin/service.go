@@ -24,8 +24,6 @@ import (
 	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/status"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/metadatascriptrunner"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/early"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/late"
@@ -34,6 +32,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 )

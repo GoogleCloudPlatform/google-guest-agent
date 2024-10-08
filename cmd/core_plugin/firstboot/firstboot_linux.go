@@ -25,10 +25,10 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/go-ini/ini"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/go-ini/ini"
 )
 
 const (

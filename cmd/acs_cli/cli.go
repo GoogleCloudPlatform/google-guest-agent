@@ -29,11 +29,11 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	dpb "google.golang.org/protobuf/types/known/durationpb"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/testserver"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
 const (

@@ -25,13 +25,13 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	apb "google.golang.org/protobuf/types/known/anypb"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 )
 
 const (

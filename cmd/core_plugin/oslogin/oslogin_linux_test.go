@@ -26,8 +26,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -35,6 +33,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/systemd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestNewModule(t *testing.T) {

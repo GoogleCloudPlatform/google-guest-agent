@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/exp/slices"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"golang.org/x/exp/slices"
 )
 
 type testRunner struct {

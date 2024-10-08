@@ -21,11 +21,11 @@ import (
 	"testing"
 
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/testing/protocmp"
 	apb "google.golang.org/protobuf/types/known/anypb"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 type conn struct {

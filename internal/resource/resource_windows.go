@@ -25,8 +25,8 @@ import (
 	"unsafe"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
+	"golang.org/x/sys/windows"
 )
 
 // windowsClient is a client for applying resource constraints on Windows.
@@ -151,7 +151,7 @@ func (c *windowsClient) Apply(constraint Constraint) error {
 	if constraint.MaxCPUUsage != 0 {
 		// Make sure the CPU usage set is realistic.
 		if constraint.MaxCPUUsage > 100 {
-			return fmt.Errorf("MaxCPUUsage %d exceeds 100%", constraint.MaxCPUUsage)
+			return fmt.Errorf("MaxCPUUsage %d exceeds 100%%", constraint.MaxCPUUsage)
 		}
 
 		// Set CPU rate limits. Usage limits is the maximum number of CPU cycles

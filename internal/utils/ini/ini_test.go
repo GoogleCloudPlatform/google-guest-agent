@@ -51,7 +51,7 @@ func TestWriteIniFile(t *testing.T) {
 		},
 		{
 			name:    "invalid-file",
-			file:    "/dev/ini-file",
+			file:    "/dev/null/ini-file",
 			wantErr: true,
 			data:    &configSection{Core: &coreSection{Value1: "value1", Value2: "value2"}},
 		},

@@ -44,7 +44,7 @@ func freeMibTable(table *mibIPforwardTable2) {
 
 func syscallError(r0 uintptr, errNo syscall.Errno, msg string) error {
 	if r0 == 0 && errNo != 0 {
-		return fmt.Errorf("%s: %w", msg, errNo.Error())
+		return fmt.Errorf("%s: %s", msg, errNo.Error())
 	} else if r0 != 0 {
 		return syscall.Errno(r0)
 	}

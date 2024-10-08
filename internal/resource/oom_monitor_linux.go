@@ -27,8 +27,8 @@ import (
 	"unsafe"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/unix"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	"golang.org/x/sys/unix"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 )

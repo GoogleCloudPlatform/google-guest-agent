@@ -23,9 +23,9 @@ import (
 	"unsafe"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/route"
+	"golang.org/x/sys/windows"
 )
 
 var (

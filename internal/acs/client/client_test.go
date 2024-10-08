@@ -21,16 +21,16 @@ import (
 	"testing"
 	"time"
 
-	client "github.com/GoogleCloudPlatform/agentcommunication_client"
+	"github.com/GoogleCloudPlatform/agentcommunication_client"
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/testserver"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	apb "google.golang.org/protobuf/types/known/anypb"
 	tpb "google.golang.org/protobuf/types/known/timestamppb"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/testserver"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 type conn struct {

@@ -24,6 +24,8 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "google_guest_agent/acp";
 
+// option go_api_flag = "OPEN_TO_OPAQUE_HYBRID";
+
 // Continuous State Enforcement system send the message to request agent
 // information.
 message GetAgentInfo {}

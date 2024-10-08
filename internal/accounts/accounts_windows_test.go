@@ -72,7 +72,7 @@ func createTestUser(t *testing.T, username string, password string) *User {
 
 	err := CreateUser(ctx, testUser)
 	if err != nil {
-		t.Fatalf("Error creating test user: %w", err)
+		t.Fatalf("Error creating test user: %v", err)
 	}
 	newUser, err := FindUser(ctx, username)
 	if err != nil {
@@ -88,7 +88,7 @@ func createTestGroup(t *testing.T, groupname string) *Group {
 	ctx := context.Background()
 	err := CreateGroup(ctx, groupname)
 	if err != nil {
-		t.Fatalf("Error creating test group: %w", err)
+		t.Fatalf("Error creating test group: %v", err)
 	}
 	testGroup, err := FindGroup(ctx, groupname)
 	if err != nil {
@@ -580,7 +580,7 @@ func TestRemoveUserFromGroup(t *testing.T) {
 			testGroup := createTestGroup(t, "testgroup")
 			err := AddUserToGroup(context.Background(), testUser, testGroup)
 			if err != nil {
-				t.Fatalf("failed to add testuser to testgroup: %w", err)
+				t.Fatalf("failed to add testuser to testgroup: %v", err)
 			}
 
 			accountsTestSetup(t, test.opts)

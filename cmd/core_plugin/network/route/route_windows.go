@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"net/netip"
 
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
+	"golang.org/x/sys/windows"
 )
 
 // windowsClient is the windows implementation of the routeOperations interface.

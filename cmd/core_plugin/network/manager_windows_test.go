@@ -20,11 +20,11 @@ import (
 	"net"
 	"testing"
 
-	"golang.org/x/exp/maps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/mocking"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
+	"golang.org/x/exp/maps"
 )
 
 func TestReadRegistryIPAddressSuccess(t *testing.T) {
@@ -149,7 +149,7 @@ func TestNicCurrentState(t *testing.T) {
 			}
 
 			if len(state.newAddresses(tc.newAddrs)) != len(tc.newAddrs) {
-				t.Errorf("nicCurrentState(%v, %v) returned %d, want %d", ifaces[0], tc.macAddr, state.newAddresses(tc.newAddrs), tc.newAddrs)
+				t.Errorf("nicCurrentState(%v, %v) returned %v, want %v", ifaces[0], tc.macAddr, state.newAddresses(tc.newAddrs), tc.newAddrs)
 			}
 
 			// Fake registry read addresses.

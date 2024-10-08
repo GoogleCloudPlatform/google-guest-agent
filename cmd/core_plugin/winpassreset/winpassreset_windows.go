@@ -24,13 +24,13 @@ import (
 	"fmt"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/windows/registry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/lru"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
+	"golang.org/x/sys/windows/registry"
 )
 
 const (
@@ -114,7 +114,7 @@ func setupAccounts(ctx context.Context, newKeys []*metadata.WindowsKey) error {
 	// Create or update the accounts in the machine.
 	for _, key := range diffKeys {
 		if err := resetPassword(ctx, key); err != nil {
-			galog.Errorf("error setting password for user %s: %w", key.UserName(), err)
+			galog.Errorf("error setting password for user %s: %v", key.UserName(), err)
 		}
 	}
 

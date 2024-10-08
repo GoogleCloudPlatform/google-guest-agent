@@ -20,10 +20,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/testhelper"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestGuestAgentVMEventCommand(t *testing.T) {

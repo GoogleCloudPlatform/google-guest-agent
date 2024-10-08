@@ -18,8 +18,8 @@ import (
 	"context"
 	"testing"
 
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 
 	apb "google.golang.org/protobuf/types/known/anypb"
 )

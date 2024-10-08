@@ -24,11 +24,11 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/spf13/cobra"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/coreplugin"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/guestagent"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
+	"github.com/spf13/cobra"
 )
 
 const (

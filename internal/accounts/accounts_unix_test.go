@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/google/go-cmp/cmp"
 )
 
 const fakeGroup = "fake_group"
@@ -339,6 +339,16 @@ func TestCreateUser(t *testing.T) {
 	}
 	testrunner := testrunnerUser(t)
 	testhome := filepath.Join(t.TempDir(), "home")
+
+	// If the current user is root, then these args are not used.
+	idArgs := ""
+	if testrunner.UnixUID() != 0 {
+		idArgs = idArgs + fmt.Sprintf(" -u %s", testrunner.UID)
+	}
+	if testrunner.UnixGID() != 0 {
+		idArgs = idArgs + fmt.Sprintf(" -g %s", testrunner.GID)
+	}
+
 	tests := []struct {
 		name               string
 		u                  *User
@@ -352,7 +362,7 @@ func TestCreateUser(t *testing.T) {
 			u:                  testrunner,
 			gusersContents:     "",
 			reuseHomedir:       false,
-			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s -u %s -g %s", testrunner.Username, testrunner.UID, testrunner.GID),
+			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s%s", testrunner.Username, idArgs),
 			wantGusersContents: testrunner.Username + "\n",
 		},
 		{
@@ -360,7 +370,7 @@ func TestCreateUser(t *testing.T) {
 			u:                  testrunner,
 			gusersContents:     "",
 			reuseHomedir:       true,
-			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s -u %s -g %s", testrunner.Username, testrunner.UID, testrunner.GID),
+			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s%s", testrunner.Username, idArgs),
 			wantGusersContents: testrunner.Username + "\n",
 		},
 		{
@@ -368,7 +378,7 @@ func TestCreateUser(t *testing.T) {
 			u:                  testrunner,
 			gusersContents:     testrunner.Username + "\n",
 			reuseHomedir:       false,
-			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s -u %s -g %s", testrunner.Username, testrunner.UID, testrunner.GID),
+			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s%s", testrunner.Username, idArgs),
 			wantGusersContents: testrunner.Username + "\n",
 		},
 		{
@@ -376,7 +386,7 @@ func TestCreateUser(t *testing.T) {
 			u:                  testrunner,
 			gusersContents:     "someoneelse\n",
 			reuseHomedir:       false,
-			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s -u %s -g %s", testrunner.Username, testrunner.UID, testrunner.GID),
+			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s%s", testrunner.Username, idArgs),
 			wantGusersContents: "someoneelse\n" + testrunner.Username + "\n",
 		},
 	}
@@ -442,6 +452,16 @@ func TestCreateUserError(t *testing.T) {
 	}
 	testrunner := testrunnerUser(t)
 	testhome := filepath.Join(t.TempDir(), "home")
+
+	// If the current user is root, then these args are not used.
+	idArgs := ""
+	if testrunner.UnixUID() != 0 {
+		idArgs = idArgs + fmt.Sprintf(" -u %s", testrunner.UID)
+	}
+	if testrunner.UnixGID() != 0 {
+		idArgs = idArgs + fmt.Sprintf(" -g %s", testrunner.GID)
+	}
+
 	tests := []struct {
 		name               string
 		u                  *User
@@ -458,7 +478,7 @@ func TestCreateUserError(t *testing.T) {
 			gusersContents:     "",
 			reuseHomedir:       false,
 			cmdFailure:         true,
-			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s -u %s -g %s", testrunner.Username, testrunner.UID, testrunner.GID),
+			wantArgs:           fmt.Sprintf("-m -s /bin/bash -p * %s%s", testrunner.Username, idArgs),
 			wantGusersContents: "",
 			wantErr:            errors.New("failed to run useraddcmd"),
 		},

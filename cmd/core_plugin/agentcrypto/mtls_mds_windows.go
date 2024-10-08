@@ -29,10 +29,10 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 
-	"golang.org/x/crypto/pkcs12"
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	"golang.org/x/sys/windows"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 const (

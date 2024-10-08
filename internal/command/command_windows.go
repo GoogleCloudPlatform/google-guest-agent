@@ -22,8 +22,8 @@ import (
 	"net"
 
 	"github.com/GoogleCloudPlatform/galog"
-	winio "github.com/Microsoft/go-winio"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	winio "github.com/Microsoft/go-winio"
 )
 
 const (

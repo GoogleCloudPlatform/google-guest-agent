@@ -24,8 +24,8 @@ import (
 	"unsafe"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"golang.org/x/sys/windows"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/windowstypes"
+	"golang.org/x/sys/windows"
 )
 
 // windowsClient is for finding processes on Windows OS's.

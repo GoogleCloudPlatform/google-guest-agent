@@ -31,9 +31,9 @@ import (
 	"time"
 
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 func TestDownloadStep(t *testing.T) {
