@@ -9,7 +9,7 @@ to enable GCE platform features.
 Included in the repository are some Makefiles to build and test the guest agent.
 These Makefiles are responsible for generating the proto `pb.go` files required.
 
-In order to build both the `guest-agent` and `core_plugins`, run
+In order to build both the `guest-agent` and `core_plugins`, run:
 
 ```shell
 make
