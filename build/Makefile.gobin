@@ -1,0 +1,45 @@
+PBGO_FILES = \
+	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
+	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
+	internal/acp/proto/agent_controlplane.pb.go \
+	internal/plugin/proto/plugin_comm.pb.go
+
+GO_BINARIES = \
+	cmd/core_plugin/core_plugin \
+	cmd/ggactl/ggactl \
+	cmd/google_authorized_keys/google_authorized_keys \
+	cmd/google_guest_agent/google_guest_agent
+
+GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
+
+fetch-go-tpm-tools:
+	$(Q)echo "Making proto dependencies dir..."
+	$(Q)mkdir -p proto_deps
+	$(Q)echo "Cloning/updating go-tpm-tools..."
+	$(Q)git -C proto_deps/go-tpm-tools pull 2> /dev/null || \
+		git clone $(GO_TPM_TOOLS_URL) proto_deps/go-tpm-tools
+
+$(PBGO_FILES): fetch-go-tpm-tools
+	$(Q)echo "[GEN] $(subst .pb.go,.proto,$(@))"
+	$(Q)protoc --go_out=$(dir $(@)) --go-grpc_out=$(dir $(@)) --proto_path=proto_deps \
+		--proto_path=$(dir $(@)) $(subst .pb.go,.proto,$(@))
+
+$(GO_BINARIES): $(PBGO_FILES)
+	$(Q)echo "[BIN] $(@)"
+	$(Q)go build -C $(dir $(@))
+
+build-go-binaries: $(GO_BINARIES)
+
+go-unit-tests: $(PBGO_FILES)
+	$(Q)echo "Running go unit tests..."
+	$(Q)go test ./...
+
+clean-pbgo:
+	$(Q)echo "Cleaning up generated pb.go files..."
+	$(Q)rm -f $(PBGO_FILES)
+
+clean-go-binaries:
+	$(Q)echo "Cleaning up go binaries..."
+	$(Q)rm -f $(GO_BINARIES)
+
+PHONY += $(GO_BINARIES) $(PBGO_FILES)
