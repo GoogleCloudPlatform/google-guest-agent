@@ -27,7 +27,7 @@ import (
 	"github.com/google/go-tpm/legacy/tpm2"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/agentcrypto/proto/credentials"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/agentcrypto/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/uefi"
 )

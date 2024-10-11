@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/GoogleCloudPlatform/galog"
-	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/handler"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/watcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"

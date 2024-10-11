@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
-	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/boundedlist"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"

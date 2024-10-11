@@ -25,7 +25,7 @@ import (
 	client "github.com/GoogleCloudPlatform/agentcommunication_client"
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
 	"github.com/GoogleCloudPlatform/galog"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"google.golang.org/api/option"
