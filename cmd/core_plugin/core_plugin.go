@@ -33,6 +33,7 @@ import (
 )
 
 var (
+	// Just triggering a prow build.
 	// logOpts holds the logger options. It's mapped to command line flags.
 	logOpts = logger.Options{
 		// Core plugin uses the same "local" ident as the guest agent. For example,
