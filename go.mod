@@ -20,6 +20,7 @@ require (
 	google.golang.org/api v0.199.0
 	google.golang.org/grpc v1.67.1
 	google.golang.org/protobuf v1.34.2
+	software.sslmate.com/src/go-pkcs12 v0.5.0
 )
 
 require (
