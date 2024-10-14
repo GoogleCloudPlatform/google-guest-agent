@@ -122,14 +122,14 @@ func (addr *RawSockaddrInet) Addr() (netip.Addr, error) {
 	return netip.Addr{}, fmt.Errorf("invalid address family: %v", addr.Family)
 }
 
-// RouteProtocol enumeration type defines the routing mechanism that an IP route
+// Protocol enumeration type defines the routing mechanism that an IP route
 // was added with, as described in RFC 4292.
 // https://learn.microsoft.com/en-us/windows/win32/api/nldef/ne-nldef-nl_route_protocol
-type RouteProtocol uint32
+type Protocol uint32
 
-// RouteOrigin enumeration type defines the origin of the IP route.
+// Origin enumeration type defines the origin of the IP route.
 // https://learn.microsoft.com/en-us/windows/win32/api/nldef/ne-nldef-nl_route_origin
-type RouteOrigin uint32
+type Origin uint32
 
 // MibIPforwardRow2 structure stores information about an IP route entry.
 // https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipforward_row2
@@ -142,13 +142,13 @@ type MibIPforwardRow2 struct {
 	ValidLifetime        uint32
 	PreferredLifetime    uint32
 	Metric               uint32
-	Protocol             RouteProtocol
+	Protocol             Protocol
 	Loopback             bool
 	AutoconfigureAddress bool
 	Publish              bool
 	Immortal             bool
 	Age                  uint32
-	Origin               RouteOrigin
+	Origin               Origin
 }
 
 // delete method deletes an IP route entry on the local computer.
