@@ -1,20 +1,27 @@
-BUILDPATH = cmd/core_plugin cmd/google_guest_agent
+# build/debugging
+ifeq ($(V),1)
+Q :=
+else
+Q := @
+endif
 
-.PHONY: clean build buildagent buildcoreplugin test
+include build/Makefile.gobin
 
-build: clean buildagent buildcoreplugin
+clean: clean-go-binaries clean-pbgo
+build: build-go-binaries
+test: go-unit-tests
+check: go-lint
 
-buildagent:
-	${MAKE} -C cmd/google_guest_agent build
-	mv cmd/google_guest_agent/google_guest_agent ./
+help:
+	$(Q)echo  "VARIABLES:"
+	$(Q)echo  "  V                 - Runs the build system in verbose mode i.e. V=1 make"
+	$(Q)echo  " "
+	$(Q)echo  "GENERAL TARGETS:"
+	$(Q)echo  "  build             - Builds all binary artifacts (all code generation also happens)"
+	$(Q)echo  "  check             - Runs linters and code checks"
+	$(Q)echo  "  clean             - Cleans up binaries and generated code"
+	$(Q)echo  "  help              - Prints this help message"
+	$(Q)echo  "  test              - Runs all unit tests"
 
-buildcoreplugin:
-	${MAKE} -C cmd/core_plugin build
-	mv cmd/core_plugin/core_plugin ./
-
-clean:
-	$(foreach path, $(BUILDPATH), ${MAKE} -C $(path) clean;)
-	rm -f google_guest_agent core_plugin;
-
-test:
-	go test ./...;
+.PHONY: $(PHONY)
+.DEFAULT_GOAL = build
