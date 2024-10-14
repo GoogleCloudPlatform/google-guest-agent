@@ -37,7 +37,7 @@ import (
 	tpb "google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
-	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/boundedlist"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"

@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
-	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	tpb "google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"testing"
 
-	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
+	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"

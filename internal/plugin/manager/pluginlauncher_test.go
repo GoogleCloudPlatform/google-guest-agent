@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/resource"

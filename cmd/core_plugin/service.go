@@ -35,7 +35,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 )
 
 const (

@@ -19,7 +19,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 )
 
 // PluginServer implements the plugin RPC server interface.

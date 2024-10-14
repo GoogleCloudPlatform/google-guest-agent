@@ -31,7 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 const (
