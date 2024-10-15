@@ -12,6 +12,8 @@ GO_BINARIES = \
 
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
 
+GOOS ?= "linux"
+
 fetch-go-tpm-tools:
 	$(Q)echo "Making proto dependencies dir..."
 	$(Q)mkdir -p proto_deps
@@ -24,7 +26,13 @@ $(PBGO_FILES): fetch-go-tpm-tools
 	$(Q)protoc --go_out=$(dir $(@)) --go-grpc_out=$(dir $(@)) --proto_path=proto_deps \
 		--experimental_allow_proto3_optional --proto_path=$(dir $(@)) $(subst .pb.go,.proto,$(@))
 
-$(GO_BINARIES): $(PBGO_FILES)
+print-go-env:
+	$(Q)echo "golang build environment:"
+	$(Q)echo "#########################"
+	$(Q)echo "  GOOS=$(GOOS)"
+	$(Q)echo "#########################"
+
+$(GO_BINARIES): print-go-env $(PBGO_FILES)
 	$(Q)echo "[BIN] $(@)"
 	$(Q)cd $(dir $(@)) && go build
 
