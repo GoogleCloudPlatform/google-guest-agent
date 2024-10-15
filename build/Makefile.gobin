@@ -14,6 +14,13 @@ GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
 
 GOOS ?= "linux"
 
+# Create a temporary directory if ARTIFACTS is not provided.
+ifeq ($(ARTIFACTS),)
+ARTIFACTS_DIR = $(shell mktemp -d)
+else
+ARTIFACTS_DIR = "$(ARTIFACTS)"
+endif
+
 fetch-go-tpm-tools:
 	$(Q)echo "Making proto dependencies dir..."
 	$(Q)mkdir -p proto_deps
@@ -42,7 +49,10 @@ build-go-binaries: $(GO_BINARIES)
 
 go-unit-tests: $(PBGO_FILES)
 	$(Q)echo "Running go unit tests..."
-	$(Q)go test ./...
+	$(Q)$(eval DEST := $(ARTIFACTS_DIR))
+	$(Q)go test -v -coverprofile=$(DEST)/coverage.out ./... | tee -a $(DEST)/go-test.log
+	$(Q)cat $(DEST)/go-test.log | go-junit-report > $(DEST)/junit.xml
+	$(Q)echo "Artifacts written to: $(DEST)"
 
 clean-pbgo:
 	$(Q)echo "Cleaning up generated pb.go files..."

@@ -15,6 +15,8 @@ check: go-lint
 help:
 	$(Q)echo  "VARIABLES:"
 	$(Q)echo  "  V                 - Runs the build system in verbose mode i.e. V=1 make"
+	$(Q)echo  "  ARTIFACTS         - Destination of test result files when invoking \"test\" target, a temporary"
+	$(Q)echo  "                      directory will be created if the variable is not set."
 	$(Q)echo  " "
 	$(Q)echo  "GENERAL TARGETS:"
 	$(Q)echo  "  build             - Builds all binary artifacts (all code generation also happens)"
