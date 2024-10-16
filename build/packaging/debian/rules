@@ -1,0 +1,40 @@
+#!/usr/bin/make -f
+
+export PATH := /tmp/go/bin:$(PATH)
+export SHELL := env PATH=$(PATH) /bin/bash
+
+export DH_OPTIONS
+export DH_GOPKG := github.com/GoogleCloudPlatform/google-guest-agent
+export CGO_ENABLED := 0
+export GOCACHE := /tmp/.cache
+export GOPROXY := https://proxy.golang.org
+export GO111MODULE := on
+export GOPATH := /usr/share/gocode
+export DH_GOLANG_BUILDPKG := github.com/GoogleCloudPlatform/google-guest-agent/cmd/google_guest_agent 
+
+%:
+	dh $@  --buildsystem=golang --with=golang,systemd
+
+override_dh_auto_install:
+	# Binary-only package.
+	dh_auto_install -- --no-source
+	install -d debian/google-guest-agent/usr/share/google-guest-agent
+	install -p -m 0644 build/configs/usr/share/google-guest-agent/instance_configs.cfg debian/google-guest-agent/usr/share/google-guest-agent
+
+override_dh_golang:
+	# We don't use any packaged dependencies, so skip dh_golang step.
+
+override_dh_auto_build:
+	dh_auto_build -O--buildsystem=golang -- -ldflags="-s -w -X main.version=$(VERSION)" -mod=readonly
+
+override_dh_installinit:
+	# We don't ship sysvinit files or need script changes for them.
+
+override_dh_systemd_enable:
+	install -d debian/google-guest-agent/lib/systemd/system
+	install -p -m 0644 build/configs/lib/systemd/system/google-guest-agent.service debian/google-guest-agent/lib/systemd/system/
+	dh_systemd_enable google-guest-agent.service
+
+override_dh_systemd_start:
+	# Only perform start/stop actions for the guest agent and cert refresh timer.
+	dh_systemd_start google-guest-agent.service
