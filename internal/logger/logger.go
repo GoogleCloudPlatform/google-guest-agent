@@ -66,14 +66,20 @@ const (
 	// cloudLoggingFlushCadence is the cadence of flushing cloud logging data.
 	cloudLoggingFlushCadence = time.Second * 5
 
-	// CloudLoggingLogID is the logId used for cloud logging - both for core
-	// plugin and guest agent.
+	// CloudLoggingLogID is the logId used for cloud logging for core plugin.
 	CloudLoggingLogID = "GCEGuestAgent"
 
 	// LocalLoggerIdent is the ident used for local loggers (i.e syslog), it is
 	// shared between core plugin and guest agent - they both use the same
 	// "name space".
 	LocalLoggerIdent = "google_guest_agent"
+
+	// ManagerCloudLoggingLogID is the logId used for cloud logging for plugin
+	// manager.
+	ManagerCloudLoggingLogID = "GCEGuestAgentManager"
+	// ManagerLocalLoggerIdent is the ident used for local loggers (i.e syslog)
+	// for plugin manager.
+	ManagerLocalLoggerIdent = "google_guest_agent_manager"
 )
 
 // Init initializes the logger.

@@ -189,6 +189,7 @@ func TestLauncherStep(t *testing.T) {
 	wantMaxMemoryUsage := step.maxMemoryUsage
 	wantMaxCPUUsage := step.maxCPUUsage
 	wantPluginName := plugin.FullName()
+	cfg.Retrieve().Core.ACSClient = false
 
 	tests := []struct {
 		name       string

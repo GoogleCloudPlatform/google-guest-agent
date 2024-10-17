@@ -23,6 +23,7 @@ import (
 
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
@@ -57,11 +58,10 @@ func setupPlugin(ctx context.Context, t *testing.T, plugin *Plugin, ts *testPlug
 }
 
 func TestStopPlugin(t *testing.T) {
-	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	ctc := setupConstraintTestClient(t)
-
 	stateDir := t.TempDir()
 	setBaseStateDir(t, stateDir)
+	cfg.Retrieve().Core.ACSClient = false
 	addr := filepath.Join(t.TempDir(), "pluginA_revisionA.sock")
 
 	tests := []struct {
@@ -108,6 +108,7 @@ func TestStopPlugin(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 			ts := &testPluginServer{}
 			step := &stopStep{cleanup: tc.stopCleanup}
 			setupMockPsClient(t, tc.psClient)

@@ -315,6 +315,7 @@ func TestInitPluginManager(t *testing.T) {
 	stateDir := t.TempDir()
 	cfg.Retrieve().Plugin.StateDir = stateDir
 	cfg.Retrieve().Plugin.SocketConnectionsDir = filepath.Dir(addr)
+	cfg.Retrieve().Core.ACSClient = false
 
 	pluginA := &Plugin{Name: "pluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr, EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3, MaxMetricDatapoints: 2, MetricsInterval: time.Second * 3}}
 	if err := pluginA.Store(); err != nil {
@@ -382,6 +383,7 @@ func TestConfigurePluginStates(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
+	cfg.Retrieve().Core.ACSClient = false
 
 	req := &acpb.ConfigurePluginStates{
 		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
@@ -538,6 +540,7 @@ func TestInstallPlugin(t *testing.T) {
 	setupConstraintTestClient(t)
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	cfg.Retrieve().Plugin.SocketConnectionsDir = connections
+	cfg.Retrieve().Core.ACSClient = false
 	addr := filepath.Join(connections, "PluginA_RevisionA.sock")
 	ps := &testPluginServer{ctrs: make(map[string]int)}
 	server, hash, runner, seenPendingPlugins := installSetup(t, ps, addr)
@@ -676,6 +679,7 @@ func TestUpgradePlugin(t *testing.T) {
 	setBaseStateDir(t, state)
 	ctc := setupConstraintTestClient(t)
 	cfg.Retrieve().Plugin.SocketConnectionsDir = connections
+	cfg.Retrieve().Core.ACSClient = false
 	psClient := &mockPsClient{alive: true}
 	setupMockPsClient(t, psClient)
 	// Start plugin server - old revision.
@@ -781,7 +785,7 @@ func TestRemovePlugin(t *testing.T) {
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	connections := t.TempDir()
 	state := t.TempDir()
-	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s", state)
+	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\n[Core]\nacs_client = false", state)
 	if err := cfg.Load([]byte(tmp)); err != nil {
 		t.Fatalf("cfg.Load(%s) failed unexpectedly with error: %v", tmp, err)
 	}
@@ -848,7 +852,7 @@ func TestRemovePlugin(t *testing.T) {
 func TestMonitoring(t *testing.T) {
 	s := scheduler.Instance()
 	t.Cleanup(s.Stop)
-	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s", t.TempDir())
+	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\n[Core]\nacs_client = false", t.TempDir())
 	if err := cfg.Load([]byte(tmp)); err != nil {
 		t.Fatalf("cfg.Load(%s) failed unexpectedly with error: %v", tmp, err)
 	}
@@ -946,6 +950,9 @@ type fakeACS struct {
 }
 
 func (c *fakeACS) SendMessage(msg *pb.MessageBody) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.throwErr {
 		return fmt.Errorf("test error")
 	}
@@ -955,9 +962,6 @@ func (c *fakeACS) SendMessage(msg *pb.MessageBody) error {
 	if err := msg.GetBody().UnmarshalTo(m); err != nil {
 		return fmt.Errorf("Expected acmpb.AgentInfo, failed to unmarshal message body: %v", err)
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	c.seenType = m.GetEventType()
 	c.seenEvent = m
@@ -1025,7 +1029,7 @@ func TestSendEvent(t *testing.T) {
 }
 
 func TestUpgradePluginError(t *testing.T) {
-	if err := cfg.Load(nil); err != nil {
+	if err := cfg.Load([]byte("[Core]\nacs_client = false")); err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 

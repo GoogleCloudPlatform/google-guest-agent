@@ -75,6 +75,7 @@ func TestPluginMonitoring(t *testing.T) {
 func TestHealthCheck(t *testing.T) {
 	ctx := context.Background()
 	setBaseStateDir(t, t.TempDir())
+	cfg.Retrieve().Core.ACSClient = false
 
 	// Setup install directory.
 	installDir := filepath.Join(cfg.Retrieve().Plugin.StateDir, pluginInstallDir)

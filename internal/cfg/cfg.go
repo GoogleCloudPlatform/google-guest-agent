@@ -59,8 +59,8 @@ const (
 log_level = 3
 log_verbosity = 0
 log_file =
-on_demand_plugins = false
-acs_client = false
+on_demand_plugins = true
+acs_client = true
 
 [Accounts]
 deprovision_remove = false

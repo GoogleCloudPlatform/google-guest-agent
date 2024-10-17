@@ -35,8 +35,8 @@ import (
 var (
 	// logOpts holds the logger options. It's mapped to command line flags.
 	logOpts = logger.Options{
-		Ident:      logger.LocalLoggerIdent,
-		CloudIdent: logger.CloudLoggingLogID,
+		Ident:      logger.ManagerCloudLoggingLogID,
+		CloudIdent: logger.ManagerCloudLoggingLogID,
 	}
 	// version is the version of the binary.
 	version = "unknown"
@@ -46,8 +46,8 @@ var (
 	// corePluginPath is the path to core plugin binary.
 	corePluginPath = ""
 	// skipCorePlugin determines if core plugin initialization should be skipped.
-	// This is used only for testing and must not be set in non-test environments.
-	skipCorePlugin = false
+	// Core plugin is not yet supported and must be set to true by default.
+	skipCorePlugin = true
 )
 
 const (
@@ -72,7 +72,7 @@ func setupFlags() {
 	flag.BoolVar(&forceOnDemandPlugins, "on_demand_plugins", false, "force on-demand plugins (even if disabled on the configuration)")
 	// Core plugin flags.
 	flag.StringVar(&corePluginPath, "core_plugin_path", entryPath(), "path to core plugin binary")
-	flag.BoolVar(&skipCorePlugin, "core_plugins", false, "skip core plugin installation")
+	flag.BoolVar(&skipCorePlugin, "core_plugins", true, "skip core plugin installation")
 
 	flag.Parse()
 }

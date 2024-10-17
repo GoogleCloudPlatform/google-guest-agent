@@ -117,6 +117,9 @@ func clientOptions(ctx context.Context) ([]option.ClientOption, error) {
 // isConnectionSet can be unset to trigger new connection creation which is
 // generally required on send/receive error.
 func setConnection(ctx context.Context) error {
+	connMu.Lock()
+	defer connMu.Unlock()
+
 	// Used of unit testing. Create connection makes a http call which must be avoided in unit tests.
 	if ctx.Value(OverrideConnection) != nil {
 		connection = ctx.Value(OverrideConnection).(ConnectionInterface)
@@ -127,8 +130,6 @@ func setConnection(ctx context.Context) error {
 	}
 
 	if !isConnectionSet.Load() || isNilInterface(connection) {
-		connMu.Lock()
-		defer connMu.Unlock()
 		galog.Debugf("Creating new ACS connection")
 		opts, err := clientOptions(ctx)
 		if err != nil {
