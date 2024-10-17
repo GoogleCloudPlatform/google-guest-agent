@@ -13,6 +13,7 @@ GO_BINARIES = \
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
 
 GOOS ?= "linux"
+VERSION ?= "dev"
 
 # Create a temporary directory if ARTIFACTS is not provided.
 ifeq ($(ARTIFACTS),)
@@ -37,11 +38,12 @@ print-go-env:
 	$(Q)echo "golang build environment:"
 	$(Q)echo "#########################"
 	$(Q)echo "  GOOS=$(GOOS)"
+	$(Q)echo "  VERSION=$(VERSION)"
 	$(Q)echo "#########################"
 
 $(GO_BINARIES): print-go-env $(PBGO_FILES)
 	$(Q)echo "[BIN] $(@)"
-	$(Q)cd $(dir $(@)) && go build
+	$(Q)cd $(dir $(@)) && go build -ldflags "-X main.version=$(VERSION)"
 
 gen-pbgo: $(PBGO_FILES)
 
