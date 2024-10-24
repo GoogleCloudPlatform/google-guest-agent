@@ -135,7 +135,7 @@ func setConnection(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("unable to get client options, err: %w", err)
 		}
-		connection, err = client.CreateConnection(ctx, channelID(), true, opts...)
+		connection, err = client.CreateConnection(ctx, channelID(), false, opts...)
 		if err != nil {
 			return fmt.Errorf("unable to create new ACS connection, err: %w", err)
 		}
