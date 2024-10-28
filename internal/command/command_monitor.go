@@ -72,6 +72,11 @@ func parsePipemodeFromCfg() int {
 // Setup starts an internally managed command server. The agent configuration
 // will decide the server options.
 func Setup(ctx context.Context, listener KnownListeners) error {
+	// Only setup command monitor if it is enabled in the configuration file.
+	if !cfg.Retrieve().Unstable.CommandMonitorEnabled {
+		galog.Debug("Command monitor is disabled in the configuration file, skipping setup")
+		return nil
+	}
 	galog.Debugf("Setting up command monitor for %v", listener)
 	if cmdMonitor.srv != nil {
 		return fmt.Errorf("command monitor is already running")

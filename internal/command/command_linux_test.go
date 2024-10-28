@@ -89,14 +89,14 @@ func TestMkdirpWithPerms(t *testing.T) {
 	}{
 		{
 			name:     "standard create",
-			dir:      path.Join(".", "test"),
+			dir:      path.Join(t.TempDir(), "test"),
 			filemode: os.FileMode(0700) | os.ModeDir,
 			uid:      uidself,
 			gid:      gidself,
 		},
 		{
 			name:     "nested create",
-			dir:      path.Join(".", "test", "test2", "test3"),
+			dir:      path.Join(t.TempDir(), "test", "test2", "test3"),
 			filemode: os.FileMode(0700) | os.ModeDir,
 			uid:      uidself,
 			gid:      gidself,

@@ -41,7 +41,8 @@ func PipeName(listener KnownListeners) string {
 
 func mkdirpWithPerms(dir string, p os.FileMode, uid, gid int) error {
 	stat, err := os.Stat(dir)
-	if err == nil {
+	parent := filepath.Dir(dir)
+	if err == nil && parent != "/" && parent != "" {
 		statT, ok := stat.Sys().(*syscall.Stat_t)
 		if !ok {
 			return fmt.Errorf("could not determine owner of %s", dir)
@@ -65,7 +66,6 @@ func mkdirpWithPerms(dir string, p os.FileMode, uid, gid int) error {
 			}
 		}
 	} else {
-		parent := filepath.Dir(dir)
 		if parent != "/" && parent != "" {
 			if err := mkdirpWithPerms(parent, p, uid, gid); err != nil {
 				return err

@@ -84,6 +84,7 @@ func TestInit(t *testing.T) {
 
 	ctx := testctx(t)
 	cfg.Retrieve().Unstable.CommandPipePath = getTestPipePath(t)
+	cfg.Retrieve().Unstable.CommandMonitorEnabled = true
 	if cmdMonitor.srv != nil {
 		t.Fatal("internal command server already exists")
 	}
