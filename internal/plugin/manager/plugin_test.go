@@ -72,6 +72,7 @@ type testPluginServer struct {
 	mu           sync.Mutex
 	code         int32
 	stopCalled   bool
+	statusCalled bool
 	applyCalled  bool
 	applyFail    bool
 	ctrs         map[string]int
@@ -125,6 +126,7 @@ func (ts *testPluginServer) Stop(ctx context.Context, msg *pb.StopRequest) (*pb.
 }
 
 func (ts *testPluginServer) GetStatus(ctx context.Context, req *pb.GetStatusRequest) (*pb.Status, error) {
+	ts.statusCalled = true
 	if ts.statusFail {
 		return nil, status.Error(1, "test error")
 	}

@@ -101,6 +101,15 @@ func readPluginLogs(path string) string {
 // healthCheck returns the health status of the plugin.
 // If the plugin is not healthy, it will restart the plugin.
 func (m *PluginMonitor) healthCheck(ctx context.Context) *pcpb.Status {
+	currentState := m.plugin.State()
+	if currentState == acpb.CurrentPluginStates_DaemonPluginState_STOPPING || currentState == acpb.CurrentPluginStates_DaemonPluginState_STOPPED {
+		// Plugin is explicitly being stopped. Do not perform health check as it
+		// would fail and try to restart the plugin. Health check runs in a separate
+		// goroutine and could race with stop request.
+		galog.Infof("Plugin %s is stopping or stopped, skipping health check", m.plugin.FullName())
+		return nil
+	}
+
 	s, err := m.plugin.GetStatus(ctx, healthCheckRequest)
 	if err == nil {
 		// GetStatus() did not return error, simply return the response.

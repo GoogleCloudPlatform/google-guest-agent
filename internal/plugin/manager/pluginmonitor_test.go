@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	pcpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 	"github.com/google/go-cmp/cmp"
@@ -84,17 +85,33 @@ func TestHealthCheck(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		want    *pcpb.Status
-		wantCmd string
+		name           string
+		want           *pcpb.Status
+		status         acpb.CurrentPluginStates_DaemonPluginState_StatusValue
+		wantStatusCall bool
+		wantCmd        string
 	}{
 		{
-			name: "success",
-			want: &pcpb.Status{Code: 0, Results: []string{"running ok"}},
+			name:           "success",
+			want:           &pcpb.Status{Code: 0, Results: []string{"running ok"}},
+			wantStatusCall: true,
+			status:         acpb.CurrentPluginStates_DaemonPluginState_RUNNING,
 		},
 		{
-			name:    "failure",
-			wantCmd: "startbinary",
+			name:           "stopping_plugin",
+			wantStatusCall: false,
+			status:         acpb.CurrentPluginStates_DaemonPluginState_STOPPING,
+		},
+		{
+			name:           "stopped_plugin",
+			wantStatusCall: false,
+			status:         acpb.CurrentPluginStates_DaemonPluginState_STOPPED,
+		},
+		{
+			name:           "failure",
+			wantCmd:        "startbinary",
+			wantStatusCall: true,
+			status:         acpb.CurrentPluginStates_DaemonPluginState_RUNNING,
 		},
 	}
 
@@ -105,7 +122,7 @@ func TestHealthCheck(t *testing.T) {
 			addr := filepath.Join(t.TempDir(), "A_12.sock")
 			cfg.Retrieve().Plugin.SocketConnectionsDir = filepath.Dir(addr)
 			startTestServer(t, ts, udsProtocol, addr)
-			p := &Plugin{Name: "A", Revision: "12", Address: addr, Protocol: udsProtocol, EntryPath: "startbinary", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 2, StartConfig: &ServiceConfig{}}, InstallPath: t.TempDir()}
+			p := &Plugin{Name: "A", Revision: "12", Address: addr, Protocol: udsProtocol, EntryPath: "startbinary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: test.status}, Manifest: &Manifest{StartAttempts: 2, StartConfig: &ServiceConfig{}}, InstallPath: t.TempDir()}
 			if err := p.Connect(ctx); err != nil {
 				t.Fatalf("Failed to connect to plugin: %v", err)
 			}
@@ -118,6 +135,10 @@ func TestHealthCheck(t *testing.T) {
 
 			if fakeRunner.seenCommand != test.wantCmd {
 				t.Errorf("fakeRunner.seenCommand = %q, want %q", fakeRunner.seenCommand, test.wantCmd)
+			}
+
+			if ts.statusCalled != test.wantStatusCall {
+				t.Errorf("ts.statusCalled = %t, want %t", ts.statusCalled, test.wantStatusCall)
 			}
 		})
 	}

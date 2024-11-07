@@ -120,6 +120,10 @@ func TestStopPlugin(t *testing.T) {
 				t.Errorf("stopStep.Run(ctx, %+v) failed unexpectedly: %v", plugin, err)
 			}
 
+			if plugin.State() != acmpb.CurrentPluginStates_DaemonPluginState_STOPPED {
+				t.Errorf("stopStep.Run(ctx, %+v) did not set plugin state to STOPPED", plugin)
+			}
+
 			if ts.stopCalled != tc.wantStopRPC {
 				t.Errorf("stopStep.Run(ctx, %+v) called stop plugin RPC: %t, want: %t", plugin, ts.stopCalled, tc.wantStopRPC)
 			}

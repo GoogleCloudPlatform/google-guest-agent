@@ -75,10 +75,19 @@ type PluginManager struct {
 	// protocol is the protocol used by plugin manager to communicate with all
 	// plugins.
 	protocol string
-	// pendingPluginRevisions keep tracks of the pending plugin revisions. These
-	// plugins are plugins that are in pre-launch state. This allows us to ignore
-	// duplicate requests if previous request is still in progress.
-	pendingPluginRevisions map[string]bool
+
+	// pendingPluginRevisionsMu protects the pendingPluginRevisions map.
+	pendingPluginRevisionsMu sync.RWMutex
+	// inProgressPluginRequests keep tracks of the pending plugin requests. This
+	// allows us to ignore new requests if previous request is still in progress
+	// for the same plugin.
+	inProgressPluginRequests map[string]bool
+
+	// requestCountMu protects the requestCount map.
+	requestCountMu sync.Mutex
+	// requestCount keeps track of the number of requests received for each
+	// action and also the number of successful and failures requests.
+	requestCount map[acpb.ConfigurePluginStates_Action]map[bool]int
 }
 
 // agentPluginState returns the path to the directory when agent maintains
@@ -106,12 +115,13 @@ func InitPluginManager(ctx context.Context) (*PluginManager, error) {
 	}
 
 	pluginManager = &PluginManager{
-		plugins:                plugins,
-		protocol:               tcpProtocol,
-		pluginMonitors:         make(map[string]string),
-		pluginMetricsMonitors:  make(map[string]string),
-		scheduler:              scheduler.Instance(),
-		pendingPluginRevisions: make(map[string]bool),
+		plugins:                  plugins,
+		protocol:                 tcpProtocol,
+		pluginMonitors:           make(map[string]string),
+		pluginMetricsMonitors:    make(map[string]string),
+		scheduler:                scheduler.Instance(),
+		inProgressPluginRequests: make(map[string]bool),
+		requestCount:             make(map[acpb.ConfigurePluginStates_Action]map[bool]int),
 	}
 	wg := sync.WaitGroup{}
 	for _, p := range plugins {
@@ -193,13 +203,40 @@ func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPlug
 func (m *PluginManager) ConfigurePluginStates(ctx context.Context, req *acpb.ConfigurePluginStates, localPlugin bool) {
 	galog.Debugf("Handling configure plugin state request: %+v, local plugin: %t", req, localPlugin)
 	wg := sync.WaitGroup{}
+
+	var toProcess []*acpb.ConfigurePluginStates_ConfigurePlugin
+
+	m.pendingPluginRevisionsMu.Lock()
 	for _, req := range req.GetConfigurePlugins() {
+		_, inProgress := m.inProgressPluginRequests[req.GetPlugin().GetName()]
+		if inProgress {
+			// There's already a request in progress for this plugin, ignore this
+			// request.
+			galog.Infof("Ignoring request to %v plugin %q, another request already in progress", req.GetAction(), req.GetPlugin().GetName())
+			continue
+		}
+		toProcess = append(toProcess, req)
+		m.inProgressPluginRequests[req.GetPlugin().GetName()] = true
+	}
+	m.pendingPluginRevisionsMu.Unlock()
+
+	for _, req := range toProcess {
 		wg.Add(1)
 		go func(req *acpb.ConfigurePluginStates_ConfigurePlugin) {
 			defer wg.Done()
+
+			// Regardless of the outcome, we should remove the plugin from the pending
+			// list as request is no longer in process for this plugin.
+			defer func() {
+				m.pendingPluginRevisionsMu.Lock()
+				defer m.pendingPluginRevisionsMu.Unlock()
+				delete(m.inProgressPluginRequests, req.GetPlugin().GetName())
+			}()
+
 			m.configurePlugin(ctx, req, localPlugin)
 		}(req)
 	}
+
 	wg.Wait()
 	galog.Debugf("Configure plugin state request completed")
 }
@@ -241,18 +278,30 @@ func (m *PluginManager) delete(name string) {
 }
 
 func (m *PluginManager) configurePlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) {
+	var success bool
 	switch req.GetAction() {
 	case acpb.ConfigurePluginStates_INSTALL:
 		if err := m.installPlugin(ctx, req, localPlugin); err != nil {
 			galog.Errorf("Failed to install plugin %q, revision %q: %v", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId(), err)
+		} else {
+			success = true
 		}
 	case acpb.ConfigurePluginStates_REMOVE:
 		if err := m.removePlugin(ctx, req); err != nil {
 			galog.Errorf("Failed to remove plugin %q, revision %q: %v", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId(), err)
+		} else {
+			success = true
 		}
 	default:
 		galog.Warnf("Unknown action (%s) for configure plugin state request, ignoring", req.GetAction().String())
 	}
+
+	m.requestCountMu.Lock()
+	defer m.requestCountMu.Unlock()
+	if m.requestCount[req.GetAction()] == nil {
+		m.requestCount[req.GetAction()] = make(map[bool]int)
+	}
+	m.requestCount[req.GetAction()][success]++
 }
 
 // setMetricConfig sets the default metric configurations for the plugin or
@@ -414,17 +463,6 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 		return fmt.Errorf("failed to create new plugin instance: %w", err)
 	}
 
-	if _, ok := m.pendingPluginRevisions[plugin.FullName()]; ok {
-		sendEvent(ctx, plugin, acpb.PluginEventMessage_PLUGIN_INSTALL_FAILED, "Plugin is already installed or being processed.")
-		return fmt.Errorf("plugin %q is already installed or being processed", plugin.FullName())
-	}
-
-	m.pendingPluginRevisions[plugin.FullName()] = true
-
-	// Regardless of the outcome, we should remove the plugin from the pending
-	// list as request is no longer in process for new plugin revision.
-	defer delete(m.pendingPluginRevisions, plugin.FullName())
-
 	currPlugin, err := m.fetch(req.GetPlugin().GetName())
 	if err != nil {
 		return fmt.Errorf("fetching current instance for %q: %w", req.GetPlugin().GetName(), err)
@@ -508,13 +546,15 @@ func (m *PluginManager) removePlugin(ctx context.Context, req *acpb.ConfigurePlu
 func (m *PluginManager) startMonitoring(ctx context.Context, p *Plugin) {
 	galog.Infof("Starting plugin monitor job for plugin %q", p.FullName())
 	pm := NewPluginMonitor(p, healthCheckFrequency)
+
+	m.pluginMonitorMu.Lock()
+	m.pluginMonitors[p.FullName()] = pm.ID()
+	m.pluginMonitorMu.Unlock()
+
 	// ScheduleJob() throws error only if we try to schedule a job that should
 	// not be enabled (ShouldEnable() returns false). Ignoring this error
 	// here as in case of monitoring pm.ShouldEnable() always returns true.
 	m.scheduler.ScheduleJob(ctx, pm)
-	m.pluginMonitorMu.Lock()
-	defer m.pluginMonitorMu.Unlock()
-	m.pluginMonitors[p.FullName()] = pm.ID()
 }
 
 // stopMonitoring stops/removes the plugin monitoring job.

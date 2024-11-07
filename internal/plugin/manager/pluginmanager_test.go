@@ -393,6 +393,11 @@ func TestConfigurePluginStates(t *testing.T) {
 				Manifest: &acpb.ConfigurePluginStates_Manifest{},
 			},
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
+				Action:   acpb.ConfigurePluginStates_INSTALL,
+				Plugin:   &acpb.ConfigurePluginStates_Plugin{Name: "PluginA", RevisionId: "1"},
+				Manifest: &acpb.ConfigurePluginStates_Manifest{},
+			},
+			&acpb.ConfigurePluginStates_ConfigurePlugin{
 				Action:   acpb.ConfigurePluginStates_REMOVE,
 				Plugin:   &acpb.ConfigurePluginStates_Plugin{Name: "PluginB", RevisionId: "2"},
 				Manifest: &acpb.ConfigurePluginStates_Manifest{},
@@ -406,12 +411,26 @@ func TestConfigurePluginStates(t *testing.T) {
 	P1 := &Plugin{Name: "PluginA", Revision: "1"}
 	p2 := &Plugin{Name: "PluginC", Revision: "3"}
 	m := map[string]*Plugin{P1.Name: P1, p2.Name: p2}
-	pm := &PluginManager{plugins: m}
+	pm := &PluginManager{plugins: m, inProgressPluginRequests: make(map[string]bool), requestCount: make(map[acpb.ConfigurePluginStates_Action]map[bool]int)}
 
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	pm.ConfigurePluginStates(ctx, req, false)
 	// Should be a no-op.
 	if diff := cmp.Diff(m, pm.plugins, cmpopts.IgnoreUnexported(Plugin{})); diff != "" {
+		t.Errorf("ConfigurePluginStates(ctx, %+v) returned diff (-want +got):\n%s", req, diff)
+	}
+
+	if len(pm.inProgressPluginRequests) != 0 {
+		t.Errorf("ConfigurePluginStates(ctx, %+v) set pending plugins = %+v, want empty map", req, pm.inProgressPluginRequests)
+	}
+
+	// Without deduplication, we would have 2 install requests.
+	wantRequestCount := map[acpb.ConfigurePluginStates_Action]map[bool]int{
+		acpb.ConfigurePluginStates_INSTALL:            map[bool]int{false: 1},
+		acpb.ConfigurePluginStates_REMOVE:             map[bool]int{false: 1},
+		acpb.ConfigurePluginStates_ACTION_UNSPECIFIED: map[bool]int{false: 1},
+	}
+	if diff := cmp.Diff(wantRequestCount, pm.requestCount); diff != "" {
 		t.Errorf("ConfigurePluginStates(ctx, %+v) returned diff (-want +got):\n%s", req, diff)
 	}
 }
@@ -447,7 +466,7 @@ func installSetup(t *testing.T, ps *testPluginServer, addr string) (*httptest.Se
 				seenStates[plugin.Name] = s
 			}
 		}
-		maps.Copy(seenRevisions, pm.pendingPluginRevisions)
+		maps.Copy(seenRevisions, pm.inProgressPluginRequests)
 		w.Write(bytes)
 	}))
 
@@ -594,12 +613,12 @@ func TestInstallPlugin(t *testing.T) {
 			s := scheduler.Instance()
 			t.Cleanup(s.Stop)
 			pm := &PluginManager{
-				plugins:                map[string]*Plugin{},
-				protocol:               udsProtocol,
-				pluginMonitors:         make(map[string]string),
-				pluginMetricsMonitors:  make(map[string]string),
-				scheduler:              s,
-				pendingPluginRevisions: make(map[string]bool),
+				plugins:                  map[string]*Plugin{},
+				protocol:                 udsProtocol,
+				pluginMonitors:           make(map[string]string),
+				pluginMetricsMonitors:    make(map[string]string),
+				scheduler:                s,
+				inProgressPluginRequests: make(map[string]bool),
 			}
 			pluginManager = pm
 			err := pm.installPlugin(ctx, req, tc.local)
@@ -721,12 +740,12 @@ func TestUpgradePlugin(t *testing.T) {
 	t.Cleanup(s.Stop)
 
 	pm := &PluginManager{
-		plugins:                map[string]*Plugin{plugin.Name: plugin},
-		protocol:               udsProtocol,
-		pluginMonitors:         make(map[string]string),
-		pluginMetricsMonitors:  make(map[string]string),
-		scheduler:              s,
-		pendingPluginRevisions: make(map[string]bool),
+		plugins:                  map[string]*Plugin{plugin.Name: plugin},
+		protocol:                 udsProtocol,
+		pluginMonitors:           make(map[string]string),
+		pluginMetricsMonitors:    make(map[string]string),
+		scheduler:                s,
+		inProgressPluginRequests: make(map[string]bool),
 	}
 	pluginManager = pm
 	if err := pm.installPlugin(ctx, req, false); err != nil {
@@ -766,18 +785,8 @@ func TestUpgradePlugin(t *testing.T) {
 		t.Errorf("installPlugin(ctx, %+v) did not update pending plugin revisions (-want +got):\n%s", req, diff)
 	}
 
-	wantPendingRevisions := map[string]bool{"PluginA_RevisionB": true}
-	if diff := cmp.Diff(wantPendingRevisions, gotPendingPlugins.revisions); diff != "" {
-		t.Errorf("installPlugin(ctx, %+v) did not update pending plugin revisions (-want +got):\n%s", req, diff)
-	}
-
 	if got := plugin.pendingStatus(); got != nil {
 		t.Errorf("installPlugin(ctx, %+v) = pending plugin status %v, want nil on old revision %s", req, got, plugin.FullName())
-	}
-
-	// Eventually, we should clear the pending plugin revisions.
-	if len(pm.pendingPluginRevisions) != 0 {
-		t.Errorf("installPlugin(ctx, %+v) set pending plugin revisions %v, want empty map", req, pm.pendingPluginRevisions)
 	}
 }
 
@@ -1034,7 +1043,7 @@ func TestUpgradePluginError(t *testing.T) {
 	}
 
 	p1 := &Plugin{Name: "PluginA", Revision: "RevisionA", RuntimeInfo: &RuntimeInfo{}}
-	pm := &PluginManager{plugins: map[string]*Plugin{p1.Name: p1}, pendingPluginRevisions: map[string]bool{p1.FullName(): true}}
+	pm := &PluginManager{plugins: map[string]*Plugin{p1.Name: p1}, inProgressPluginRequests: map[string]bool{p1.FullName(): true}}
 
 	// Non existing plugin.
 	req1 := &acpb.ConfigurePluginStates_ConfigurePlugin{

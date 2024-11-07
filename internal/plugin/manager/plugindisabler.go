@@ -77,6 +77,8 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 		}
 	}
 
+	p.setState(acmpb.CurrentPluginStates_DaemonPluginState_STOPPED)
+
 	// Reset the plugin client and process PID.
 	p.client = nil
 	p.RuntimeInfo.pidMu.Lock()
