@@ -159,12 +159,29 @@ func (f *dataFetchers) configurePluginStates(ctx context.Context, msg *acpb.Mess
 		galog.Warnf("Failed to unmarshal ConfigurePluginStates request: %v", err)
 		return
 	}
+
+	// Don't process the request from ACS if the plugin manager is not initialized
+	// yet. This is to avoid trying to configure the plugins that may already
+	// exist on disk.
+	if !f.pluginManager.IsInitialized.Load() {
+		galog.Warnf("Plugin manager is not initialized yet, ignoring ConfigurePluginStates request")
+		return
+	}
+
 	// Go routine configures all the plugin as specified in the request and exits.
 	// It waits until all plugins in the request are processed before exiting.
 	go f.pluginManager.ConfigurePluginStates(ctx, req, false)
 }
 
 func (f *dataFetchers) listPluginStates(ctx context.Context, msg *acpb.MessageBody) *acppb.CurrentPluginStates {
+	// Don't process the request from ACS if the plugin manager is not initialized
+	// yet. This is to avoid trying to list the plugins that may already
+	// exist on disk.
+	if !f.pluginManager.IsInitialized.Load() {
+		galog.Warnf("Plugin manager is not initialized yet, ignoring ListPluginStates request")
+		return nil
+	}
+
 	req := new(acppb.ListPluginStates)
 	if err := anypb.UnmarshalTo(msg.Body, req, proto.UnmarshalOptions{}); err != nil {
 		galog.Warnf("Failed to unmarshal ListPluginStates request: %v", err)

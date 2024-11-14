@@ -30,6 +30,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
+	apb "google.golang.org/protobuf/types/known/anypb"
 )
 
 type fakeConnection struct {
@@ -55,6 +56,23 @@ func TestHandleMessage(t *testing.T) {
 		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
 	}
 	cfg.Retrieve().Core.ACSClient = true
+
+	testMsg := &acmpb.ConfigurePluginStates{
+		ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{
+			&acmpb.ConfigurePluginStates_ConfigurePlugin{
+				Action: acmpb.ConfigurePluginStates_INSTALL,
+				Plugin: &acmpb.ConfigurePluginStates_Plugin{
+					Name:       "basic_plugin",
+					RevisionId: "1",
+				},
+			},
+		},
+	}
+
+	msgBytes, err := proto.Marshal(testMsg)
+	if err != nil {
+		t.Fatalf("proto.Marshal(%v) = %v, want nil", testMsg, err)
+	}
 
 	v := "1.0.0"
 	info := osinfo.OSInfo{
@@ -124,6 +142,12 @@ func TestHandleMessage(t *testing.T) {
 			messageType: configurePluginStatesMsg,
 			want:        &acmpb.ConfigurePluginStates{},
 			eventData:   &acpb.MessageBody{Labels: map[string]string{messageTypeLabel: configurePluginStatesMsg}},
+		},
+		{
+			desc:        "configure_plugin_states_skip_call",
+			messageType: configurePluginStatesMsg,
+			want:        &acmpb.ConfigurePluginStates{},
+			eventData:   &acpb.MessageBody{Labels: map[string]string{messageTypeLabel: configurePluginStatesMsg}, Body: &apb.Any{Value: msgBytes, TypeUrl: string(proto.MessageName(testMsg))}},
 		},
 		{
 			desc:        "unknown_message_type",

@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -88,6 +89,9 @@ type PluginManager struct {
 	// requestCount keeps track of the number of requests received for each
 	// action and also the number of successful and failures requests.
 	requestCount map[acpb.ConfigurePluginStates_Action]map[bool]int
+
+	// IsInitialized indicates if plugin manager is initialized.
+	IsInitialized atomic.Bool
 }
 
 // agentPluginState returns the path to the directory when agent maintains
@@ -101,21 +105,8 @@ func Instance() *PluginManager {
 	return pluginManager
 }
 
-// InitPluginManager initializes and returns a PluginManager instance.
-// Plugin Manager can be initialized and used to support core plugins even if
-// ACS is disabled. Plugin Manager will be initialized during early Guest Agent
-// startup to configure the core plugins.
-func InitPluginManager(ctx context.Context) (*PluginManager, error) {
-	if err := RegisterCmdHandler(ctx); err != nil {
-		return nil, fmt.Errorf("failed to register plugin command handler: %w", err)
-	}
-	plugins, err := load(agentPluginState())
-	if err != nil {
-		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
-	}
-
+func init() {
 	pluginManager = &PluginManager{
-		plugins:                  plugins,
 		protocol:                 tcpProtocol,
 		pluginMonitors:           make(map[string]string),
 		pluginMetricsMonitors:    make(map[string]string),
@@ -123,11 +114,42 @@ func InitPluginManager(ctx context.Context) (*PluginManager, error) {
 		inProgressPluginRequests: make(map[string]bool),
 		requestCount:             make(map[acpb.ConfigurePluginStates_Action]map[bool]int),
 	}
+}
+
+// InitPluginManager initializes and returns a PluginManager instance.
+// Plugin Manager can be initialized and used to support core plugins even if
+// ACS is disabled. Plugin Manager will be initialized during early Guest Agent
+// startup to configure the core plugins.
+func InitPluginManager(ctx context.Context) (*PluginManager, error) {
+	galog.Infof("Initializing plugin manager")
+	plugins, err := load(agentPluginState())
+	if err != nil {
+		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
+	}
+
+	pluginManager.plugins = plugins
+
+	if err := RegisterCmdHandler(ctx); err != nil {
+		return nil, fmt.Errorf("failed to register plugin command handler: %w", err)
+	}
+
 	wg := sync.WaitGroup{}
+	pluginManager.pendingPluginRevisionsMu.Lock()
+
 	for _, p := range plugins {
+		pluginManager.inProgressPluginRequests[p.Name] = true
 		wg.Add(1)
+
 		go func(p *Plugin) {
-			defer wg.Done()
+			// Regardless of the outcome, we should remove the plugin from the pending
+			// list as request is no longer in process for this plugin.
+			defer func() {
+				pluginManager.pendingPluginRevisionsMu.Lock()
+				defer pluginManager.pendingPluginRevisionsMu.Unlock()
+				delete(pluginManager.inProgressPluginRequests, p.Name)
+				wg.Done()
+			}()
+
 			if err := connectOrReLaunch(ctx, p); err != nil {
 				galog.Errorf("Failed to connect or relaunch plugin %q: %v", p.FullName(), err)
 			} else {
@@ -135,6 +157,8 @@ func InitPluginManager(ctx context.Context) (*PluginManager, error) {
 			}
 		}(p)
 	}
+	pluginManager.IsInitialized.Store(true)
+	pluginManager.pendingPluginRevisionsMu.Unlock()
 	wg.Wait()
 
 	if isUDSSupported() {

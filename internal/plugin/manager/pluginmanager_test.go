@@ -566,6 +566,9 @@ func TestInstallPlugin(t *testing.T) {
 	runner.pid = -6666
 	defer server.Close()
 
+	orig := pluginManager
+	t.Cleanup(func() { pluginManager = orig })
+
 	req := &acpb.ConfigurePluginStates_ConfigurePlugin{
 		Action: acpb.ConfigurePluginStates_INSTALL,
 		Plugin: &acpb.ConfigurePluginStates_Plugin{
@@ -711,6 +714,9 @@ func TestUpgradePlugin(t *testing.T) {
 	ps2 := &testPluginServer{ctrs: make(map[string]int)}
 	server, hash, runner, gotPendingPlugins := installSetup(t, ps2, addr)
 	defer server.Close()
+
+	orig := pluginManager
+	t.Cleanup(func() { pluginManager = orig })
 
 	plugin := &Plugin{Name: "PluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr1, EntryPath: "test-entry-point", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3}}
 	if err := plugin.Connect(ctx); err != nil {

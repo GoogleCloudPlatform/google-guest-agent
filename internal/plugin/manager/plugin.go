@@ -35,9 +35,10 @@ import (
 )
 
 const (
-	// defaultRPCTimeout is the default timeout for gRPC calls with plugin
-	// so Guest Agent does not end up waiting for a response forever.
-	defaultRPCTimeout = time.Second * 5
+	// default timeouts for gRPC calls with plugin so Guest Agent does not end up
+	// waiting for a response forever.
+	defaultApplyRPCTimeout  = time.Second * 5
+	defaultStatusRPCTimeout = time.Second * 2
 )
 
 // PluginService returns the underlying plugin service client.
@@ -109,7 +110,7 @@ func (p *Plugin) Apply(ctx context.Context, reqBytes []byte) (*pb.ApplyResponse,
 	req := &pb.ApplyRequest{
 		Data: &apb.Any{Value: reqBytes},
 	}
-	tCtx, cancel := context.WithTimeout(ctx, defaultRPCTimeout)
+	tCtx, cancel := context.WithTimeout(ctx, defaultApplyRPCTimeout)
 	defer cancel()
 
 	resp, err := p.PluginService().Apply(tCtx, req, grpc.WaitForReady(true))
@@ -123,7 +124,7 @@ func (p *Plugin) GetStatus(ctx context.Context, req string) (*pb.Status, *status
 	galog.Debugf("Executing get status request (%s) on plugin %q", req, p.FullName())
 
 	var data *string
-	tCtx, cancel := context.WithTimeout(ctx, defaultRPCTimeout)
+	tCtx, cancel := context.WithTimeout(ctx, defaultStatusRPCTimeout)
 	defer cancel()
 
 	if req != "" {

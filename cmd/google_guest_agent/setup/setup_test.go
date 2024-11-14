@@ -23,8 +23,10 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/watcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -213,5 +215,29 @@ func TestHandlePluginEvent(t *testing.T) {
 				t.Errorf("handlePluginEvent(ctx, %q, nil, %+v) = %t, want %t", tc.evType, tc.data, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRun(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
+	c := Config{Version: "123", EnableACSWatcher: true, SkipCorePlugin: true}
+	ctx := context.Background()
+	if err := Run(ctx, c); err != nil {
+		t.Fatalf("Run(ctx, %+v) failed unexpectedly with error: %v", c, err)
+	}
+
+	if !manager.Instance().IsInitialized.Load() {
+		t.Errorf("Run(ctx, %+v) did not initialize plugin manager", c)
+	}
+
+	if !events.FetchManager().IsSubscribed(watcher.MessageReceiver, "ACS-message-handler") {
+		t.Errorf("Run(ctx, %+v) did not subscribe to ACS-message-handler", c)
+	}
+
+	if err := events.FetchManager().AddWatcher(ctx, watcher.New()); err == nil {
+		t.Errorf("Run(ctx, %+v) successfully added ACS watcher, setup should have already added it", c)
 	}
 }

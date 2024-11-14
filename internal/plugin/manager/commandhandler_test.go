@@ -82,7 +82,10 @@ func TestVmEventHandler(t *testing.T) {
 	p1 := &Plugin{Name: "PluginA", Revision: "1", Address: addr, Protocol: udsProtocol, RuntimeInfo: &RuntimeInfo{}}
 	p2 := &Plugin{Name: "PluginC", Revision: "3", RuntimeInfo: &RuntimeInfo{}}
 	m := map[string]*Plugin{p1.Name: p1, p2.Name: p2}
-	pluginManager = &PluginManager{plugins: m}
+
+	orig := pluginManager
+	pluginManager = &PluginManager{plugins: m, pluginMonitors: make(map[string]string)}
+	t.Cleanup(func() { pluginManager = orig })
 
 	tests := []struct {
 		desc     string

@@ -108,7 +108,7 @@ func vmEventHandler(ctx context.Context, r []byte) ([]byte, error) {
 				msg := fmt.Sprintf("Plugin %q is not running, last state: %v, skipping sending VM event %q", p.FullName(), p.State(), req.Event)
 				result.StatusMessage = msg
 				result.Status = notifySkipStatus
-				galog.Warnf(msg)
+				galog.Warn(msg)
 				return
 			}
 

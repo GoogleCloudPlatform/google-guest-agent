@@ -116,19 +116,7 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 // coreReady executes components that are dependent/waiting on core plugin to be ready.
 func coreReady(ctx context.Context, opts Config) {
 	galog.Debugf("Received %s ready event, setting service state to running", corePluginName)
-
 	service.SetState(ctx, service.StateRunning)
-
-	// Registers the acs event watcher and initializes the acs handler if
-	// on-demand plugins are enabled in the configuration file.
-	if opts.EnableACSWatcher {
-		if err := events.FetchManager().AddWatcher(ctx, watcher.New()); err != nil {
-			galog.Fatalf("Failed to add ACS watcher: %v", err)
-		}
-		handler.Init(opts.Version)
-		galog.Infof("Registered ACS watcher and handler")
-	}
-
 	galog.Infof("Google Guest Agent (version: %q) Initialized...", opts.Version)
 }
 
@@ -173,10 +161,24 @@ type Config struct {
 // Run orchestrates the minimum required steps for initializing Guest Agent
 // with core plugin.
 func Run(ctx context.Context, c Config) error {
+	// Registers the acs event watcher and initializes the acs handler if
+	// on-demand plugins are enabled in the configuration file.
+	// This is done as early as possible to ensure that the handler is ready
+	// to handle to respond to non-plugin configuration requests as they serve as
+	// heartbeat for the agent.
+	if c.EnableACSWatcher {
+		if err := events.FetchManager().AddWatcher(ctx, watcher.New()); err != nil {
+			galog.Fatalf("Failed to add ACS watcher: %v", err)
+		}
+		handler.Init(c.Version)
+		galog.Infof("Registered ACS watcher and handler")
+	}
+
 	pm, err := manager.InitPluginManager(ctx)
 	if err != nil {
 		return fmt.Errorf("plugin manager initialization: %w", err)
 	}
+	galog.Infof("Plugin manager initialized")
 
 	go func() {
 		if err := command.Setup(ctx, command.ListenerGuestAgent); err != nil {

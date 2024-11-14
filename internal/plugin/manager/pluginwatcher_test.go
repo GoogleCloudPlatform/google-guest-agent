@@ -49,7 +49,9 @@ func TestWatcher(t *testing.T) {
 	if err := p.Connect(ctx); err != nil {
 		t.Fatalf("p.Connect(ctx) failed unexpectedly with error: %v", err)
 	}
-	pluginManager = &PluginManager{plugins: map[string]*Plugin{"pluginA": p}}
+	orig := pluginManager
+	t.Cleanup(func() { pluginManager = orig })
+	pluginManager = &PluginManager{plugins: map[string]*Plugin{"pluginA": p}, pluginMonitors: make(map[string]string)}
 
 	tests := []struct {
 		name       string
