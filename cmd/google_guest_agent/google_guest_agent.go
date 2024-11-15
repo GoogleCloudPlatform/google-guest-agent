@@ -35,7 +35,8 @@ import (
 var (
 	// logOpts holds the logger options. It's mapped to command line flags.
 	logOpts = logger.Options{
-		Ident:      logger.ManagerCloudLoggingLogID,
+		Ident:      logger.ManagerLocalLoggerIdent,
+		Prefix:     logger.ManagerLogPrefix,
 		CloudIdent: logger.ManagerCloudLoggingLogID,
 	}
 	// version is the version of the binary.

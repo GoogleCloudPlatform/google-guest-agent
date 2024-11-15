@@ -34,8 +34,10 @@ const (
 
 // initPlatformLogger is the windows implementation of platform logger
 // initialization.
-func initPlatformLogger(ctx context.Context, ident string) ([]galog.Backend, error) {
+func initPlatformLogger(ctx context.Context, ident string, prefix string) ([]galog.Backend, error) {
 	var res []galog.Backend
+	// TODO: b/379339223 - Move SetPrefix() to common logger initialization.
+	galog.SetPrefix(prefix)
 
 	eventLogger, err := galog.NewEventlogBackend(windowsEventID, ident)
 	if err != nil {

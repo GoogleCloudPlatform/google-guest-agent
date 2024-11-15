@@ -74,22 +74,28 @@ const (
 	// "name space".
 	LocalLoggerIdent = "google_guest_agent"
 
+	// CorePluginLogPrefix is a human readable prefix added to all log entries
+	// identifying the core plugin.
+	CorePluginLogPrefix = "CorePlugin"
+
 	// ManagerCloudLoggingLogID is the logId used for cloud logging for plugin
 	// manager.
 	ManagerCloudLoggingLogID = "GCEGuestAgentManager"
 	// ManagerLocalLoggerIdent is the ident used for local loggers (i.e syslog)
 	// for plugin manager.
 	ManagerLocalLoggerIdent = "google_guest_agent_manager"
+	// ManagerLogPrefix is a human readable prefix added to all log entries for
+	// plugin manager.
+	ManagerLogPrefix = "GCEGuestAgentManager"
 )
 
 // Init initializes the logger.
 func Init(ctx context.Context, opts Options) error {
-	enabledLoggers, err := initPlatformLogger(ctx, opts.Ident)
+	enabledLoggers, err := initPlatformLogger(ctx, opts.Ident, opts.Prefix)
 	if err != nil {
 		return fmt.Errorf("failed to initialize platform logger: %w", err)
 	}
 
-	galog.SetPrefix(opts.Prefix)
 	galog.SetMinVerbosity(opts.Verbosity)
 
 	if opts.LogFile != "" && file.Exists(filepath.Dir(opts.LogFile), file.TypeDir) {

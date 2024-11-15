@@ -41,7 +41,7 @@ var (
 		Ident: logger.LocalLoggerIdent,
 		// Since core plugin and guest agent are using the same ident, use a prefix
 		// to differentiate their entries in the logs.
-		Prefix: "core_plugin",
+		Prefix: logger.CorePluginLogPrefix,
 		// CloudIdent is the cloud logging's logId attribute - or logName field
 		// visible to the user.
 		CloudIdent: logger.CloudLoggingLogID,

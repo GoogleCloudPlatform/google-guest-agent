@@ -26,7 +26,7 @@ import (
 
 func TestInitPlatformLoggerLinux(t *testing.T) {
 	ctx := context.Background()
-	backends, err := initPlatformLogger(ctx, "test")
+	backends, err := initPlatformLogger(ctx, "test", "")
 	if err != nil {
 		t.Errorf("initPlatformLogger(%v, %v) = %v, want nil", ctx, "test", err)
 	}

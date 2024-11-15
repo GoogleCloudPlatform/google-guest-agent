@@ -42,7 +42,7 @@ func TestInitPlatformLoggerWindows(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	backends, err := initPlatformLogger(ctx, "test")
+	backends, err := initPlatformLogger(ctx, "test", "")
 	if err != nil {
 		t.Fatalf("initPlatformLogger(%v, %v) = %v, want nil", ctx, "test", err)
 	}
