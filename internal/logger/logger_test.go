@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/agentcommunication_client"
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -185,6 +186,44 @@ func TestInitCloudLogging(t *testing.T) {
 			got := initCloudLogging(ctx, "eventType", tc.data, evData)
 			if got != tc.want {
 				t.Errorf("initCloudLogging() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInitACSClientLogging(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		opts Options
+		want bool
+	}{
+		{
+			name: "enable_logging",
+			opts: Options{ACSClientDebugLogging: true, Level: 3},
+			want: true,
+		},
+		{
+			name: "disable_logging",
+			opts: Options{ACSClientDebugLogging: false, Level: 3},
+			want: false,
+		},
+		{
+			name: "default_logging",
+			opts: Options{Level: 3},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := Init(ctx, tc.opts); err != nil {
+				t.Fatalf("Init(ctx, %+v) failed unexpectedly: %v", tc.opts, err)
+			}
+			got := client.DebugLogging
+			if got != tc.want {
+				t.Errorf("Init(ctx, %+v) set acs.DebugLogging = %t, want %t", tc.opts, got, tc.want)
 			}
 		})
 	}

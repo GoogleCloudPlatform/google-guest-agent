@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/GoogleCloudPlatform/agentcommunication_client"
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -54,6 +55,8 @@ type Options struct {
 	// Prefix is a prefix tag appended to all log entries, it's passed down to
 	// galog configuration.
 	Prefix string
+	// ACSClientDebugLogging is a flag to enable ACS client logging.
+	ACSClientDebugLogging bool
 }
 
 const (
@@ -131,6 +134,8 @@ func Init(ctx context.Context, opts Options) error {
 	}
 
 	galog.SetLevel(level)
+	client.DebugLogging = opts.ACSClientDebugLogging
+
 	return nil
 }
 

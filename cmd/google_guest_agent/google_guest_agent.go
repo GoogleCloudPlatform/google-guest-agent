@@ -113,6 +113,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	logOpts.ProgramVersion = version
+	logOpts.ACSClientDebugLogging = cfg.Retrieve().ACS.ClientDebugLogging
 	if err := logger.Init(ctx, logOpts); err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
 		os.Exit(1)

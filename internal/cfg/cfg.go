@@ -130,6 +130,7 @@ state_dir = {{.baseStateDir}}
 endpoint =
 channel_id =
 host =
+client_debug_logging = false
 
 [Unstable]
 command_monitor_enabled = false
@@ -233,6 +234,9 @@ type ACS struct {
 	ChannelID string `ini:"channel_id,omitempty"`
 	// Host is the ACS host to use.
 	Host string `ini:"host,omitempty"`
+	// ClientDebugLogging is the ACS client debug logging. Enabling this will
+	// enable debug logging in the ACS client library.
+	ClientDebugLogging bool `ini:"client_debug_logging,omitempty"`
 }
 
 // Core contains the core configuration entries of guest agent, all
