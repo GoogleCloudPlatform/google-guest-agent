@@ -18,6 +18,7 @@ package handler
 import (
 	"context"
 	"runtime"
+	"sync"
 
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
 	"github.com/GoogleCloudPlatform/galog"
@@ -70,6 +71,9 @@ func Init(ver string) {
 // supporting requests from ACS, this helps having test doubles in unit tests.
 // Actual fetchers make system calls in some case which must be avoided.
 type dataFetchers struct {
+	// worker is used to wait for the requests to complete. This is used only in
+	// unit tests.
+	worker sync.WaitGroup
 	// clientVersion is the version of the running guest agent.
 	clientVersion string
 	osInfoReader  func() osinfo.OSInfo
@@ -91,36 +95,47 @@ func (f *dataFetchers) handleMessage(ctx context.Context, eventType string, data
 		return true
 	}
 
-	messageType := msg.Labels[messageTypeLabel]
-	reqID := msg.Labels["request_id"]
-	labels := msg.Labels
-	galog.Debugf("Handling %q (request id: %q) request", messageType, reqID)
+	f.worker.Add(1)
+	// Running separate go routine to handle the request prevents from blocking
+	// the new watcher events.
+	// Go routine handles the request and exits. In case of configure request it
+	// waits until all the plugin specified in the request are and processed.
+	go func() {
+		defer f.worker.Done()
 
-	switch messageType {
-	case getAgentInfoMsg:
-		resp = f.agentInfo()
-		labels[messageTypeLabel] = agentInfoMsg
-	case getOSInfoMsg:
-		resp = f.osInfo()
-		labels[messageTypeLabel] = osInfoMsg
-	case listPluginStatesMsg:
-		resp = f.listPluginStates(ctx, msg)
-		labels[messageTypeLabel] = currentPluginStatesMsg
-	case configurePluginStatesMsg:
-		f.configurePluginStates(ctx, msg)
-	default:
-		galog.Warnf("Unknown message type: %q, ignoring", messageType)
-	}
+		messageType := msg.Labels[messageTypeLabel]
+		reqID := msg.Labels["request_id"]
+		labels := msg.Labels
 
-	// Response will be [nil] in case of [configurePluginStatesMsg] request as
-	// its handled asynchronously and notified about the events later.
-	if resp != nil {
-		if err := client.Send(ctx, labels, resp); err != nil {
-			galog.Warnf("Failed to send message: %v", err)
+		galog.Debugf("Handling %q (request id: %q) request", messageType, reqID)
+
+		switch messageType {
+		case getAgentInfoMsg:
+			resp = f.agentInfo()
+			labels[messageTypeLabel] = agentInfoMsg
+		case getOSInfoMsg:
+			resp = f.osInfo()
+			labels[messageTypeLabel] = osInfoMsg
+		case listPluginStatesMsg:
+			resp = f.listPluginStates(ctx, msg)
+			labels[messageTypeLabel] = currentPluginStatesMsg
+		case configurePluginStatesMsg:
+			f.configurePluginStates(ctx, msg)
+		default:
+			galog.Warnf("Unknown message type: %q, ignoring", messageType)
 		}
-	}
 
-	galog.Debugf("Successfully completed %q request", messageType)
+		// Response will be [nil] in case of [configurePluginStatesMsg] request as
+		// its handled asynchronously and notified about the events later.
+		if resp != nil {
+			if err := client.Send(ctx, labels, resp); err != nil {
+				galog.Warnf("Failed to send message: %v", err)
+			}
+		}
+
+		galog.Debugf("Successfully completed %q (request id: %q) request", messageType, reqID)
+	}()
+
 	return true
 }
 
@@ -168,9 +183,7 @@ func (f *dataFetchers) configurePluginStates(ctx context.Context, msg *acpb.Mess
 		return
 	}
 
-	// Go routine configures all the plugin as specified in the request and exits.
-	// It waits until all plugins in the request are processed before exiting.
-	go f.pluginManager.ConfigurePluginStates(ctx, req, false)
+	f.pluginManager.ConfigurePluginStates(ctx, req, false)
 }
 
 func (f *dataFetchers) listPluginStates(ctx context.Context, msg *acpb.MessageBody) *acppb.CurrentPluginStates {

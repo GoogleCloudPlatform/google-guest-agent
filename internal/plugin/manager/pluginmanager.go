@@ -172,9 +172,9 @@ func InitPluginManager(ctx context.Context) (*PluginManager, error) {
 func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPluginStates) *acpb.CurrentPluginStates {
 	galog.Debugf("Handling list plugin state request: %+v", req)
 	var states []*acpb.CurrentPluginStates_DaemonPluginState
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, p := range m.plugins {
+	plugins := m.list()
+
+	for _, p := range plugins {
 		status := &acpb.CurrentPluginStates_DaemonPluginState_Status{Status: p.State()}
 		h := p.healthInfo()
 		if h != nil {

@@ -180,6 +180,7 @@ func TestHandleMessage(t *testing.T) {
 			if !f.handleMessage(ctx, "test-event", nil, d) {
 				t.Errorf("handleMessage(ctx, %s, nil, %+v) = false, want true", "test-event", d)
 			}
+			f.worker.Wait()
 
 			sentMsg := connection.seenMessage
 

@@ -67,9 +67,6 @@ func (*PluginMetrics) ShouldEnable(ctx context.Context) bool {
 
 // Run gets and caches the plugin's metrics.
 func (p *PluginMetrics) Run(ctx context.Context) (bool, error) {
-	p.plugin.RuntimeInfo.metricsMu.Lock()
-	defer p.plugin.RuntimeInfo.metricsMu.Unlock()
-
 	currentState := p.plugin.State()
 	if currentState != acpb.CurrentPluginStates_DaemonPluginState_RUNNING {
 		// Skip metric collection if process is not in running state. Reading
@@ -96,6 +93,9 @@ func (p *PluginMetrics) Run(ctx context.Context) (bool, error) {
 	if err != nil {
 		galog.Warnf("Failed to get memory usage for plugin %s: %v", p.plugin.FullName(), err)
 	}
+
+	p.plugin.RuntimeInfo.metricsMu.Lock()
+	defer p.plugin.RuntimeInfo.metricsMu.Unlock()
 
 	// Cache the metrics.
 	p.plugin.RuntimeInfo.metrics.Add(Metric{
