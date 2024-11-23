@@ -72,6 +72,8 @@ type ProcessInterface interface {
 	// KillProcess kills the process with the given pid. If wait is true, it will
 	// wait for the process to exit, otherwise it will return immediately.
 	KillProcess(pid int, mode KillMode) error
+
+	FindPid(pid int) (Process, error)
 }
 
 // FindRegex finds all processes with the executable matching the provided
@@ -98,6 +100,11 @@ func IsProcessAlive(pid int) (bool, error) {
 // KillProcess kills the process with the given pid.
 func KillProcess(pid int, mode KillMode) error {
 	return Client.KillProcess(pid, mode)
+}
+
+// FindPid finds the process with the given pid.
+func FindPid(pid int) (Process, error) {
+	return Client.FindPid(pid)
 }
 
 // KillProcess kills the process with the given pid. If wait is true, it will

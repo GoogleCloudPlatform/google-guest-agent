@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 // linuxClient is for finding processes on linux distributions.
@@ -68,6 +68,10 @@ func readClkTicks(ctx context.Context) (float64, error) {
 	return strconv.ParseFloat(strings.TrimSpace(string(clkRes.Output)), 64)
 }
 
+func (p linuxClient) FindPid(pid int) (Process, error) {
+	return p.readPidDetails(pid)
+}
+
 // FindRegex finds all processes with the executable path matching the provided
 // regex.
 func (p linuxClient) FindRegex(exeMatch string) ([]Process, error) {
@@ -97,56 +101,72 @@ func (p linuxClient) FindRegex(exeMatch string) ([]Process, error) {
 			continue
 		}
 
-		// Find the executable path.
-		processRootDir := path.Join(p.procDir, file.Name())
-		exeLinkPath := path.Join(processRootDir, "exe")
-
-		exePath, err := os.Readlink(exeLinkPath)
-		if err != nil {
-			continue
-		}
-
-		if !exeExpression.MatchString(exePath) {
-			continue
-		}
-
-		// Find the command line.
-		cmdlinePath := path.Join(processRootDir, "cmdline")
-		dat, err := os.ReadFile(cmdlinePath)
-		if err != nil {
-			return nil, fmt.Errorf("error reading cmdline file: %w", err)
-		}
-
-		var commandLine []string
-		var token []byte
-		for _, curr := range dat {
-			if curr == 0 {
-				commandLine = append(commandLine, string(token))
-				token = nil
-			} else {
-				token = append(token, curr)
-			}
-		}
-
-		// Find the PID.
 		// Ignore the error due to the `procExpression` regex, which ensures that
 		// the file name is a valid PID, and therefore we should not expect any
 		// errors.
 		pid, _ := strconv.Atoi(file.Name())
 
-		result = append(result, Process{
-			PID:         pid,
-			Exe:         exePath,
-			CommandLine: commandLine,
-		})
+		process, err := p.readPidDetails(pid)
+		if err != nil {
+			galog.Debugf("Failed to read process(%d), while finding processes matching regex %q: [%v], skipping...", pid, exeMatch, err)
+			continue
+		}
+
+		if !exeExpression.MatchString(process.Exe) {
+			continue
+		}
+
+		result = append(result, process)
 	}
 
 	return result, nil
 }
 
+func (p linuxClient) readPidDetails(pid int) (Process, error) {
+	var process Process
+
+	// Find the executable path.
+	processRootDir := filepath.Join(p.procDir, fmt.Sprintf("%d", pid))
+
+	if !file.Exists(processRootDir, file.TypeDir) {
+		return process, fmt.Errorf("process %d does not exist, %q not found", pid, processRootDir)
+	}
+
+	exeLinkPath := filepath.Join(processRootDir, "exe")
+
+	exePath, err := os.Readlink(exeLinkPath)
+	if err != nil {
+		return process, fmt.Errorf("error reading executable path: %w", err)
+	}
+
+	// Find the command line.
+	cmdlinePath := filepath.Join(processRootDir, "cmdline")
+	dat, err := os.ReadFile(cmdlinePath)
+	if err != nil {
+		return process, fmt.Errorf("error reading cmdline file: %w", err)
+	}
+
+	var commandLine []string
+	var token []byte
+	for _, curr := range dat {
+		if curr == 0 {
+			commandLine = append(commandLine, string(token))
+			token = nil
+		} else {
+			token = append(token, curr)
+		}
+	}
+
+	return Process{
+		PID:         pid,
+		Exe:         exePath,
+		CommandLine: commandLine,
+	}, nil
+}
+
 // Memory returns the memory usage in kB of the process with the provided PID.
 func (p linuxClient) Memory(pid int) (int, error) {
-	baseProcDir := path.Join(p.procDir, strconv.Itoa(pid))
+	baseProcDir := filepath.Join(p.procDir, strconv.Itoa(pid))
 
 	var stats []byte
 	var readErrors error
@@ -210,10 +230,10 @@ func (p linuxClient) Memory(pid int) (int, error) {
 
 // CPUUsage returns the % CPU usage of the process with the provided PID.
 func (p linuxClient) CPUUsage(ctx context.Context, pid int) (float64, error) {
-	baseProcDir := path.Join(p.procDir, strconv.Itoa(pid))
+	baseProcDir := filepath.Join(p.procDir, strconv.Itoa(pid))
 
 	// Read the stat file. This is where the usage data is kept.
-	stats, err := os.ReadFile(path.Join(baseProcDir, "stat"))
+	stats, err := os.ReadFile(filepath.Join(baseProcDir, "stat"))
 	if err != nil {
 		return 0, fmt.Errorf("error reading stat file: %w", err)
 	}
@@ -253,7 +273,7 @@ func (p linuxClient) CPUUsage(ctx context.Context, pid int) (float64, error) {
 	startTime := startTimeTicks / clkTime
 
 	// uptime is the total running time of the system.
-	uptimeContents, err := os.ReadFile(path.Join(p.procDir, "uptime"))
+	uptimeContents, err := os.ReadFile(filepath.Join(p.procDir, "uptime"))
 	if err != nil {
 		return 0, fmt.Errorf("error reading /proc/uptime file: %w", err)
 	}

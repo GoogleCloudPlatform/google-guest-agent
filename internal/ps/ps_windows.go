@@ -216,3 +216,42 @@ func checkAllPids(p int32) (bool, error) {
 	}
 	return false, fmt.Errorf("failed to get all PIDs exhausted all retries")
 }
+
+func (p windowsClient) FindPid(pid int) (Process, error) {
+	var process Process
+
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return process, fmt.Errorf("error opening process info handler: %w", err)
+	}
+	defer windows.CloseHandle(h)
+
+	exe, err := p.findProcessExecutablePath(h)
+	if err != nil {
+		return Process{}, fmt.Errorf("error getting process executable path: %w", err)
+	}
+
+	process.PID = pid
+	process.Exe = exe
+
+	return process, nil
+}
+
+func (p windowsClient) findProcessExecutablePath(handle windows.Handle) (string, error) {
+	bufferSize := uint32(256)
+
+	for i := 0; i < 5; i++ {
+		b := make([]uint16, bufferSize)
+		err := windows.QueryFullProcessImageName(handle, 0, &b[0], &bufferSize)
+		if err == windows.ERROR_INSUFFICIENT_BUFFER {
+			bufferSize = bufferSize * 2
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		return windows.UTF16ToString(b[:bufferSize]), nil
+	}
+
+	return "", fmt.Errorf("failed to get process executable path")
+}
