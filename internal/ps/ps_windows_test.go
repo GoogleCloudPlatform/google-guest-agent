@@ -20,10 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/windowstypes"
+	"github.com/google/go-cmp/cmp"
 )
 
 type testOpts struct {
@@ -189,5 +191,37 @@ func TestDefaultWindowsMemoryInfo(t *testing.T) {
 
 	if actual == 0 {
 		t.Fatalf("Memory(4) returned %d, want nonzero", actual)
+	}
+}
+
+func TestWindowsFindPid(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	path, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		t.Fatalf("LookPath(powershell.exe) failed unexpectedly: %v", err)
+	}
+
+	// Start a sleeping process for 20 seconds to ensure it's in the process list.
+	// Cleanup will cancel the context, which will kill the process before the
+	// test ends.
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "Start-Sleep -Seconds 20")
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("cmd.Start() for Start-Sleep failed unexpectedly: %v", err)
+	}
+
+	got, err := FindPid(cmd.Process.Pid)
+	if err != nil {
+		t.Fatalf("FindPid(%d) failed unexpectedly: %v", cmd.Process.Pid, err)
+	}
+
+	want := Process{
+		PID: cmd.Process.Pid,
+		Exe: path,
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("FindPid(%d) returned unexpected diff (-want +got):\n%s", cmd.Process.Pid, diff)
 	}
 }

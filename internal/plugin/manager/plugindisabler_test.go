@@ -69,6 +69,7 @@ func TestStopPlugin(t *testing.T) {
 		stopCleanup    bool
 		psClient       *mockPsClient
 		wantStopRPC    bool
+		reusePid       bool
 		installCleanup bool
 		plugin         *Plugin
 	}{
@@ -78,7 +79,7 @@ func TestStopPlugin(t *testing.T) {
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
 			installCleanup: true,
-			plugin:         &Plugin{Name: "testplugin1", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
+			plugin:         &Plugin{Name: "testplugin1", EntryPath: "testplugin1", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
 		},
 		{
 			name:           "stop_cleanup_false",
@@ -86,15 +87,15 @@ func TestStopPlugin(t *testing.T) {
 			installCleanup: false,
 			psClient:       &mockPsClient{alive: false},
 			wantStopRPC:    false,
-			plugin:         &Plugin{Name: "testplugin2", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
+			plugin:         &Plugin{Name: "testplugin2", EntryPath: "testplugin2", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
 		},
 		{
 			name:           "core_stop_cleanup_true",
 			stopCleanup:    true,
-			psClient:       &mockPsClient{alive: true, throwErr: true},
+			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
 			installCleanup: false,
-			plugin:         &Plugin{Name: "testplugin3", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeCore},
+			plugin:         &Plugin{Name: "testplugin3", EntryPath: "testplugin3", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeCore},
 		},
 		{
 			name:           "core_stop_cleanup_false",
@@ -102,7 +103,16 @@ func TestStopPlugin(t *testing.T) {
 			installCleanup: false,
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
-			plugin:         &Plugin{Name: "testplugin4", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeCore},
+			plugin:         &Plugin{Name: "testplugin4", EntryPath: "testplugin4", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeCore},
+		},
+		{
+			name:           "nokill_cleanup_true",
+			stopCleanup:    true,
+			psClient:       &mockPsClient{alive: true},
+			wantStopRPC:    false,
+			reusePid:       true,
+			installCleanup: true,
+			plugin:         &Plugin{Name: "testplugin5", EntryPath: "testplugin5", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
 		},
 	}
 
@@ -111,10 +121,15 @@ func TestStopPlugin(t *testing.T) {
 			ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 			ts := &testPluginServer{}
 			step := &stopStep{cleanup: tc.stopCleanup}
-			setupMockPsClient(t, tc.psClient)
 			// Use invalid PID to avoid killing some process unknowingly.
 			plugin := tc.plugin
 			setupPlugin(ctx, t, plugin, ts)
+
+			if !tc.reusePid {
+				tc.psClient.exe = plugin.EntryPath
+			}
+
+			setupMockPsClient(t, tc.psClient)
 
 			if err := step.Run(ctx, plugin); err != nil {
 				t.Errorf("stopStep.Run(ctx, %+v) failed unexpectedly: %v", plugin, err)
@@ -132,6 +147,12 @@ func TestStopPlugin(t *testing.T) {
 			}
 			if plugin.client != nil {
 				t.Errorf("stopStep.Run(ctx, %+v) did not reset the plugin client", plugin)
+			}
+
+			// Test process was killed.
+			wantKilled := (!tc.reusePid && tc.psClient.alive)
+			if wantKilled != tc.psClient.procKilled {
+				t.Errorf("stopStep.Run(ctx, %+v) killed process: %t, want killed: %t", plugin, tc.psClient.procKilled, wantKilled)
 			}
 
 			// Test cleanup happened.
