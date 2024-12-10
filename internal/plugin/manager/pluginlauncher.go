@@ -138,7 +138,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 
 	// Launch the plugin.
 	if err := retry.Run(ctx, policy, launchFunc); err != nil {
-		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to launch plugin: [%v]", err))
+		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to launch plugin: [%v]. Plugin logs: %s", err, readPluginLogs(p.logfile())))
 		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
 		return err
 	}
@@ -159,7 +159,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 
 	_, status := p.Start(ctx)
 	if status.Err() != nil {
-		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to start plugin: [%+v]", status))
+		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to start plugin: [%+v]. Plugin logs: %s", status, readPluginLogs(p.logfile())))
 		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
 		return fmt.Errorf("failed to start plugin %s with error: %w", p.FullName(), status.Err())
 	}
