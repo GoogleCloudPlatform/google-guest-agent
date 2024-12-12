@@ -87,7 +87,7 @@ func (m *PluginMonitor) Run(ctx context.Context) (bool, error) {
 func readPluginLogs(path string) string {
 	errLogs, readErr := file.ReadLastNLines(path, numOfLines)
 	if readErr != nil {
-		galog.Errorf("Failed to read plugin log file %s: %v", path, readErr)
+		galog.Warnf("Unable to read plugin log file %s: %v", path, readErr)
 		return ""
 	}
 
