@@ -702,7 +702,7 @@ func TestUpgradePlugin(t *testing.T) {
 	ctc := setupConstraintTestClient(t)
 	cfg.Retrieve().Plugin.SocketConnectionsDir = connections
 	cfg.Retrieve().Core.ACSClient = false
-	psClient := &mockPsClient{alive: true}
+	psClient := &mockPsClient{alive: true, exe: "test-entry-point"}
 	setupMockPsClient(t, psClient)
 	// Start plugin server - old revision.
 	addr1 := filepath.Join(connections, "PluginA_RevisionA.sock")

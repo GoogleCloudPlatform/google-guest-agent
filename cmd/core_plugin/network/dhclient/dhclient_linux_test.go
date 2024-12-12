@@ -63,6 +63,10 @@ func (d *dhclientMockPs) Memory(pid int) (int, error) {
 	return 0, nil
 }
 
+func (d *dhclientMockPs) FindPid(_ int) (ps.Process, error) {
+	return ps.Process{}, nil
+}
+
 func (d *dhclientMockPs) CPUUsage(ctx context.Context, pid int) (float64, error) {
 	return 0, nil
 }
@@ -238,7 +242,7 @@ func TestDhclientProcessExists(t *testing.T) {
 						for _, arg := range opts.Args {
 							msg += fmt.Sprintf(" %v", arg)
 						}
-						return nil, fmt.Errorf(msg)
+						return nil, fmt.Errorf("%s", msg)
 					}
 					return nil, nil
 				},

@@ -33,13 +33,16 @@ type mockPsClient struct {
 	alive       bool
 	memoryUsage int
 	cpuUsage    float64
+	exe         string
+	procKilled  bool
 }
 
-func (mockPsClient) KillProcess(pid int, mode ps.KillMode) error {
+func (m *mockPsClient) KillProcess(pid int, mode ps.KillMode) error {
+	m.procKilled = true
 	return nil
 }
 
-func (m mockPsClient) IsProcessAlive(pid int) (bool, error) {
+func (m *mockPsClient) IsProcessAlive(pid int) (bool, error) {
 	if m.throwErr {
 		return m.alive, fmt.Errorf("test error")
 	}
@@ -50,11 +53,18 @@ func (mockPsClient) FindRegex(_ string) ([]ps.Process, error) {
 	return nil, nil
 }
 
-func (m mockPsClient) Memory(_ int) (int, error) {
+func (m *mockPsClient) FindPid(int) (ps.Process, error) {
+	if !m.alive {
+		return ps.Process{}, fmt.Errorf("test error")
+	}
+	return ps.Process{Exe: m.exe}, nil
+}
+
+func (m *mockPsClient) Memory(_ int) (int, error) {
 	return m.memoryUsage, nil
 }
 
-func (m mockPsClient) CPUUsage(_ context.Context, _ int) (float64, error) {
+func (m *mockPsClient) CPUUsage(_ context.Context, _ int) (float64, error) {
 	return m.cpuUsage, nil
 }
 

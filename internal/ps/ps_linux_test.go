@@ -22,6 +22,9 @@ import (
 	"os"
 	"path"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 // Setup a fake process directory.
@@ -35,6 +38,7 @@ func setupProc(t *testing.T, entries []*Process) {
 	if err := os.MkdirAll(procDir, 0755); err != nil {
 		t.Fatalf("failed to make mocked proc dir: %+v", err)
 	}
+	t.Logf("procDir: %s", procDir)
 
 	if entries == nil {
 		return
@@ -49,6 +53,7 @@ func setupProc(t *testing.T, entries []*Process) {
 		if err := os.MkdirAll(procDir, 0755); err != nil {
 			t.Fatalf("os.MkDirAll() failed to make process dir: %+v", err)
 		}
+		t.Logf("procDir entry: %s", procDir)
 
 		// randomFilePath is the path of a random/unknown file in the processe's
 		// dir.
@@ -145,12 +150,13 @@ func TestFind(t *testing.T) {
 	tests := []struct {
 		name    string
 		success bool
+		args    []string
 		expr    string
 	}{
-		{"dhclient-exist", true, ".*dhclient.*"},
-		{"google-guest-agent-exist", true, ".*google_guest_agent.*"},
-		{"dhclient-not-exist", false, ".*dhclientx.*"},
-		{"google-guest-agent-not-exist", false, ".*google_guest_agentx.*"},
+		{"dhclient-exist", true, []string{"dhclient", "eth0"}, ".*dhclient.*"},
+		{"google-guest-agent-exist", true, []string{"google_guest_agent"}, ".*google_guest_agent.*"},
+		{"dhclient-not-exist", false, []string{}, ".*dhclientx.*"},
+		{"google-guest-agent-not-exist", false, []string{}, ".*google_guest_agentx.*"},
 	}
 
 	procs := []*Process{
@@ -169,6 +175,10 @@ func TestFind(t *testing.T) {
 
 				if res == nil {
 					t.Fatalf("ps.Find() returned: nil, expected: non-nil")
+				}
+
+				if diff := cmp.Diff(res[0].CommandLine, curr.args, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
+					t.Errorf("ps.Find() returned diff for args (-want +got):\n%s", diff)
 				}
 			} else {
 				if res != nil {
