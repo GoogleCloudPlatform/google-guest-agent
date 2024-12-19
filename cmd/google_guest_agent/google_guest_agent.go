@@ -127,8 +127,12 @@ func main() {
 		galog.Fatalf("Failed to initialize service manager: %s", err)
 	}
 
-	if err := events.FetchManager().AddWatcher(ctx, metadata.NewWatcher()); err != nil {
-		galog.Fatalf("Failed to add metadata watcher: %v", err)
+	if cfg.Retrieve().Core.DisableMDSWatcher {
+		galog.Infof("MDS watcher is disabled in config, skipping MDS watcher initialization")
+	} else {
+		if err := events.FetchManager().AddWatcher(ctx, metadata.NewWatcher()); err != nil {
+			galog.Fatalf("Failed to add metadata watcher: %v", err)
+		}
 	}
 
 	opts := setup.Config{Version: version, CorePluginPath: corePluginPath, SkipCorePlugin: skipCorePlugin}

@@ -61,6 +61,7 @@ log_verbosity = 0
 log_file =
 on_demand_plugins = true
 acs_client = true
+disable_mds_watcher = false
 
 [Accounts]
 deprovision_remove = false
@@ -267,6 +268,9 @@ type Core struct {
 	// only. Value is set dynamically when config is loaded in main. Any values
 	// provided via config file or anything will be overridden.
 	Version string `ini:"-"`
+	// DisableMDSWatcher disables the MDS watcher. This is used only for testing
+	// as MDS is not accessible and *must* not be set in non-test environments.
+	DisableMDSWatcher bool `ini:"disable_mds_watcher,omitempty"`
 }
 
 // AccountManager contains the configurations of AccountManager section.

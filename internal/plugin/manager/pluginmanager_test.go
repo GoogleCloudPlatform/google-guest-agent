@@ -209,11 +209,6 @@ func TestStore(t *testing.T) {
 			}
 
 			// Tests bytes were correctly stored and can be parsed.
-			// bytes := gotP.Manifest.StartConfig.Structured
-			// gotCfg := &structpb.Struct{}
-			// if err := proto.Unmarshal(bytes, gotCfg); err != nil {
-			// 	t.Fatalf("proto.Unmarshal(%+v) failed unexpectedly with error: %v", bytes, err)
-			// }
 			gotCfg, err := gotP.Manifest.StartConfig.toProto()
 			if err != nil {
 				t.Fatalf("%s plugin.toProto() failed unexpectedly with error: %v", gotP.FullName(), err)
@@ -301,7 +296,7 @@ func TestInitPluginManagerError(t *testing.T) {
 	if err := RegisterCmdHandler(ctx); err != nil {
 		t.Fatalf("RegisterCmdHandler(ctx) failed unexpectedly with error: %v", err)
 	}
-	if _, err := InitPluginManager(ctx); err == nil {
+	if _, err := InitPluginManager(ctx, "test-instance-id"); err == nil {
 		t.Errorf("InitPluginManager(ctx) succeeded, want register command handler error")
 	}
 }
@@ -327,7 +322,7 @@ func TestInitPluginManager(t *testing.T) {
 		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
 	}
 
-	pm, err := InitPluginManager(ctx)
+	pm, err := InitPluginManager(ctx, "test-instance-id")
 	if err != nil {
 		t.Fatalf("InitPluginManager(ctx) failed unexpectedly with error: %v", err)
 	}
@@ -820,7 +815,7 @@ func TestRemovePlugin(t *testing.T) {
 	}
 
 	if err := os.MkdirAll(plugin.stateDir(), 0755); err != nil {
-		t.Fatalf("os.MkdirAll(%s) failed unexpectedly with error: %v", plugin.stateFile(), err)
+		t.Fatalf("os.MkdirAll(%s) failed unexpectedly with error: %v", plugin.stateDir(), err)
 	}
 
 	req := &acpb.ConfigurePluginStates_ConfigurePlugin{
@@ -1200,5 +1195,65 @@ func TestNewPluginManifest(t *testing.T) {
 		if diff := cmp.Diff(cfg, gotCfg, protocmp.Transform()); diff != "" {
 			t.Errorf("newPluginManifest(%v) returned an unexpected diff for structured config (-want +got): %v", tc.req, diff)
 		}
+	}
+}
+
+func TestCleanupOldState(t *testing.T) {
+	state := t.TempDir()
+	oldInstance := filepath.Join(state, "old-instance")
+	newInstance := filepath.Join(state, "new-instance")
+	otherFile := filepath.Join(state, "random-file")
+
+	f, err := os.Create(otherFile)
+	if err != nil {
+		t.Fatalf("os.Create(%s) failed unexpectedly with error: %v", filepath.Join(state, "random-file"), err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("f.Close(%s) failed unexpectedly with error: %v", otherFile, err)
+	}
+
+	for _, d := range []string{oldInstance, newInstance} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed unexpectedly with error: %v", d, err)
+		}
+	}
+
+	pm := &PluginManager{instanceID: "new-instance"}
+	if err := pm.cleanupOldState(context.Background(), state); err != nil {
+		t.Fatalf("cleanupOldState(ctx, %s) failed unexpectedly with error: %v", state, err)
+	}
+
+	tests := []struct {
+		name   string
+		path   string
+		fType  file.Type
+		exists bool
+	}{
+		{
+			name:   "old-instance-cleanup",
+			path:   oldInstance,
+			exists: false,
+			fType:  file.TypeDir,
+		},
+		{
+			name:   "new-instance-unchanged",
+			path:   newInstance,
+			exists: true,
+			fType:  file.TypeDir,
+		},
+		{
+			name:   "non-dir-file-unchanged",
+			path:   otherFile,
+			exists: true,
+			fType:  file.TypeFile,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := file.Exists(tc.path, tc.fType); got != tc.exists {
+				t.Errorf("cleanupOldState(ctx, %s) ran, file %q exists: %t, should exist: %t", state, tc.path, !got, tc.exists)
+			}
+		})
 	}
 }

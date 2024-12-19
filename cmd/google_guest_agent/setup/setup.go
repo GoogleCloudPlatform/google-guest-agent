@@ -23,8 +23,10 @@ import (
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/handler"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/watcher"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
@@ -158,6 +160,19 @@ type Config struct {
 	SkipCorePlugin bool
 }
 
+func fetchInstanceID(ctx context.Context, mds metadata.MDSClientInterface) (string, error) {
+	// Its most likely unset and only used for testing.
+	if cfg.Retrieve().Instance.InstanceID != "" {
+		return cfg.Retrieve().Instance.InstanceID, nil
+	}
+
+	id, err := mds.GetKey(ctx, "/instance/id", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to get instance ID: %w", err)
+	}
+	return id, nil
+}
+
 // Run orchestrates the minimum required steps for initializing Guest Agent
 // with core plugin.
 func Run(ctx context.Context, c Config) error {
@@ -174,7 +189,12 @@ func Run(ctx context.Context, c Config) error {
 		galog.Infof("Registered ACS watcher and handler")
 	}
 
-	pm, err := manager.InitPluginManager(ctx)
+	id, err := fetchInstanceID(ctx, metadata.New())
+	if err != nil {
+		return fmt.Errorf("failed to get instance ID: %w", err)
+	}
+
+	pm, err := manager.InitPluginManager(ctx, id)
 	if err != nil {
 		return fmt.Errorf("plugin manager initialization: %w", err)
 	}
