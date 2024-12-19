@@ -56,6 +56,8 @@ var pluginManager *PluginManager
 
 // PluginManager struct represents the plugins that plugin manager manages.
 type PluginManager struct {
+	// instanceID is the instance ID of the VM plugin manager is running on.
+	instanceID string
 	// mu protects the plugins map.
 	mu sync.RWMutex
 	// plugins is the map of plugin name and plugin managed by plugin manager.
@@ -94,10 +96,10 @@ type PluginManager struct {
 	IsInitialized atomic.Bool
 }
 
-// agentPluginState returns the path to the directory when agent maintains
+// agentPluginState returns the path to the directory where agent maintains
 // plugin state.
 func agentPluginState() string {
-	return filepath.Join(baseState(), agentStateDir, pluginInfoDir)
+	return filepath.Join(baseState(), pluginManager.instanceID, agentStateDir, pluginInfoDir)
 }
 
 // Instance returns the previously initialized instance of plugin manager.
@@ -116,12 +118,43 @@ func init() {
 	}
 }
 
+func (m *PluginManager) cleanupOldState(ctx context.Context, path string) error {
+	dirs, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("failed to read directory %q: %w", path, err)
+	}
+
+	for _, dir := range dirs {
+		absPath := filepath.Join(path, dir.Name())
+		if !dir.IsDir() || dir.Name() == m.instanceID {
+			galog.V(2).Debugf("Skipping %q from plugin manager old state cleanup", absPath)
+			continue
+		}
+		galog.Debugf("Removing previous plugin state %q", absPath)
+		if err := os.RemoveAll(absPath); err != nil {
+			return fmt.Errorf("failed to remove file %q: %w", absPath, err)
+		}
+	}
+	return nil
+}
+
 // InitPluginManager initializes and returns a PluginManager instance.
 // Plugin Manager can be initialized and used to support core plugins even if
 // ACS is disabled. Plugin Manager will be initialized during early Guest Agent
 // startup to configure the core plugins.
-func InitPluginManager(ctx context.Context) (*PluginManager, error) {
-	galog.Infof("Initializing plugin manager")
+func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, error) {
+	galog.Infof("Initializing plugin manager for instance %q", instanceID)
+
+	pluginManager.instanceID = instanceID
+
+	// Cleanup old plugin state in a separate goroutine. This operation is not
+	// critical for plugin manager initialization and should not block it.
+	go func() {
+		if err := pluginManager.cleanupOldState(ctx, baseState()); err != nil {
+			galog.Errorf("Failed to cleanup old plugin state: %v", err)
+		}
+	}()
+
 	plugins, err := load(agentPluginState())
 	if err != nil {
 		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
