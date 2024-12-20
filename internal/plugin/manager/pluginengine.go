@@ -253,7 +253,7 @@ func (p *Plugin) runSteps(ctx context.Context, steps []Step) error {
 // baseState returns the base path where the agent and all plugins state is
 // stored.
 func baseState() string {
-	return filepath.Clean(cfg.Retrieve().Plugin.StateDir)
+	return filepath.Join(filepath.Clean(cfg.Retrieve().Plugin.StateDir), pluginManager.currentInstanceID())
 }
 
 // pluginInstallPath returns the path where the plugin is installed. This is

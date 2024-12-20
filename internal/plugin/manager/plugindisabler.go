@@ -69,7 +69,7 @@ func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 	}
 
 	// Make sure plugin process exited by attempting to kill.
-	if err := ps.KillProcess(p.RuntimeInfo.Pid, ps.KillModeNoWait); err != nil {
+	if err := ps.KillProcess(p.RuntimeInfo.Pid, ps.KillModeWait); err != nil {
 		return fmt.Errorf("kill %s plugin process (%d) completed with error: %v", p.FullName(), p.RuntimeInfo.Pid, err)
 	}
 

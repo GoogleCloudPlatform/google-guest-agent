@@ -17,6 +17,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -26,6 +27,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/watcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
@@ -222,6 +224,10 @@ func TestRun(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
 	}
+	if err := os.Setenv("TEST_COMPUTE_INSTANCE_ID", "1234567890"); err != nil {
+		t.Fatalf("os.Setenv(%q, %q) failed unexpectedly with error: %v", "TEST_COMPUTE_INSTANCE_ID", "1234567890", err)
+	}
+	t.Cleanup(func() { os.Setenv("TEST_COMPUTE_INSTANCE_ID", "") })
 
 	c := Config{Version: "123", EnableACSWatcher: true, SkipCorePlugin: true}
 	ctx := context.Background()
@@ -239,5 +245,87 @@ func TestRun(t *testing.T) {
 
 	if err := events.FetchManager().AddWatcher(ctx, watcher.New()); err == nil {
 		t.Errorf("Run(ctx, %+v) successfully added ACS watcher, setup should have already added it", c)
+	}
+}
+
+// MDSClient implements fake metadata server.
+type MDSClient struct {
+	id       string
+	throwErr bool
+}
+
+// GetKey implements fake GetKey MDS method.
+func (s *MDSClient) GetKey(ctx context.Context, key string, headers map[string]string) (string, error) {
+	if s.throwErr {
+		return "", fmt.Errorf("test error")
+	}
+	return s.id, nil
+}
+
+// GetKeyRecursive implements fake GetKeyRecursive MDS method.
+func (s *MDSClient) GetKeyRecursive(ctx context.Context, key string) (string, error) {
+	return "", fmt.Errorf("GetKeyRecursive() not yet implemented")
+}
+
+// Get method implements fake Get on MDS.
+func (s *MDSClient) Get(context.Context) (*metadata.Descriptor, error) {
+	return nil, fmt.Errorf("not yet implemented")
+}
+
+// Watch method implements fake watcher on MDS.
+func (s *MDSClient) Watch(context.Context) (*metadata.Descriptor, error) {
+	return nil, fmt.Errorf("not yet implemented")
+}
+
+// WriteGuestAttributes method implements fake writer on MDS.
+func (s *MDSClient) WriteGuestAttributes(context.Context, string, string) error {
+	return fmt.Errorf("not yet implemented")
+}
+
+func TestFetchInstanceID(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
+	ctx := context.Background()
+
+	tests := []struct {
+		desc       string
+		want       string
+		env        string
+		mds        *MDSClient
+		shouldFail bool
+	}{
+		{
+			desc: "mds_success",
+			mds:  &MDSClient{id: "test-instance-id"},
+			want: "test-instance-id",
+		},
+		{
+			desc: "cfg_success",
+			env:  "test-instance-id2",
+			want: "test-instance-id2",
+		},
+		{
+			desc:       "mds_failure",
+			mds:        &MDSClient{throwErr: true},
+			shouldFail: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			if err := os.Setenv("TEST_COMPUTE_INSTANCE_ID", tc.env); err != nil {
+				t.Fatalf("os.Setenv(%q, %q) failed unexpectedly with error: %v", "TEST_COMPUTE_INSTANCE_ID", tc.env, err)
+			}
+
+			got, err := fetchInstanceID(ctx, tc.mds)
+			if (err != nil) != tc.shouldFail {
+				t.Errorf("fetchInstanceID(ctx, %+v) = %v, want error %t", tc.mds, err, tc.shouldFail)
+			}
+			if got != tc.want {
+				t.Errorf("fetchInstanceID(ctx, %+v) = %q, want %q", tc.mds, got, tc.want)
+			}
+		})
 	}
 }
