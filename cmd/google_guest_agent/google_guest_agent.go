@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/google_guest_agent/setup"
@@ -52,9 +51,6 @@ var (
 )
 
 const (
-	// galogShutdownTimeout is the period of time we should wait galog to
-	// shutdown.
-	galogShutdownTimeout = time.Second
 	// defaultLinuxCorePath is the default path where core plugin is installed on Linux.
 	defaultLinuxCorePath = "/usr/lib/google/guest_agent/core_plugin"
 	// defaultWindowsCorePath is the default path where core plugin is installed on Windows.
@@ -121,7 +117,7 @@ func main() {
 
 	if err := service.Init(ctx, func() {
 		galog.Info("Google Guest Agent Leaving (canceling context)...")
-		galog.Shutdown(galogShutdownTimeout)
+		galog.Shutdown()
 		cancel()
 	}); err != nil {
 		galog.Fatalf("Failed to initialize service manager: %s", err)
