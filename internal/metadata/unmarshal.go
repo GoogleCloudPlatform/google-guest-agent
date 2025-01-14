@@ -59,7 +59,7 @@ func (m *descriptor) UnmarshalJSON(b []byte) error {
 // hypervisor clock. This is the internal representation used to parse the json
 // formatted output of metadata server.
 type virtualClock struct {
-	DriftToken int `json:"drift-token"`
+	DriftToken string
 }
 
 // instance describes the metadata's instance attributes/keys. This is the
@@ -73,6 +73,9 @@ type instance struct {
 	VlanInterfaces    []map[int]vlanInterface
 	VirtualClock      virtualClock
 	Name              string
+	// We don't need the details for now, but we need to keep the key to know
+	// if service accounts are present.
+	ServiceAccounts map[string]json.RawMessage
 }
 
 // networkInterfaces describes the instances network interfaces configurations.

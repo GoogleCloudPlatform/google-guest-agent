@@ -17,7 +17,9 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +29,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -47,6 +50,9 @@ const (
 var (
 	// Default retry policy to retry max 5 times for upto ~30 sec.
 	defaultRetrypolicy = retry.Policy{MaxAttempts: 5, Jitter: time.Second, BackoffFactor: 2}
+	// slowRetrypolicy is used for instances without service account. This is to
+	// avoid consuming too many resources on instances without service account.
+	slowRetrypolicy = retry.Policy{MaxAttempts: 3, Jitter: time.Minute * 5, BackoffFactor: 2}
 	// connMu protects connection.
 	connMu sync.Mutex
 	// connection is cached ACS Connection, reuse across Agent if its already set.
@@ -54,6 +60,8 @@ var (
 	// isConnectionSet is set if connection is initialized and still valid.
 	// Its reset to false in error case to trigger reconnection.
 	isConnectionSet atomic.Bool
+	// serviceAccountPresent is set if instance is known to have service account.
+	serviceAccountPresent atomic.Bool
 )
 
 // ConnectionInterface is the minimum interface required by Agent to communicate with ACS.
@@ -137,6 +145,11 @@ func setConnection(ctx context.Context) error {
 		}
 		connection, err = client.CreateConnection(ctx, channelID(), false, opts...)
 		if err != nil {
+			// If we get ErrGettingInstanceToken, it very likely means that the
+			// instance has no service account.
+			if errors.Is(err, client.ErrGettingInstanceToken) {
+				serviceAccountPresent.Store(false)
+			}
 			return fmt.Errorf("unable to create new ACS connection, err: %w", err)
 		}
 		isConnectionSet.Store(true)
@@ -182,7 +195,7 @@ func Send(ctx context.Context, labels map[string]string, msg proto.Message) erro
 		return nil
 	}
 
-	if err := retry.Run(ctx, defaultRetrypolicy, fn); err != nil {
+	if err := retry.Run(ctx, retryPolicy(ctx), fn); err != nil {
 		return fmt.Errorf("unable to send message, err: %w", err)
 	}
 
@@ -208,7 +221,7 @@ func Watch(ctx context.Context) (*acpb.MessageBody, error) {
 		return msg, err
 	}
 
-	msg, err := retry.RunWithResponse(ctx, defaultRetrypolicy, fn)
+	msg, err := retry.RunWithResponse(ctx, retryPolicy(ctx), fn)
 	if err != nil {
 		return nil, fmt.Errorf("unable to receive message, err: %w", err)
 	}
@@ -232,4 +245,31 @@ func isNilInterface(a any) bool {
 		return true
 	}
 	return v == nil
+}
+
+func retryPolicy(ctx context.Context) retry.Policy {
+	if serviceAccountPresent.Load() {
+		return defaultRetrypolicy
+	}
+
+	if os.Getenv("TEST_UNDECLARED_OUTPUTS_DIR") != "" {
+		// MDS watcher is disabled in test env skip [Get] and just use default retry
+		// policy.
+		return defaultRetrypolicy
+	}
+
+	desc, err := metadata.New().Get(ctx)
+	if err != nil {
+		galog.Debugf("Failed to get metadata descriptor, using default retry policy, err: %v", err)
+		return defaultRetrypolicy
+	}
+
+	if desc.HasServiceAccount() {
+		serviceAccountPresent.Store(true)
+		galog.Debugf("Instance has service account, using default retry policy")
+		return defaultRetrypolicy
+	}
+
+	galog.Debugf("Instance has no service account, using slow retry policy")
+	return slowRetrypolicy
 }

@@ -181,3 +181,74 @@ func TestWindowsEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestServiceAccountsUnmarshalJSON(t *testing.T) {
+	mdsWithServiceAccounts := `
+	{
+		"instance": {
+			"serviceAccounts": {
+        "1234567890-compute@developer.gserviceaccount.com": {
+            "aliases": [
+                "default"
+            ],
+            "email": "1234567890-compute@developer.gserviceaccount.com",
+            "scopes": [
+                "https://www.googleapis.com/auth/cloud-platform"
+            ]
+        },
+        "default": {
+            "aliases": [
+                "default"
+            ],
+            "scopes": [
+                "https://www.googleapis.com/auth/cloud-platform"
+            ]
+        }
+    },
+			"id": 1234567890
+		}
+	}
+	`
+
+	mdsWithoutServiceAccounts := `
+	{
+		"instance": {
+			"id": 1234567890,
+			"serviceAccounts": {},
+			"virtualClock": {
+				"driftToken": "10"
+			}
+		}
+	}
+	`
+
+	tests := []struct {
+		name string
+		mds  string
+		want bool
+	}{
+		{
+			name: "no-service-accounts",
+			mds:  mdsWithoutServiceAccounts,
+			want: false,
+		},
+		{
+			name: "with-service-accounts",
+			mds:  mdsWithServiceAccounts,
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			desc, err := UnmarshalDescriptor(tc.mds)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%q) failed unexpectedly with error: %v", tc.mds, err)
+			}
+			t.Logf("desc: %+v", desc.Instance().internal)
+			if got := desc.HasServiceAccount(); got != tc.want {
+				t.Errorf("HasServiceAccount() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
