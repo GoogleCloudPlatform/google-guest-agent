@@ -5,7 +5,7 @@ go 1.23
 require (
 	cloud.google.com/go/storage v1.44.0
 	github.com/GoogleCloudPlatform/agentcommunication_client v0.0.0-20241002052910-6a2e8891ccb6
-	github.com/GoogleCloudPlatform/galog v0.0.0-20241115222417-41950deb93d5
+	github.com/GoogleCloudPlatform/galog v0.0.0-20250111014007-ec5a17cc0445
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/go-ini/ini v1.67.0
 	github.com/go-yaml/yaml v2.1.0+incompatible
