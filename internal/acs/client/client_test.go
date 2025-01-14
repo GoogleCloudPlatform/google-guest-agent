@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/testserver"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
@@ -390,4 +392,41 @@ func TestIsNilInterface(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRetryPolicy(t *testing.T) {
+	ctx := context.Background()
+	serviceAccountPresent.Store(false)
+
+	retryPolicyIsDefault := func(policy retry.Policy, accountPresent bool) {
+		if diff := cmp.Diff(policy, defaultRetrypolicy); diff != "" {
+			t.Errorf("retryPolicy(ctx) returned unexpected diff (-want +got):\n%s", diff)
+		}
+		if got := serviceAccountPresent.Load(); got != accountPresent {
+			t.Errorf("serviceAccountPresent.Load() = %t, want %t", got, accountPresent)
+		}
+	}
+
+	// Default retry policy.
+	policy := retryPolicy(ctx)
+	retryPolicyIsDefault(policy, false)
+
+	// Service account present returns default retry policy.
+	serviceAccountPresent.Store(true)
+	policy = retryPolicy(ctx)
+	retryPolicyIsDefault(policy, true)
+
+	// Test env returns default retry policy.
+	serviceAccountPresent.Store(false)
+	orig := os.Getenv("TEST_UNDECLARED_OUTPUTS_DIR")
+	t.Cleanup(func() {
+		os.Setenv("TEST_UNDECLARED_OUTPUTS_DIR", orig)
+	})
+
+	if err := os.Setenv("TEST_UNDECLARED_OUTPUTS_DIR", "test_dir"); err != nil {
+		t.Fatalf("Failed to set TEST_UNDECLARED_OUTPUTS_DIR: %v", err)
+	}
+
+	policy = retryPolicy(ctx)
+	retryPolicyIsDefault(policy, false)
 }
