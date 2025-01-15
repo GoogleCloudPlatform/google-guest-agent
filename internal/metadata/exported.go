@@ -263,7 +263,7 @@ func newVirtualClock(vc virtualClock) *VirtualClock {
 }
 
 // DriftToken returns the virtual clock drift token.
-func (vc *VirtualClock) DriftToken() int {
+func (vc *VirtualClock) DriftToken() string {
 	return vc.internal.DriftToken
 }
 
@@ -506,4 +506,9 @@ func (wk *WindowsKey) AddToAdministrator() *bool {
 // PasswordLength is the windows passwordLength key.
 func (wk *WindowsKey) PasswordLength() int {
 	return wk.internal.PasswordLength
+}
+
+// HasServiceAccount returns true if the instance has service accounts attached.
+func (desc *Descriptor) HasServiceAccount() bool {
+	return len(desc.Instance().internal.ServiceAccounts) > 0
 }

@@ -160,41 +160,55 @@ type Config struct {
 	SkipCorePlugin bool
 }
 
-func fetchInstanceID(ctx context.Context, mds metadata.MDSClientInterface) (string, error) {
+// runTimeConfig contains the runtime configuration of the instance.
+type runTimeConfig struct {
+	// ID is the instance ID.
+	id string
+	// svcActPresent is true if the instance has service accounts attached.
+	svcActPresent bool
+}
+
+func fetchRuntimeConfig(ctx context.Context, mds metadata.MDSClientInterface) (runTimeConfig, error) {
 	// Its most likely unset and only used for testing.
 	if got := os.Getenv("TEST_COMPUTE_INSTANCE_ID"); got != "" {
-		return got, nil
+		return runTimeConfig{id: got, svcActPresent: true}, nil
 	}
 
-	id, err := mds.GetKey(ctx, "/instance/id", nil)
+	desc, err := mds.Get(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to get instance ID: %w", err)
+		return runTimeConfig{}, fmt.Errorf("failed to get metadata descriptor: %w", err)
 	}
-	return id, nil
+
+	return runTimeConfig{id: desc.Instance().ID().String(), svcActPresent: desc.HasServiceAccount()}, nil
 }
 
 // Run orchestrates the minimum required steps for initializing Guest Agent
 // with core plugin.
 func Run(ctx context.Context, c Config) error {
+	conf, err := fetchRuntimeConfig(ctx, metadata.New())
+	if err != nil {
+		return fmt.Errorf("failed to get instance ID: %w", err)
+	}
+
+	galog.Infof("Running Guest Agent setup with config: %+v, runtime config: %+v", c, conf)
+
 	// Registers the acs event watcher and initializes the acs handler if
 	// on-demand plugins are enabled in the configuration file.
 	// This is done as early as possible to ensure that the handler is ready
 	// to handle to respond to non-plugin configuration requests as they serve as
 	// heartbeat for the agent.
-	if c.EnableACSWatcher {
+	if c.EnableACSWatcher && conf.svcActPresent {
 		if err := events.FetchManager().AddWatcher(ctx, watcher.New()); err != nil {
 			galog.Fatalf("Failed to add ACS watcher: %v", err)
 		}
 		handler.Init(c.Version)
 		galog.Infof("Registered ACS watcher and handler")
+	} else {
+		galog.Infof("ACS watcher is disabled: %t, service account is present: %t, skipping ACS watcher and handler initialization. On Demand plugins will not be available.", c.EnableACSWatcher, conf.svcActPresent)
+
 	}
 
-	id, err := fetchInstanceID(ctx, metadata.New())
-	if err != nil {
-		return fmt.Errorf("failed to get instance ID: %w", err)
-	}
-
-	pm, err := manager.InitPluginManager(ctx, id)
+	pm, err := manager.InitPluginManager(ctx, conf.id)
 	if err != nil {
 		return fmt.Errorf("plugin manager initialization: %w", err)
 	}

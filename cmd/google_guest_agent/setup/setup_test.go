@@ -250,16 +250,14 @@ func TestRun(t *testing.T) {
 
 // MDSClient implements fake metadata server.
 type MDSClient struct {
-	id       string
-	throwErr bool
+	id            int
+	throwErr      bool
+	svcActPresent bool
 }
 
 // GetKey implements fake GetKey MDS method.
 func (s *MDSClient) GetKey(ctx context.Context, key string, headers map[string]string) (string, error) {
-	if s.throwErr {
-		return "", fmt.Errorf("test error")
-	}
-	return s.id, nil
+	return "", fmt.Errorf("GetKey() not yet implemented")
 }
 
 // GetKeyRecursive implements fake GetKeyRecursive MDS method.
@@ -267,9 +265,50 @@ func (s *MDSClient) GetKeyRecursive(ctx context.Context, key string) (string, er
 	return "", fmt.Errorf("GetKeyRecursive() not yet implemented")
 }
 
+const (
+	mdsWithServiceAccounts = `
+	{
+		"instance": {
+			"serviceAccounts": {
+        "default": {
+            "aliases": [
+                "default"
+            ],
+            "scopes": [
+                "https://www.googleapis.com/auth/cloud-platform"
+            ]
+        }
+    },
+			"id": %d
+		}
+	}
+	`
+
+	mdsJustID = `
+	{
+		"instance": {
+			"id": %d
+		}
+	}
+	`
+)
+
 // Get method implements fake Get on MDS.
 func (s *MDSClient) Get(context.Context) (*metadata.Descriptor, error) {
-	return nil, fmt.Errorf("not yet implemented")
+	if s.throwErr {
+		return nil, fmt.Errorf("test error")
+	}
+
+	var jsonData string
+	if s.svcActPresent {
+		jsonData = fmt.Sprintf(mdsWithServiceAccounts, s.id)
+	} else {
+		jsonData = fmt.Sprintf(mdsJustID, s.id)
+	}
+
+	// This is a valid test response and would never fail.
+	desc, _ := metadata.UnmarshalDescriptor(jsonData)
+	return desc, nil
 }
 
 // Watch method implements fake watcher on MDS.
@@ -282,7 +321,7 @@ func (s *MDSClient) WriteGuestAttributes(context.Context, string, string) error 
 	return fmt.Errorf("not yet implemented")
 }
 
-func TestFetchInstanceID(t *testing.T) {
+func TestFetchRuntimeConfig(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
 	}
@@ -291,20 +330,25 @@ func TestFetchInstanceID(t *testing.T) {
 
 	tests := []struct {
 		desc       string
-		want       string
+		want       runTimeConfig
 		env        string
 		mds        *MDSClient
 		shouldFail bool
 	}{
 		{
 			desc: "mds_success",
-			mds:  &MDSClient{id: "test-instance-id"},
-			want: "test-instance-id",
+			mds:  &MDSClient{id: 12234},
+			want: runTimeConfig{id: "12234", svcActPresent: false},
+		},
+		{
+			desc: "mds_success_svc_act_present",
+			mds:  &MDSClient{id: 7890, svcActPresent: true},
+			want: runTimeConfig{id: "7890", svcActPresent: true},
 		},
 		{
 			desc: "cfg_success",
 			env:  "test-instance-id2",
-			want: "test-instance-id2",
+			want: runTimeConfig{id: "test-instance-id2", svcActPresent: true},
 		},
 		{
 			desc:       "mds_failure",
@@ -319,12 +363,12 @@ func TestFetchInstanceID(t *testing.T) {
 				t.Fatalf("os.Setenv(%q, %q) failed unexpectedly with error: %v", "TEST_COMPUTE_INSTANCE_ID", tc.env, err)
 			}
 
-			got, err := fetchInstanceID(ctx, tc.mds)
+			got, err := fetchRuntimeConfig(ctx, tc.mds)
 			if (err != nil) != tc.shouldFail {
 				t.Errorf("fetchInstanceID(ctx, %+v) = %v, want error %t", tc.mds, err, tc.shouldFail)
 			}
-			if got != tc.want {
-				t.Errorf("fetchInstanceID(ctx, %+v) = %q, want %q", tc.mds, got, tc.want)
+			if diff := cmp.Diff(tc.want, got, cmp.AllowUnexported(runTimeConfig{})); diff != "" {
+				t.Errorf("fetchInstanceID(ctx, %+v) returned unexpected diff (-want +got):\n%s", tc.mds, diff)
 			}
 		})
 	}
