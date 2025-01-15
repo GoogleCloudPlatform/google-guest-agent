@@ -131,6 +131,9 @@ func TestSend(t *testing.T) {
 
 func TestWatch(t *testing.T) {
 	enableACSClient(t)
+	watcherRetrypolicy.MaxAttempts = 2
+	watcherRetrypolicy.Jitter = time.Millisecond
+
 	wantMsg := &apb.Any{
 		TypeUrl: "getAgentInfoMsg",
 		Value:   []byte("testagent"),
@@ -279,6 +282,8 @@ func TestACSSend(t *testing.T) {
 func TestACSWatch(t *testing.T) {
 	ctx := context.Background()
 	s := setupACS(ctx, t)
+	watcherRetrypolicy.MaxAttempts = 2
+	watcherRetrypolicy.Jitter = time.Millisecond
 
 	req := &acmpb.ConfigurePluginStates{
 		ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{

@@ -12,7 +12,8 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-// Package retry implements retry logic helpers to execute arbitrary functions with defined policy.
+// Package retry implements retry logic helpers to execute arbitrary functions
+// with defined policy.
 package retry
 
 import (
@@ -24,32 +25,50 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 )
 
-// IsRetriable is method signature for implementing to override default logic of retrying each error.
+// IsRetriable is method signature for implementing to override default logic of
+// retrying each error.
 type IsRetriable func(error) bool
 
 // Policy represents the struct to configure the retry behavior.
 type Policy struct {
-	// MaxAttempts represents the maximum number of retry attempts.
+	// MaxAttempts represents the maximum number of retry attempts. If set to 0
+	// then retry will be infinite.
 	MaxAttempts int
-	// BackoffFactor is the multiplier by which retry interval (Jitter) increases after each retry.
-	// For constant backoff set Backoff factor to 1.
+	// BackoffFactor is the multiplier by which retry interval (Jitter) increases
+	// after each retry. For constant backoff set Backoff factor to 1.
 	BackoffFactor float64
 	// Jitter is the interval before the first retry.
 	Jitter time.Duration
-	// ShouldRetry is optional and the way to override default retry logic of retry every error.
-	// If ShouldRetry is not provided/implemented every error will be retried until all attempts are exhausted.
+	// ShouldRetry is optional and the way to override default retry logic of
+	// retry every error. If ShouldRetry is not provided/implemented every error
+	// will be retried until all attempts are exhausted.
 	ShouldRetry IsRetriable
+	// MaximumBackoff is the maximum backoff time between retries. Backoff will be
+	// capped to this value. If not set, then backoff will keep increasing based
+	// on BackoffFactor and Jitter.
+	MaximumBackoff time.Duration
 }
 
-// backoff computes interval between retries. Interval is jitter*(backoffFactor^attempt).
-// For e.g. if jitter was set to 10 and factor was 3, backoff between attempts would be [10, 30, 90, 270...].
+// backoff computes interval between retries. Interval is
+// jitter*(backoffFactor^attempt). For e.g. if jitter was set to 10 and factor
+// was 3, backoff between attempts would be [10, 30, 90, 270...].
 func backoff(attempt int, policy Policy) time.Duration {
 	b := float64(policy.Jitter) * math.Pow(policy.BackoffFactor, float64(attempt))
-	return time.Duration(b)
+	d := time.Duration(b)
+
+	if policy.MaximumBackoff == 0 {
+		return d
+	}
+
+	if d > policy.MaximumBackoff {
+		return policy.MaximumBackoff
+	}
+	return d
 }
 
-// isRetriable checks if error is retriable. If ShouldRetry is unimplemented it always returns
-// true, otherwise overridden method's logic determines the retry behavior.
+// isRetriable checks if error is retriable. If ShouldRetry is unimplemented
+// it always returns true, otherwise overridden method's logic determines the
+// retry behavior.
 func isRetriable(policy Policy, err error) bool {
 	if policy.ShouldRetry == nil {
 		return true
@@ -57,7 +76,8 @@ func isRetriable(policy Policy, err error) bool {
 	return policy.ShouldRetry(err)
 }
 
-// RunWithResponse executes and retries the function on failure based on policy defined and returns response on success.
+// RunWithResponse executes and retries the function on failure based on policy
+// defined and returns response on success.
 func RunWithResponse[T any](ctx context.Context, policy Policy, f func() (T, error)) (T, error) {
 	var (
 		res T
@@ -68,7 +88,7 @@ func RunWithResponse[T any](ctx context.Context, policy Policy, f func() (T, err
 		return res, fmt.Errorf("retry function cannot be nil")
 	}
 
-	for attempt := 0; attempt < policy.MaxAttempts; attempt++ {
+	for attempt := 0; ; attempt++ {
 		if res, err = f(); err == nil {
 			return res, nil
 		}
@@ -80,7 +100,7 @@ func RunWithResponse[T any](ctx context.Context, policy Policy, f func() (T, err
 		galog.Debugf("Attempt %d failed with error %+v", attempt, err)
 
 		// Return early, no need to wait if all retries have exhausted.
-		if attempt+1 >= policy.MaxAttempts {
+		if attempt+1 == policy.MaxAttempts {
 			return res, fmt.Errorf("exhausted all (%d) retries, last error: %w", policy.MaxAttempts, err)
 		}
 
@@ -88,12 +108,19 @@ func RunWithResponse[T any](ctx context.Context, policy Policy, f func() (T, err
 		case <-ctx.Done():
 			return res, ctx.Err()
 		case <-time.After(backoff(attempt, policy)):
+			// Verify if context is still active. If not, return early.
+			select {
+			case <-ctx.Done():
+				return res, ctx.Err()
+			default:
+				// Timeout, continue retrying.
+			}
 		}
 	}
-	return res, fmt.Errorf("num of retries set to 0, made no attempts to run")
 }
 
-// Run executes and retries the function on failure based on policy defined and returns nil-error on success.
+// Run executes and retries the function on failure based on policy defined and
+// returns nil-error on success.
 func Run(ctx context.Context, policy Policy, f func() error) error {
 	if f == nil {
 		return fmt.Errorf("retry function cannot be nil")

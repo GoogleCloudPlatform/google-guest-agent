@@ -723,7 +723,7 @@ func TestUpgradePlugin(t *testing.T) {
 	orig := pluginManager
 	t.Cleanup(func() { pluginManager = orig })
 
-	plugin := &Plugin{Name: "PluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr1, EntryPath: "test-entry-point", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3}}
+	plugin := &Plugin{Name: "PluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr1, EntryPath: "test-entry-point", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect(ctx) failed unexpectedly with error: %v", err)
 	}
@@ -819,7 +819,7 @@ func TestRemovePlugin(t *testing.T) {
 	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
 	createTestFile(t, entryPoint)
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}
@@ -879,7 +879,7 @@ func TestMonitoring(t *testing.T) {
 	addr := filepath.Join(t.TempDir(), "PluginA_RevisionA.sock")
 	cfg.Retrieve().Plugin.SocketConnectionsDir = filepath.Dir(addr)
 	startTestServer(t, &testPluginServer{ctrs: make(map[string]int)}, udsProtocol, "")
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3}}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3}}
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect(ctx) failed unexpectedly with error: %v", err)
@@ -1073,7 +1073,7 @@ func TestUpgradePluginError(t *testing.T) {
 			Name:       "PluginA",
 			RevisionId: "RevisionA",
 		},
-		Manifest: &acpb.ConfigurePluginStates_Manifest{},
+		Manifest: &acpb.ConfigurePluginStates_Manifest{DownloadAttemptCount: 1},
 	}
 
 	// Fail pre-launch requirements, no download setup.
@@ -1083,7 +1083,9 @@ func TestUpgradePluginError(t *testing.T) {
 			Name:       "PluginA",
 			RevisionId: "RevisionA1",
 		},
-		Manifest: &acpb.ConfigurePluginStates_Manifest{},
+		Manifest: &acpb.ConfigurePluginStates_Manifest{
+			DownloadAttemptCount: 1,
+		},
 	}
 
 	tests := []struct {

@@ -66,13 +66,6 @@ func TestRetryError(t *testing.T) {
 		t.Errorf("Retry(ctx, %+v, fn) retried %d times, should've returned after %d retries", policy, ctr, policy.MaxAttempts)
 	}
 
-	// Zero attempts error.
-	zeroPolicy := Policy{MaxAttempts: 0, BackoffFactor: 1, Jitter: time.Millisecond * 2}
-
-	if err := Run(ctx, zeroPolicy, fn); err == nil {
-		t.Errorf("Retry(ctx, %+v, fn) succeded, want zero attempts error", zeroPolicy)
-	}
-
 	// Empty function error.
 	if err := Run(ctx, policy, nil); err == nil {
 		t.Errorf("Retry(ctx, %+v, nil) succeded, want nil function error", policy)
@@ -114,11 +107,12 @@ func TestRetryWithResponse(t *testing.T) {
 
 func TestBackoff(t *testing.T) {
 	tests := []struct {
-		name     string
-		factor   float64
-		attempts int
-		jitter   time.Duration
-		want     []time.Duration
+		name       string
+		factor     float64
+		attempts   int
+		maxBackoff time.Duration
+		jitter     time.Duration
+		want       []time.Duration
 	}{
 		{
 			name:     "constant_backoff",
@@ -141,10 +135,18 @@ func TestBackoff(t *testing.T) {
 			jitter:   time.Duration(10),
 			want:     []time.Duration{10, 30, 90, 270},
 		},
+		{
+			name:       "exponential_backoff_3_with_max",
+			factor:     3,
+			attempts:   4,
+			maxBackoff: time.Duration(100),
+			jitter:     time.Duration(10),
+			want:       []time.Duration{10, 30, 90, 100},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			policy := Policy{MaxAttempts: tt.attempts, BackoffFactor: tt.factor, Jitter: tt.jitter}
+			policy := Policy{MaxAttempts: tt.attempts, BackoffFactor: tt.factor, Jitter: tt.jitter, MaximumBackoff: tt.maxBackoff}
 			for i := 0; i < tt.attempts; i++ {
 				if got := backoff(i, policy); got != tt.want[i] {
 					t.Errorf("backoff(%d, %+v) = %d, want %d", i, policy, got, tt.want[i])
@@ -189,5 +191,32 @@ func TestIsRetriable(t *testing.T) {
 				t.Errorf("isRetriable(%+v, %+v) = %t, want %t", tt.policy, tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestInfiniteRetry(t *testing.T) {
+	ctx := context.Background()
+	ctr := 0
+	infinite := 5
+
+	fn := func() (int, error) {
+		ctr++
+		if ctr == infinite {
+			return ctr, nil
+		}
+		return -1, fmt.Errorf("fake error")
+	}
+
+	// Infinite retry policy, MaxAttempts set to 0.
+	policy := Policy{BackoffFactor: 1, Jitter: time.Millisecond}
+	got, err := RunWithResponse(ctx, policy, fn)
+	if err != nil {
+		t.Errorf("RetryWithResponse(ctx, %+v, fn) failed unexpectedly, err: %+v", policy, err)
+	}
+	if got != infinite {
+		t.Errorf("RetryWithResponse(ctx, %+v, fn) = %d, want %d", policy, got, infinite)
+	}
+	if ctr != infinite {
+		t.Errorf("RetryWithResponse(ctx, %+v, fn) retried %d times, should've returned after %d retries", policy, ctr, infinite)
 	}
 }

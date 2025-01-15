@@ -47,6 +47,12 @@ const (
 var (
 	// Default retry policy to retry max 5 times for upto ~30 sec.
 	defaultRetrypolicy = retry.Policy{MaxAttempts: 5, Jitter: time.Second, BackoffFactor: 2}
+	// Watcher retry policy to retry indefinitely. Watcher could fail if there is
+	// no connection to ACS (network issue), could be a transient error or unable
+	// to retrieve the identity token. Default retry policy will be too frequent
+	// and will not achieve much in this case but overwhelm instance by consuming
+	// too much CPU/memory.
+	watcherRetrypolicy = retry.Policy{Jitter: time.Second * 2, BackoffFactor: 2, MaximumBackoff: time.Minute * 20}
 	// connMu protects connection.
 	connMu sync.Mutex
 	// connection is cached ACS Connection, reuse across Agent if its already set.
@@ -208,12 +214,21 @@ func Watch(ctx context.Context) (*acpb.MessageBody, error) {
 		return msg, err
 	}
 
-	msg, err := retry.RunWithResponse(ctx, defaultRetrypolicy, fn)
+	msg, err := retry.RunWithResponse(ctx, watcherRetryPolicy(ctx), fn)
 	if err != nil {
 		return nil, fmt.Errorf("unable to receive message, err: %w", err)
 	}
 
 	return msg, nil
+}
+
+func watcherRetryPolicy(ctx context.Context) retry.Policy {
+	if ctx.Value(OverrideConnection) != nil {
+		// Override max retry attempts for unit tests to avoid spending too much
+		// time waiting in retries.
+		return retry.Policy{MaxAttempts: 2, Jitter: time.Millisecond, BackoffFactor: 1}
+	}
+	return watcherRetrypolicy
 }
 
 // isNilInterface returns true if the given interface is nil or of unexpected
