@@ -6,7 +6,7 @@ PBGO_FILES = \
 
 GO_BINARIES = \
 	cmd/core_plugin/core_plugin \
-	cmd/ggactl/ggactl \
+	cmd/ggactl/ggactl_plugin_cleanup \
 	cmd/google_authorized_keys/google_authorized_keys \
 	cmd/google_guest_agent/google_guest_agent
 
@@ -43,7 +43,7 @@ print-go-env:
 
 $(GO_BINARIES): print-go-env $(PBGO_FILES)
 	$(Q)echo "[BIN] $(@)"
-	$(Q)cd $(dir $(@)) && go build -ldflags "-X main.version=$(VERSION)"
+	$(Q)cd $(dir $(@)) && go build -o $(@F) -ldflags "-X main.version=$(VERSION)"
 
 gen-pbgo: $(PBGO_FILES)
 
