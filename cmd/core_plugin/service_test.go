@@ -7,7 +7,7 @@
 //      http://www.apache.org/licenses/LICENSE-2.0
 //
 //  Unless required by applicable law or agreed to in writing, software
-//  distrbuted under the License is distributed on an "AS IS" BASIS,
+//  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
@@ -30,40 +30,29 @@ func TestHandleVMEventError(t *testing.T) {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly: %v", err)
 	}
 
-	tests := []struct {
-		desc string
-		req  string
-	}{
-		{
-			desc: "invalid_event",
-			req:  `{"Command":"VmEvent", "Event":"invalid_event"}`,
-		},
-		{
-			desc: "invalid_request",
-			req:  `{"Command":2}`,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.desc, func(t *testing.T) {
-			if err := handleVMEvent(ctx, []byte(tc.req)); err == nil {
-				t.Errorf("handleVMEvent(ctx, %s) = nil, want error", tc.req)
-			}
-		})
+	req := `{"Command":2}`
+	if err := handleVMEvent(ctx, []byte(req)); err == nil {
+		t.Errorf("handleVMEvent(ctx, %s) = nil, want error", req)
 	}
 }
 
 func TestApply(t *testing.T) {
-	ctx := context.Background()
-	ps := &PluginServer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	pluginServer = &PluginServer{cancel: cancel}
+	t.Cleanup(func() {
+		pluginServer = nil
+		cancel()
+	})
+
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly: %v", err)
 	}
 
 	tests := []struct {
-		desc    string
-		req     string
-		wantErr bool
+		desc          string
+		req           string
+		wantErr       bool
+		cancelContext bool
 	}{
 		{
 			desc:    "invalid_request",
@@ -76,8 +65,13 @@ func TestApply(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			desc: "valid_request",
-			req:  `{"Command":"VmEvent", "Event":"invalid_event"}`,
+			desc: "valid_request_nothandled",
+			req:  `{"Command":"VmEvent", "Event":"startup"}`,
+		},
+		{
+			desc:          "valid_request",
+			req:           `{"Command":"VmEvent", "Event":"shutdown"}`,
+			cancelContext: true,
 		},
 	}
 
@@ -87,9 +81,14 @@ func TestApply(t *testing.T) {
 			req := &pb.ApplyRequest{
 				Data: &apb.Any{Value: reqBytes},
 			}
-			_, err := ps.Apply(ctx, req)
+			_, err := pluginServer.Apply(ctx, req)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("Apply(ctx, %s) = error %v, want error %t", tc.req, err, tc.wantErr)
+			}
+
+			ctxClosed := (ctx.Err() != nil)
+			if tc.cancelContext != ctxClosed {
+				t.Errorf("Apply(ctx, %s) = context closed %t, want %t", tc.req, ctxClosed, tc.cancelContext)
 			}
 		})
 	}
