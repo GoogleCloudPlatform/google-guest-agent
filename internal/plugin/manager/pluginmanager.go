@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/boundedlist"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"google.golang.org/protobuf/proto"
 	tpb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -124,6 +125,15 @@ func init() {
 
 func (m *PluginManager) cleanupOldState(ctx context.Context, path string) error {
 	re := regexp.MustCompile("^[0-9]+$")
+
+	if !file.Exists(path, file.TypeDir) {
+		// This is not an error, it just means there's nothing to clean up, which
+		// can happen if the agent is started for the first time or plugins were
+		// never installed.
+		galog.Debugf("Plugin state directory %q does not exist, skipping cleanup", path)
+		return nil
+	}
+
 	dirs, err := os.ReadDir(path)
 	if err != nil {
 		return fmt.Errorf("failed to read directory %q: %w", path, err)

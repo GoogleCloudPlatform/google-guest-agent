@@ -1282,4 +1282,9 @@ func TestCleanupOldState(t *testing.T) {
 			}
 		})
 	}
+
+	nonExistingDir := filepath.Join(state, "non-existing-dir")
+	if err := pm.cleanupOldState(context.Background(), nonExistingDir); err != nil {
+		t.Errorf("cleanupOldState(ctx, %s) failed unexpectedly with error: %v, want nil for non-existing directory", nonExistingDir, err)
+	}
 }
