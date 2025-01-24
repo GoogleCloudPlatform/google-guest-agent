@@ -24,7 +24,6 @@ import (
 	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/metadatascriptrunner"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/early"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/late"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
@@ -44,6 +43,9 @@ const (
 	initStatusRequest = "early-initialization"
 )
 
+// pluginServer is the core plugin server that implements the plugin interface.
+var pluginServer *PluginServer
+
 // initPluginServer initializes the core plugin server and starts serving
 // requests from Guest Agent.
 func initPluginServer() error {
@@ -55,12 +57,12 @@ func initPluginServer() error {
 
 	// This is the grpc server in communication with the Guest Agent.
 	server := grpc.NewServer()
-	ps := &PluginServer{server: server}
+	pluginServer = &PluginServer{server: server}
 
 	// Successfully registering the server and starting to listen on the address
 	// offered mean Guest Agent was successful in installing/launching the plugin
 	// & will manage the lifecycle (start, stop, or revision change) here onwards.
-	pb.RegisterGuestAgentPluginServer(server, ps)
+	pb.RegisterGuestAgentPluginServer(server, pluginServer)
 
 	if err := server.Serve(listener); err != nil {
 		return fmt.Errorf("cannot continue serving on %q: %v", address, err)
@@ -140,10 +142,17 @@ func handleVMEvent(ctx context.Context, req []byte) error {
 	if err := json.Unmarshal(req, evReq); err != nil {
 		return fmt.Errorf("unmarshal VM event request: %w", err)
 	}
-	galog.Infof("Executing metadata script runner: %+v", evReq)
-	if err := metadatascriptrunner.Run(ctx, metadata.New(), evReq.Event); err != nil {
-		return fmt.Errorf("run metadata script script runner for %+v: %w", evReq, err)
+
+	// Handling shutdown event would allow for a graceful shutdown of the core
+	// plugin.
+	if evReq.Event != "shutdown" {
+		galog.Debugf("Ignoring VM event %q", evReq.Event)
+		return nil
 	}
+
+	galog.Infof("Shutdown event received, shutting down core plugin...")
+	// Stop response is always empty and error is nil so ignore it.
+	pluginServer.Stop(ctx, &pb.StopRequest{Cleanup: false})
 	return nil
 }
 
@@ -169,16 +178,9 @@ func (ps *PluginServer) Apply(ctx context.Context, msg *pb.ApplyRequest) (*pb.Ap
 
 	switch req.Command {
 	case manager.VMEventCmd:
-		// Handling VM events involves launching Metadata Scripts that operates
-		// outside the request's scope. A separate context is created to allow them
-		// to run without any restrictions.
-		pCtx, cancel := context.WithCancel(context.Background())
-		go func() {
-			defer cancel()
-			if err := handleVMEvent(pCtx, msg.GetData().GetValue()); err != nil {
-				galog.Errorf("Failed to handle VM event: %v", err)
-			}
-		}()
+		if err := handleVMEvent(ctx, msg.GetData().GetValue()); err != nil {
+			galog.Errorf("Failed to handle VM event: %v", err)
+		}
 		return resp, nil
 	default:
 		return resp, status.Errorf(1, "unsupported command: %q", req.Command)
