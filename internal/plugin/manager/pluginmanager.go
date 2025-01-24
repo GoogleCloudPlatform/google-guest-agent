@@ -17,6 +17,7 @@ package manager
 import (
 	"context"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -228,6 +229,55 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 		pluginManager.protocol = udsProtocol
 	}
 	return pluginManager, nil
+}
+
+// RemoveAllDynamicPlugins generates a request and triggers plugin manager to
+// remove all dynamic plugins on the host.
+func (m *PluginManager) RemoveAllDynamicPlugins(ctx context.Context) error {
+	var reqs []*acpb.ConfigurePluginStates_ConfigurePlugin
+	galog.Infof("Removing all dynamic plugins")
+
+	for _, p := range m.list() {
+		if p.PluginType == PluginTypeCore {
+			galog.Debugf("Skipping core plugin %q, it will be removed by package manager", p.Name)
+			continue
+		}
+
+		req := &acpb.ConfigurePluginStates_ConfigurePlugin{
+			Action: acpb.ConfigurePluginStates_REMOVE,
+			Plugin: &acpb.ConfigurePluginStates_Plugin{
+				Name:       p.Name,
+				RevisionId: p.Revision,
+			},
+		}
+
+		reqs = append(reqs, req)
+	}
+
+	errChan := make(chan error, len(reqs))
+	wg := sync.WaitGroup{}
+
+	for _, req := range reqs {
+		wg.Add(1)
+		go func(req *acpb.ConfigurePluginStates_ConfigurePlugin) {
+			defer wg.Done()
+			err := m.removePlugin(ctx, req)
+			errChan <- err
+			galog.Infof("Remove plugin %q (revision %q) completed with error: [%v]", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId(), err)
+		}(req)
+	}
+
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
+
+	var errs error
+	for err := range errChan {
+		errs = errors.Join(errs, err)
+	}
+
+	return errs
 }
 
 // ListPluginStates returns the plugin states and cached health check

@@ -16,7 +16,6 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -844,29 +843,7 @@ func TestRemovePlugin(t *testing.T) {
 		t.Fatalf("removePlugin(ctx, %+v) failed unexpectedly with error: %v", req, err)
 	}
 
-	if _, err := os.Stat(addr); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("removePlugin(ctx, %+v) did not cleanup previous state, file %q still exists, err: %v", req, addr, err)
-	}
-
-	if _, err := os.Stat(entryPoint); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("removePlugin(ctx, %+v) did not cleanup previous state, file %q still exists, err: %v", req, entryPoint, err)
-	}
-
-	if pm.plugins[req.Plugin.Name] != nil {
-		t.Errorf("removePlugin(ctx, %+v) = %+v, did not update plugin map, want nil", req, pm.plugins[req.Plugin.Name])
-	}
-
-	if _, ok := pm.pluginMonitors[plugin.FullName()]; ok {
-		t.Errorf("removePlugin(ctx, %+v) did not remove plugin monitor from map for plugin %s", req, plugin.Name)
-	}
-
-	if ctc.seenName != plugin.FullName() {
-		t.Errorf("removePlugin(ctx, %+v) did not remove constraints for plugin %s, got %s", req, plugin.FullName(), ctc.seenName)
-	}
-
-	if file.Exists(plugin.stateDir(), file.TypeDir) {
-		t.Errorf("removePlugin(ctx, %+v) did not remove state directory %s", req, plugin.stateDir())
-	}
+	validatePluginRemoved(t, plugin, pm, ctc)
 }
 
 func TestMonitoring(t *testing.T) {
@@ -1286,5 +1263,86 @@ func TestCleanupOldState(t *testing.T) {
 	nonExistingDir := filepath.Join(state, "non-existing-dir")
 	if err := pm.cleanupOldState(context.Background(), nonExistingDir); err != nil {
 		t.Errorf("cleanupOldState(ctx, %s) failed unexpectedly with error: %v, want nil for non-existing directory", nonExistingDir, err)
+	}
+}
+
+func validatePluginRemoved(t *testing.T, plugin *Plugin, pm *PluginManager, ctc *testConstraintClient) {
+	t.Helper()
+
+	tests := []struct {
+		name  string
+		path  string
+		fType file.Type
+	}{
+		{name: "state-dir", path: plugin.stateDir(), fType: file.TypeDir},
+		{name: "state-file", path: plugin.stateFile(), fType: file.TypeFile},
+		{name: "install-dir", path: plugin.InstallPath, fType: file.TypeDir},
+		{name: "err-log-file", path: plugin.logfile(), fType: file.TypeFile},
+		{name: "socket-address-file", path: plugin.Address, fType: file.TypeFile},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := file.Exists(tc.path, tc.fType); got {
+				t.Errorf("Remove Plugin for %s did not remove file %q, got %t, want false", plugin.FullName(), tc.path, got)
+			}
+		})
+	}
+
+	if got := pm.plugins[plugin.Name]; got != nil {
+		t.Errorf("Remove Plugin for %s did not remove plugin from map, got %+v", plugin.FullName(), got)
+	}
+
+	if _, ok := pm.pluginMonitors[plugin.FullName()]; ok {
+		t.Errorf("Remove Plugin for %s did not remove plugin monitor from map", plugin.FullName())
+	}
+
+	if ctc.seenName != plugin.FullName() {
+		t.Errorf("Remove Plugin did not remove constraints for plugin %s, got %s", plugin.FullName(), ctc.seenName)
+	}
+}
+
+func TestRemoveAllDynamicPlugins(t *testing.T) {
+	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+	connections := t.TempDir()
+	state := t.TempDir()
+	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\n[Core]\nacs_client = false", state)
+	if err := cfg.Load([]byte(tmp)); err != nil {
+		t.Fatalf("cfg.Load(%s) failed unexpectedly with error: %v", tmp, err)
+	}
+	ctc := setupConstraintTestClient(t)
+	cfg.Retrieve().Plugin.SocketConnectionsDir = connections
+
+	addr := filepath.Join(connections, "PluginA_RevisionA.sock")
+	ps := &testPluginServer{ctrs: make(map[string]int)}
+	startTestServer(t, ps, udsProtocol, addr)
+
+	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
+	createTestFile(t, entryPoint)
+
+	corePlugin := &Plugin{Name: "CorePlugin", Revision: "RevisionA", InstallPath: t.TempDir(), PluginType: PluginTypeCore}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
+	if err := plugin.Connect(ctx); err != nil {
+		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
+	}
+
+	if err := os.MkdirAll(plugin.stateDir(), 0755); err != nil {
+		t.Fatalf("os.MkdirAll(%s) failed unexpectedly with error: %v", plugin.stateDir(), err)
+	}
+
+	s := scheduler.Instance()
+	t.Cleanup(s.Stop)
+
+	pm := &PluginManager{plugins: map[string]*Plugin{plugin.Name: plugin, corePlugin.Name: corePlugin}, protocol: udsProtocol, pluginMonitors: make(map[string]string), scheduler: s}
+	pm.pluginMonitors[plugin.FullName()] = "test-monitor"
+	if err := pm.RemoveAllDynamicPlugins(ctx); err != nil {
+		t.Fatalf("RemoveAllDynamicPlugins(ctx) failed unexpectedly with error: %v", err)
+	}
+
+	validatePluginRemoved(t, plugin, pm, ctc)
+
+	// Core plugin should not be removed.
+	if pm.plugins[corePlugin.Name] == nil {
+		t.Errorf("RemoveAllDynamicPlugins(ctx) removed core plugin %s", corePlugin.Name)
 	}
 }
