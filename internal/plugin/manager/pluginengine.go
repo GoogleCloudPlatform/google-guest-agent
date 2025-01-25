@@ -220,6 +220,20 @@ func (p *Plugin) FullName() string {
 	return fmt.Sprintf("%s_%s", p.Name, p.Revision)
 }
 
+// setPid sets the current plugin process id.
+func (p *Plugin) setPid(pid int) {
+	p.RuntimeInfo.pidMu.Lock()
+	defer p.RuntimeInfo.pidMu.Unlock()
+	p.RuntimeInfo.Pid = pid
+}
+
+// pid returns the current plugin process id.
+func (p *Plugin) pid() int {
+	p.RuntimeInfo.pidMu.RLock()
+	defer p.RuntimeInfo.pidMu.RUnlock()
+	return p.RuntimeInfo.Pid
+}
+
 // setState sets the plugin status.
 func (p *Plugin) setState(s acmpb.CurrentPluginStates_DaemonPluginState_StatusValue) {
 	p.RuntimeInfo.statusMu.Lock()

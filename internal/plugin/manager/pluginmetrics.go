@@ -74,10 +74,7 @@ func (p *PluginMetrics) Run(ctx context.Context) (bool, error) {
 		return true, fmt.Errorf("plugin %q found in state %v, skipping metric collection", p.plugin.FullName(), currentState)
 	}
 
-	p.plugin.RuntimeInfo.pidMu.RLock()
-	pid := p.plugin.RuntimeInfo.Pid
-	p.plugin.RuntimeInfo.pidMu.RUnlock()
-
+	pid := p.plugin.pid()
 	if pid == 0 {
 		// Stop metric collection if pid found as 0. This can happen if the plugin
 		// is being stopped/removed and previous scheduled metric collection job

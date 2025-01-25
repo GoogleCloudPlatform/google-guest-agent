@@ -232,6 +232,10 @@ func TestLauncherStep(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				plugin.setState(acmpb.CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED)
+			})
+
 			cfg.Retrieve().Plugin.StateDir = stateDir
 			cfg.Retrieve().Plugin.SocketConnectionsDir = filepath.Dir(addr)
 			plugin.InstallPath = tc.path
@@ -244,6 +248,10 @@ func TestLauncherStep(t *testing.T) {
 			err := step.Run(ctx, plugin)
 			if (err != nil) != tc.shouldFail {
 				t.Errorf("launchStep.Run(ctx, %+v) = error: %v, want error: %t", plugin, err, tc.shouldFail)
+			}
+
+			if got := plugin.State(); got != tc.status {
+				t.Errorf("launchStep.Run(ctx, %+v) = plugin state %s, want %s", plugin, got, tc.status)
 			}
 
 			// Test state was stored on successful run.
