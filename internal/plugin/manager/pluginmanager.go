@@ -574,7 +574,7 @@ func (m *PluginManager) runlaunchPluginSteps(ctx context.Context, plugin *Plugin
 		sendEvent(ctx, plugin, acpb.PluginEventMessage_PLUGIN_INSTALL_FAILED, fmt.Sprintf("Failed to install plugin: %v", err))
 		// If the installation fails, try cleaning up the process to prevent
 		// potential conflicts or errors that unmanaged processes could cause.
-		if err := ps.KillProcess(plugin.RuntimeInfo.Pid, ps.KillModeNoWait); err != nil {
+		if err := ps.KillProcess(plugin.pid(), ps.KillModeNoWait); err != nil {
 			// Just log the error, process might have crashed, already exited or not
 			// successfully launched at all.
 			galog.Warnf("Stop plugin %q finished with error: %v", plugin.FullName(), err)
@@ -642,14 +642,16 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin) error {
 	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_REMOVE, "Received request to remove a plugin.")
 
+	// Stop all schedulers running on the plugin so it doesn't interfere with the
+	// stop process.
+	m.stopMonitoring(p)
+	m.stopMetricsMonitoring(p)
+
 	if err := p.runSteps(ctx, []Step{&stopStep{cleanup: true}}); err != nil {
 		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_REMOVE_FAILED, fmt.Sprintf("Failed to remove plugin: %v", err))
 		return fmt.Errorf("unable to remove plugin %q: %w", p.FullName(), err)
 	}
 
-	// Stop all schedulers running on the plugin.
-	m.stopMonitoring(p)
-	m.stopMetricsMonitoring(p)
 	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_REMOVED, "Successfully removed the plugin.")
 	m.delete(p.Name)
 
