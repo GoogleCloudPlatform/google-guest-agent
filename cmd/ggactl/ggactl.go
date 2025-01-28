@@ -24,8 +24,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/coreplugin"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/guestagent"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/plugincleanup"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/spf13/cobra"
@@ -41,12 +40,12 @@ const (
 // subcommands.
 func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "ggactl",
-		Short: "Guest Agent CLI",
-		Long:  "Guest Agent CLI for communicating over command monitor.",
+		Use:   "ggactl_plugin_cleanup",
+		Short: "Guest Agent CLI for plugin cleanup.",
+		Long:  "Guest Agent CLI for removing all dynamic plugins.",
 	}
 
-	root.AddCommand(guestagent.New(), coreplugin.New())
+	root.AddCommand(plugincleanup.New())
 
 	return root
 }
@@ -64,6 +63,7 @@ func main() {
 		LogToStderr:       true,
 		LogToCloudLogging: true,
 		Level:             cfg.Retrieve().Core.LogLevel,
+		LogFile:           cfg.Retrieve().Core.LogFile,
 	}
 
 	if err := logger.Init(ctx, logOpts); err != nil {
