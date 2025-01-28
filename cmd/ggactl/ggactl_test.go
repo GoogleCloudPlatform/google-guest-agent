@@ -16,31 +16,29 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/plugincleanup"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/testhelper"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 )
 
 func TestNewRootCommand(t *testing.T) {
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), plugincleanup.TestOverrideKey, true)
 	cmd := newRootCommand()
 
-	if cmd.Name() != "ggactl" {
-		t.Errorf("newRootCommand.Name = %s, want ggactl", cmd.Name())
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly: %v", err)
 	}
 
-	if len(cmd.Commands()) != 2 {
-		t.Errorf("newRootCommand.Commands() = %d, want 2", len(cmd.Commands()))
+	if cmd.Name() != "ggactl_plugin_cleanup" {
+		t.Errorf("newRootCommand.Name = %s, want ggactl_plugin_cleanup", cmd.Name())
 	}
 
-	resp := command.Response{Status: 200, StatusMessage: "Success"}
-	respBytes, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("json.Marshal(%+v) failed, %v", resp, err)
+	if len(cmd.Commands()) != 1 {
+		t.Errorf("newRootCommand.Commands() = %d, want 1", len(cmd.Commands()))
 	}
 
 	tests := []struct {
@@ -51,32 +49,14 @@ func TestNewRootCommand(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "guestagent_send",
-			args:    []string{"guestagent", "send", `{"Command":"echo"}`},
-			lis:     command.ListenerGuestAgent,
-			want:    string(respBytes),
-			handler: &testhelper.CommandHandler{Cmd: "echo", SendResp: respBytes},
-		},
-		{
-			name:    "guestagent_vmevent",
-			args:    []string{"guestagent", "vmevent", "startup"},
-			lis:     command.ListenerGuestAgent,
-			want:    "startup success",
-			handler: &testhelper.CommandHandler{Cmd: manager.VMEventCmd, SendResp: []byte("startup success")},
-		},
-		{
-			name:    "coreplugin_send",
-			args:    []string{"coreplugin", "send", `{"Command":"echo"}`},
-			lis:     command.ListenerCorePlugin,
-			want:    string(respBytes),
-			handler: &testhelper.CommandHandler{Cmd: "echo", SendResp: respBytes},
+			name: "plugin_cleanup_all",
+			args: []string{"all"},
+			want: "",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testhelper.SetupCommandMonitor(ctx, t, test.lis, test.handler)
-
 			got, err := testhelper.ExecuteCommand(ctx, cmd, test.args)
 			if err != nil {
 				t.Fatalf("testhelper.ExecuteCommand(%s, %v) failed unexpectedly: %v", cmd.Name(), test.args, err)
