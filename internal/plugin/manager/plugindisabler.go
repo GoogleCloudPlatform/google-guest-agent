@@ -50,9 +50,10 @@ func (ss *stopStep) ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_St
 }
 
 func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
-	proc, err := ps.FindPid(p.RuntimeInfo.Pid)
+	pluginPid := p.pid()
+	proc, err := ps.FindPid(pluginPid)
 	if err != nil {
-		return fmt.Errorf("%q plugin process(%d) not found: %w", p.FullName(), p.RuntimeInfo.Pid, err)
+		return fmt.Errorf("%q plugin process(%d) not found: %w", p.FullName(), pluginPid, err)
 	}
 
 	// If plugin is not running, we can skip the stop RPC.
@@ -60,7 +61,7 @@ func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 	// stop and kill the plugin process.
 
 	if proc.Exe != p.EntryPath {
-		galog.Infof("Plugin PID (%d) is being reused by a different process running from (%q) different from expected binary(%q), skipping stop RPC", p.RuntimeInfo.Pid, proc.Exe, p.EntryPath)
+		galog.Infof("Plugin PID (%d) is being reused by a different process running from (%q) different from expected binary(%q), skipping stop RPC", pluginPid, proc.Exe, p.EntryPath)
 		return nil
 	}
 
@@ -69,8 +70,8 @@ func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 	}
 
 	// Make sure plugin process exited by attempting to kill.
-	if err := ps.KillProcess(p.RuntimeInfo.Pid, ps.KillModeWait); err != nil {
-		return fmt.Errorf("kill %s plugin process (%d) completed with error: %v", p.FullName(), p.RuntimeInfo.Pid, err)
+	if err := ps.KillProcess(pluginPid, ps.KillModeWait); err != nil {
+		return fmt.Errorf("kill %s plugin process (%d) completed with error: %v", p.FullName(), pluginPid, err)
 	}
 
 	sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_STOPPED, "Successfully stopped the plugin.")
@@ -81,7 +82,7 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 	if err := ss.stopPlugin(ctx, p); err != nil {
 		// Its unlikely for kill to fail as process is running as root and is a best
 		// effort. Just log the error for debugging in-case it happens.
-		galog.Infof("Kill %s plugin process (%d) completed with: %v", p.FullName(), p.RuntimeInfo.Pid, err)
+		galog.Infof("Kill %s plugin process completed with: %v", p.FullName(), err)
 	}
 
 	if p.client != nil {
@@ -94,9 +95,7 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 
 	// Reset the plugin client and process PID.
 	p.client = nil
-	p.RuntimeInfo.pidMu.Lock()
-	p.RuntimeInfo.Pid = 0
-	p.RuntimeInfo.pidMu.Unlock()
+	p.setPid(0)
 
 	// Cleanup is set to true only on plugin removal.
 	if ss.cleanup {

@@ -119,20 +119,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 			return fmt.Errorf("failed to launch plugin from %q: %w", p.EntryPath, err)
 		}
 
-		p.RuntimeInfo.Pid = res.Pid
-		return nil
-	}
-
-	constraintFunc := func() error {
-		constraint := resource.Constraint{
-			PID:            p.RuntimeInfo.Pid,
-			Name:           p.FullName(),
-			MaxMemoryUsage: p.Manifest.MaxMemoryUsage,
-			MaxCPUUsage:    p.Manifest.MaxCPUUsage,
-		}
-		if err := resource.Apply(constraint); err != nil {
-			return err
-		}
+		p.setPid(res.Pid)
 		return nil
 	}
 
@@ -143,6 +130,21 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 		return err
 	}
 
+	pluginPid := p.pid()
+
+	constraintFunc := func() error {
+		constraint := resource.Constraint{
+			PID:            pluginPid,
+			Name:           p.FullName(),
+			MaxMemoryUsage: p.Manifest.MaxMemoryUsage,
+			MaxCPUUsage:    p.Manifest.MaxCPUUsage,
+		}
+		if err := resource.Apply(constraint); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	// Apply resource constraint.
 	if err := retry.Run(ctx, policy, constraintFunc); err != nil {
 		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to apply resource constraint: [%v]", err))
@@ -150,7 +152,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 		return err
 	}
 
-	galog.Debugf("Launched a plugin process from %q with pid %d", p.EntryPath, p.RuntimeInfo.Pid)
+	galog.Debugf("Launched a plugin process from %q with pid %d", p.EntryPath, pluginPid)
 
 	if err := p.Connect(ctx); err != nil {
 		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
