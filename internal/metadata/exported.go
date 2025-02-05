@@ -448,6 +448,11 @@ func (attr *Attributes) EnableDiagnostics() *bool {
 	return attr.internal.EnableDiagnostics
 }
 
+// EnableCorePlugin returns the attributes enable core plugin.
+func (attr *Attributes) EnableCorePlugin() *bool {
+	return attr.internal.EnableCorePlugin
+}
+
 // EnableWSFC returns the attributes enable wsfc.
 func (attr *Attributes) EnableWSFC() *bool {
 	return attr.internal.EnableWSFC
