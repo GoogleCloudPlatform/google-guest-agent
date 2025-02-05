@@ -53,6 +53,10 @@ func (p *Plugin) buildStartRequest(ctx context.Context) (*pb.StartRequest, error
 		Config: &pb.StartRequest_Config{StateDirectoryPath: p.stateDir()},
 	}
 
+	if p.Manifest.StartConfig == nil {
+		return req, nil
+	}
+
 	// Start config is optional and may not be present.
 	if len(p.Manifest.StartConfig.Simple) != 0 {
 		req.ServiceConfig = &pb.StartRequest_StringConfig{StringConfig: p.Manifest.StartConfig.Simple}

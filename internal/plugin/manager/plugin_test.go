@@ -396,6 +396,13 @@ func TestBuildStartRequest(t *testing.T) {
 				Config: &pb.StartRequest_Config{StateDirectoryPath: stateDir},
 			},
 		},
+		{
+			name:   "nil_cfg",
+			plugin: &Plugin{Name: pluginName, Manifest: &Manifest{}},
+			want: &pb.StartRequest{
+				Config: &pb.StartRequest_Config{StateDirectoryPath: stateDir},
+			},
+		},
 	}
 
 	for _, test := range tests {
