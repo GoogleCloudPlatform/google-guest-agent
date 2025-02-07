@@ -12,13 +12,14 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-// Package systemd provides utilities for interacting with systemd.
-package systemd
+// Package daemon provides utilities for interacting with daemon services, for
+// linux it uses systemd and for windows it uses service control manager.
+package daemon
 
 import "context"
 
 // Client is the client for interacting with systemd.
-var Client ClientInterface = systemdClient{}
+var Client ClientInterface
 
 // RestartMethod is a method with which to restart a service.
 type RestartMethod int
@@ -47,12 +48,15 @@ type ClientInterface interface {
 	ReloadDaemon(ctx context.Context, daemon string) error
 	// UnitStatus returns the status of a systemd unit.
 	UnitStatus(ctx context.Context, unit string) (ServiceStatus, error)
+	// StopDaemon stops a daemon service.
+	StopDaemon(ctx context.Context, daemon string) error
+	// StartDaemon starts a daemon service.
+	StartDaemon(ctx context.Context, daemon string) error
 }
 
-// systemdClient is the default implementation of ClientInterface.
-type systemdClient struct{}
-
-// RestartService restarts a systemd service.
+// RestartService restarts a systemd service. RestartMethod is applicable only
+// to linux. Windows does not support restart methods and ignores the method
+// parameter.
 func RestartService(ctx context.Context, service string, method RestartMethod) error {
 	return Client.RestartService(ctx, service, method)
 }
@@ -70,4 +74,14 @@ func ReloadDaemon(ctx context.Context, daemon string) error {
 // UnitStatus returns the status of a systemd unit.
 func UnitStatus(ctx context.Context, unit string) (ServiceStatus, error) {
 	return Client.UnitStatus(ctx, unit)
+}
+
+// StopDaemon stops a daemon service.
+func StopDaemon(ctx context.Context, daemon string) error {
+	return Client.StopDaemon(ctx, daemon)
+}
+
+// StartDaemon starts a daemon service.
+func StartDaemon(ctx context.Context, daemon string) error {
+	return Client.StartDaemon(ctx, daemon)
 }

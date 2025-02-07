@@ -33,8 +33,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/systemd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ini"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/regex"
@@ -72,13 +72,13 @@ func (sn *Module) IsManaging(ctx context.Context, opts *service.Options) (bool, 
 	}
 
 	// First check if the service is running.
-	status, err := systemd.UnitStatus(ctx, "systemd-networkd.service")
+	status, err := daemon.UnitStatus(ctx, "systemd-networkd.service")
 	if err != nil {
 		return false, fmt.Errorf("error checking systemd-networkd service status: %w", err)
 	}
 
 	// If the service is not running, we don't need to check the interface.
-	if status != systemd.Active {
+	if status != daemon.Active {
 		return false, nil
 	}
 

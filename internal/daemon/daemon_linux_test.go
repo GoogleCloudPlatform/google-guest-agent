@@ -14,7 +14,7 @@
 
 //go:build linux
 
-package systemd
+package daemon
 
 import (
 	"context"
@@ -139,7 +139,7 @@ func TestReloadDaemon(t *testing.T) {
 	}{
 		{
 			name:         "reload",
-			expectedArgs: []string{"reload-daemon", "test"},
+			expectedArgs: []string{"daemon-reload", "test"},
 			wantErr:      false,
 		},
 		{
@@ -290,6 +290,96 @@ func TestUnitStatus(t *testing.T) {
 
 			if diff := cmp.Diff(test.expectedArgs, args[0]); diff != "" {
 				t.Errorf("UnitStatus(ctx, \"test\") = %v, want %v", args[0], test.expectedArgs)
+			}
+		})
+	}
+}
+
+func TestStopDaemon(t *testing.T) {
+	tests := []struct {
+		name         string
+		expectedArgs []string
+		wantErr      bool
+	}{
+		{
+			name:         "stop",
+			expectedArgs: []string{"stop", "test"},
+			wantErr:      false,
+		},
+		{
+			name:    "error",
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testRunner := setupTestRunner(t, test.wantErr, "")
+			client := systemdClient{}
+			err := client.StopDaemon(context.Background(), "test")
+			if (err == nil) == test.wantErr {
+				t.Fatalf("StopDaemon(ctx, test) = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr {
+				return
+			}
+
+			args, found := testRunner.seenCommand["systemctl"]
+			if !found {
+				t.Fatalf("StopDaemon(ctx, test) did not call systemctl")
+			}
+
+			if len(args) != 1 {
+				t.Fatalf("StopDaemon(ctx, test) = %v, want 1 command", args)
+			}
+
+			if diff := cmp.Diff(test.expectedArgs, args[0]); diff != "" {
+				t.Errorf("StopDaemon(ctx, test) = %v, want %v", args[0], test.expectedArgs)
+			}
+		})
+	}
+}
+
+func TestStartDaemon(t *testing.T) {
+	tests := []struct {
+		name         string
+		expectedArgs []string
+		wantErr      bool
+	}{
+		{
+			name:         "start",
+			expectedArgs: []string{"start", "test"},
+			wantErr:      false,
+		},
+		{
+			name:    "error",
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testRunner := setupTestRunner(t, test.wantErr, "")
+			client := systemdClient{}
+			err := client.StartDaemon(context.Background(), "test")
+			if (err == nil) == test.wantErr {
+				t.Fatalf("StartDaemon(ctx, test) = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr {
+				return
+			}
+
+			args, found := testRunner.seenCommand["systemctl"]
+			if !found {
+				t.Fatalf("StartDaemon(ctx, test) did not call systemctl")
+			}
+
+			if len(args) != 1 {
+				t.Fatalf("StartDaemon(ctx, test) = %v, want 1 command", args)
+			}
+
+			if diff := cmp.Diff(test.expectedArgs, args[0]); diff != "" {
+				t.Errorf("StartDaemon(ctx, test) = %v, want %v", args[0], test.expectedArgs)
 			}
 		})
 	}

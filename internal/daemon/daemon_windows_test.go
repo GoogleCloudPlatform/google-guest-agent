@@ -14,7 +14,7 @@
 
 //go:build windows
 
-package systemd
+package daemon
 
 import (
 	"context"
@@ -39,8 +39,24 @@ func TestReloadDaemon(t *testing.T) {
 	}
 }
 
-func TestUnitStatus(t *testing.T) {
-	if _, err := UnitStatus(context.Background(), "test"); err == nil {
-		t.Errorf("UnitStatus(ctx, \"test\") = nil, want err")
+func TestWinServiceClient(t *testing.T) {
+	svc := winServiceClient{}
+	ctx := context.Background()
+	unit := "w32time"
+
+	if err := svc.StopDaemon(ctx, unit); err != nil {
+		t.Errorf("StopDaemon(ctx, w32time) = %v, want nil", err)
+	}
+
+	if err := svc.StartDaemon(ctx, unit); err != nil {
+		t.Errorf("StartDaemon(ctx, w32time) = %v, want nil", err)
+	}
+
+	status, err := svc.UnitStatus(ctx, unit)
+	if err != nil {
+		t.Errorf("UnitStatus(ctx, w32time) = %v, want nil", err)
+	}
+	if status != Active {
+		t.Errorf("UnitStatus(ctx, w32time) status = %v, want Active", status)
 	}
 }

@@ -29,11 +29,11 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/systemd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
@@ -102,14 +102,14 @@ var (
 	// defaultServices are the services to restart after configuration changes.
 	// Each sub-array of the map indicates that only one of those services need to
 	// be successfully restarted.
-	defaultServices = map[systemd.RestartMethod][]serviceRestartConfig{
-		systemd.ReloadOrRestart: []serviceRestartConfig{
+	defaultServices = map[daemon.RestartMethod][]serviceRestartConfig{
+		daemon.ReloadOrRestart: []serviceRestartConfig{
 			{
 				protocol: serviceRestartAtLeastOne,
 				services: []string{"ssh", "sshd"},
 			},
 		},
-		systemd.TryRestart: []serviceRestartConfig{
+		daemon.TryRestart: []serviceRestartConfig{
 			{
 				protocol: serviceRestartOptional,
 				services: []string{"nscd", "unscd"},
@@ -179,7 +179,7 @@ type osloginModule struct {
 	// command binaries (in the security key case/variation).
 	authorizedKeysCommandSKPaths []string
 	// services is a map of restart methods to the services to restart.
-	services map[systemd.RestartMethod][]serviceRestartConfig
+	services map[daemon.RestartMethod][]serviceRestartConfig
 	// osloginDirs are the directories to create for OSLogin, if necessary.
 	osloginDirs []string
 	// sudoers is the path to the sudoers file.
@@ -639,14 +639,14 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 			// restarted.
 			var passed bool
 			for _, service := range serviceConfig.services {
-				if found, err := systemd.CheckUnitExists(ctx, service); !found {
+				if found, err := daemon.CheckUnitExists(ctx, service); !found {
 					if err != nil {
 						galog.Errorf("failed to check if service %s exists: %v", service, err)
 					}
 					continue
 				}
 
-				if err := systemd.RestartService(ctx, service, method); err != nil {
+				if err := daemon.RestartService(ctx, service, method); err != nil {
 					galog.Errorf("failed to restart service %s: %v", service, err)
 					continue
 				}

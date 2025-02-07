@@ -27,10 +27,10 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/systemd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"github.com/google/go-cmp/cmp"
@@ -638,8 +638,8 @@ func TestDisableOSLoginErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			module := createTestModule(t)
-			module.services = map[systemd.RestartMethod][]serviceRestartConfig{
-				systemd.TryRestart: {
+			module.services = map[daemon.RestartMethod][]serviceRestartConfig{
+				daemon.TryRestart: {
 					{
 						services: []string{"service1"},
 					},
@@ -839,19 +839,19 @@ func TestSetupGroup(t *testing.T) {
 }
 
 func TestRestartServices(t *testing.T) {
-	unknownMethod := systemd.RestartMethod(50)
+	unknownMethod := daemon.RestartMethod(50)
 
 	tests := []struct {
 		name            string
 		returnErr       bool
-		services        map[systemd.RestartMethod][]serviceRestartConfig
+		services        map[daemon.RestartMethod][]serviceRestartConfig
 		expectedCommand string
 		expectedArgs    []string
 	}{
 		{
 			name: "restart",
-			services: map[systemd.RestartMethod][]serviceRestartConfig{
-				systemd.TryRestart: {
+			services: map[daemon.RestartMethod][]serviceRestartConfig{
+				daemon.TryRestart: {
 					{
 						services: []string{"service1"},
 					},
@@ -862,8 +862,8 @@ func TestRestartServices(t *testing.T) {
 		},
 		{
 			name: "reload_restart",
-			services: map[systemd.RestartMethod][]serviceRestartConfig{
-				systemd.ReloadOrRestart: {
+			services: map[daemon.RestartMethod][]serviceRestartConfig{
+				daemon.ReloadOrRestart: {
 					{
 						services: []string{"service1"},
 					},
@@ -875,8 +875,8 @@ func TestRestartServices(t *testing.T) {
 		{
 			name:      "error",
 			returnErr: true,
-			services: map[systemd.RestartMethod][]serviceRestartConfig{
-				systemd.TryRestart: {
+			services: map[daemon.RestartMethod][]serviceRestartConfig{
+				daemon.TryRestart: {
 					{
 						services: []string{"service1"},
 					},
@@ -886,7 +886,7 @@ func TestRestartServices(t *testing.T) {
 		{
 			name:      "unknown_method",
 			returnErr: true,
-			services: map[systemd.RestartMethod][]serviceRestartConfig{
+			services: map[daemon.RestartMethod][]serviceRestartConfig{
 				unknownMethod: {
 					{
 						services: []string{"service1"},
@@ -1008,7 +1008,7 @@ func TestRetryFailConfiguration(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		services  map[systemd.RestartMethod][]serviceRestartConfig
+		services  map[daemon.RestartMethod][]serviceRestartConfig
 		fileOpts  osloginTestFileOpts
 		runnerErr bool
 	}{
@@ -1038,8 +1038,8 @@ func TestRetryFailConfiguration(t *testing.T) {
 		},
 		{
 			name: "retry-restart-services",
-			services: map[systemd.RestartMethod][]serviceRestartConfig{
-				systemd.TryRestart: {
+			services: map[daemon.RestartMethod][]serviceRestartConfig{
+				daemon.TryRestart: {
 					{
 						protocol: serviceRestartOptional,
 						services: []string{"service1"},

@@ -14,7 +14,7 @@
 
 //go:build linux
 
-package systemd
+package daemon
 
 import (
 	"context"
@@ -23,6 +23,14 @@ import (
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )
+
+func init() {
+	// Client is the client for interacting with systemd.
+	Client = systemdClient{}
+}
+
+// systemdClient is the linux implementation of ClientInterface.
+type systemdClient struct{}
 
 const (
 	// These are methods with which to restart a service. Restarting in this case
@@ -80,7 +88,7 @@ func (systemdClient) ReloadDaemon(ctx context.Context, daemon string) error {
 	if _, err := run.WithContext(ctx, run.Options{
 		OutputType: run.OutputNone,
 		Name:       "systemctl",
-		Args:       []string{"reload-daemon", daemon},
+		Args:       []string{"daemon-reload", daemon},
 	}); err != nil {
 		return fmt.Errorf("failed to reload daemon %q: %w", daemon, err)
 	}
@@ -129,4 +137,26 @@ func (systemdClient) UnitStatus(ctx context.Context, unit string) (ServiceStatus
 	}
 
 	return Unknown, nil
+}
+
+func (systemdClient) StopDaemon(ctx context.Context, daemon string) error {
+	if _, err := run.WithContext(ctx, run.Options{
+		OutputType: run.OutputCombined,
+		Name:       "systemctl",
+		Args:       []string{"stop", daemon},
+	}); err != nil {
+		return fmt.Errorf("failed to stop daemon %q: %w", daemon, err)
+	}
+	return nil
+}
+
+func (systemdClient) StartDaemon(ctx context.Context, daemon string) error {
+	if _, err := run.WithContext(ctx, run.Options{
+		OutputType: run.OutputCombined,
+		Name:       "systemctl",
+		Args:       []string{"start", daemon},
+	}); err != nil {
+		return fmt.Errorf("failed to start daemon %q: %w", daemon, err)
+	}
+	return nil
 }

@@ -29,8 +29,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/systemd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ini"
 )
 
@@ -59,12 +59,12 @@ func (sn *serviceNetworkManager) IsManaging(ctx context.Context, opts *service.O
 	}
 
 	// Check whether NetworkManager.service is active.
-	status, err := systemd.UnitStatus(ctx, "NetworkManager.service")
+	status, err := daemon.UnitStatus(ctx, "NetworkManager.service")
 	if err != nil {
 		return false, fmt.Errorf("error checking status of NetworkManager.service: %w", err)
 	}
 
-	if status != systemd.Active {
+	if status != daemon.Active {
 		return false, nil
 	}
 

@@ -32,8 +32,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/systemd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/regex"
 )
@@ -62,12 +62,12 @@ func (sn *serviceWicked) IsManaging(ctx context.Context, opts *service.Options) 
 	}
 
 	// Check if the wicked service is running.
-	status, err := systemd.UnitStatus(ctx, "wicked.service")
+	status, err := daemon.UnitStatus(ctx, "wicked.service")
 	if err != nil {
 		return false, fmt.Errorf("failed to check status of wicked.service: %w", err)
 	}
 
-	if status != systemd.Active {
+	if status != daemon.Active {
 		return false, nil
 	}
 

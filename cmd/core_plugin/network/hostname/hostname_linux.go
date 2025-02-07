@@ -24,8 +24,8 @@ import (
 	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/systemd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
@@ -75,12 +75,12 @@ var setHostname = func(ctx context.Context, hostname string) error {
 	}
 	// Restart rsyslog or syslogd to update hostname in logging.
 	if _, err := exec.LookPath("systemctl"); err == nil {
-		ok, err := systemd.CheckUnitExists(ctx, "rsyslog")
+		ok, err := daemon.CheckUnitExists(ctx, "rsyslog")
 		if err != nil {
 			return fmt.Errorf("failed to check for rsyslog: %v", err)
 		}
 		if ok {
-			return systemd.RestartService(ctx, "rsyslog", systemd.Restart)
+			return daemon.RestartService(ctx, "rsyslog", daemon.Restart)
 		}
 	} else {
 		opts := run.Options{
