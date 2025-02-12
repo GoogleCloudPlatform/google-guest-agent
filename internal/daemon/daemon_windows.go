@@ -100,6 +100,38 @@ func (winServiceClient) StopDaemon(ctx context.Context, daemon string) error {
 	return waitForState(ctx, ctrlr, svc.Stopped)
 }
 
+func (winServiceClient) EnableService(ctx context.Context, daemon string) error {
+	m, ctrlr, err := openSvcController(daemon)
+	defer closeSvcController(ctrlr, m)
+	if err != nil {
+		return fmt.Errorf("failed to open service controller for %q: %w", daemon, err)
+	}
+
+	currentConfig, err := ctrlr.Config()
+	if err != nil {
+		return fmt.Errorf("failed to get current config for service %q: %w", daemon, err)
+	}
+
+	currentConfig.StartType = mgr.StartAutomatic
+	return ctrlr.UpdateConfig(currentConfig)
+}
+
+func (winServiceClient) DisableService(ctx context.Context, daemon string) error {
+	m, ctrlr, err := openSvcController(daemon)
+	defer closeSvcController(ctrlr, m)
+	if err != nil {
+		return fmt.Errorf("failed to open service controller for %q: %w", daemon, err)
+	}
+
+	currentConfig, err := ctrlr.Config()
+	if err != nil {
+		return fmt.Errorf("failed to get current config for service %q: %w", daemon, err)
+	}
+
+	currentConfig.StartType = mgr.StartDisabled
+	return ctrlr.UpdateConfig(currentConfig)
+}
+
 func (winServiceClient) StartDaemon(ctx context.Context, daemon string) error {
 	mgr, ctrlr, err := openSvcController(daemon)
 	defer closeSvcController(ctrlr, mgr)

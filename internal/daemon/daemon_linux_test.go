@@ -384,3 +384,95 @@ func TestStartDaemon(t *testing.T) {
 		})
 	}
 }
+
+func TestEnableService(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name         string
+		expectedArgs []string
+		wantErr      bool
+	}{
+		{
+			name:         "enable",
+			expectedArgs: []string{"enable", "test"},
+			wantErr:      false,
+		},
+		{
+			name:    "error",
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testRunner := setupTestRunner(t, test.wantErr, "")
+			client := systemdClient{}
+			err := client.EnableService(ctx, "test")
+			if (err == nil) == test.wantErr {
+				t.Fatalf("EnableService(ctx, test) = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr {
+				return
+			}
+
+			args, found := testRunner.seenCommand["systemctl"]
+			if !found {
+				t.Fatalf("EnableService(ctx, test) did not call systemctl")
+			}
+
+			if len(args) != 1 {
+				t.Fatalf("EnableService(ctx, test) = %v, want 1 command", args)
+			}
+
+			if diff := cmp.Diff(test.expectedArgs, args[0]); diff != "" {
+				t.Errorf("EnableService(ctx, test) = %v, want %v", args[0], test.expectedArgs)
+			}
+		})
+	}
+}
+
+func TestDisableService(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name         string
+		expectedArgs []string
+		wantErr      bool
+	}{
+		{
+			name:         "disable",
+			expectedArgs: []string{"--no-reload", "disable", "test"},
+			wantErr:      false,
+		},
+		{
+			name:    "error",
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testRunner := setupTestRunner(t, test.wantErr, "")
+			client := systemdClient{}
+			err := client.DisableService(ctx, "test")
+			if (err == nil) == test.wantErr {
+				t.Fatalf("DisableService(ctx, test) = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr {
+				return
+			}
+
+			args, found := testRunner.seenCommand["systemctl"]
+			if !found {
+				t.Fatalf("DisableService(ctx, test) did not call systemctl")
+			}
+
+			if len(args) != 1 {
+				t.Fatalf("DisableService(ctx, test) = %v, want 1 command", args)
+			}
+
+			if diff := cmp.Diff(test.expectedArgs, args[0]); diff != "" {
+				t.Errorf("DisableService(ctx, test) = %v, want %v", args[0], test.expectedArgs)
+			}
+		})
+	}
+}

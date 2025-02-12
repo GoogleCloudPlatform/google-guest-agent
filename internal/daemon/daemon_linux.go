@@ -160,3 +160,25 @@ func (systemdClient) StartDaemon(ctx context.Context, daemon string) error {
 	}
 	return nil
 }
+
+func (systemdClient) EnableService(ctx context.Context, daemon string) error {
+	if _, err := run.WithContext(ctx, run.Options{
+		OutputType: run.OutputCombined,
+		Name:       "systemctl",
+		Args:       []string{"enable", daemon},
+	}); err != nil {
+		return fmt.Errorf("failed to enable daemon %q: %w", daemon, err)
+	}
+	return nil
+}
+
+func (systemdClient) DisableService(ctx context.Context, daemon string) error {
+	if _, err := run.WithContext(ctx, run.Options{
+		OutputType: run.OutputCombined,
+		Name:       "systemctl",
+		Args:       []string{"--no-reload", "disable", daemon},
+	}); err != nil {
+		return fmt.Errorf("failed to disable daemon %q: %w", daemon, err)
+	}
+	return nil
+}

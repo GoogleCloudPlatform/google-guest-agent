@@ -19,6 +19,8 @@ package daemon
 import (
 	"context"
 	"testing"
+
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 func TestRestartService(t *testing.T) {
@@ -48,15 +50,62 @@ func TestWinServiceClient(t *testing.T) {
 		t.Errorf("StopDaemon(ctx, w32time) = %v, want nil", err)
 	}
 
+	status, err := svc.UnitStatus(ctx, unit)
+	if err != nil {
+		t.Errorf("UnitStatus(ctx, w32time) = %v, want nil", err)
+	}
+	if status != Inactive {
+		t.Errorf("UnitStatus(ctx, w32time) status = %v, want Inactive", status)
+	}
+
 	if err := svc.StartDaemon(ctx, unit); err != nil {
 		t.Errorf("StartDaemon(ctx, w32time) = %v, want nil", err)
 	}
 
-	status, err := svc.UnitStatus(ctx, unit)
+	status, err = svc.UnitStatus(ctx, unit)
 	if err != nil {
 		t.Errorf("UnitStatus(ctx, w32time) = %v, want nil", err)
 	}
 	if status != Active {
 		t.Errorf("UnitStatus(ctx, w32time) status = %v, want Active", status)
+	}
+}
+
+func currentConfig(t *testing.T, service string) uint32 {
+	t.Helper()
+
+	m, ctrlr, err := openSvcController(service)
+	if err != nil {
+		t.Fatalf("openSvcController(w32time) = %v, want nil", err)
+	}
+	t.Cleanup(func() { closeSvcController(ctrlr, m) })
+
+	got, err := ctrlr.Config()
+	if err != nil {
+		t.Fatalf("ctrlr.Config() = %v, want nil", err)
+	}
+
+	return got.StartType
+}
+
+func TestEnableDisableService(t *testing.T) {
+	svc := winServiceClient{}
+	ctx := context.Background()
+	unit := "w32time"
+
+	if err := svc.DisableService(ctx, unit); err != nil {
+		t.Errorf("DisableService(ctx, w32time) = %v, want nil", err)
+	}
+
+	if got := currentConfig(t, unit); got != mgr.StartDisabled {
+		t.Errorf("Config() StartType = %d, want %d", got, mgr.StartDisabled)
+	}
+
+	if err := svc.EnableService(ctx, unit); err != nil {
+		t.Errorf("EnableService(ctx, w32time) = %v, want nil", err)
+	}
+
+	if got := currentConfig(t, unit); got != mgr.StartAutomatic {
+		t.Errorf("Config() StartType = %d, want %d", got, mgr.StartAutomatic)
 	}
 }

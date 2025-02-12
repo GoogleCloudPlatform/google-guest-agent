@@ -40,6 +40,11 @@ const (
 
 // ClientInterface provides utilities for interacting with systemd.
 type ClientInterface interface {
+	// DisableService disables a daemon service. It essentially prevents the
+	// service from starting automatically on restart.
+	DisableService(ctx context.Context, daemon string) error
+	// EnableService enables a daemon service.
+	EnableService(ctx context.Context, daemon string) error
 	// RestartService restarts a systemd service.
 	RestartService(ctx context.Context, service string, method RestartMethod) error
 	// CheckUnitExists checks if a systemd unit exists.
@@ -52,6 +57,17 @@ type ClientInterface interface {
 	StopDaemon(ctx context.Context, daemon string) error
 	// StartDaemon starts a daemon service.
 	StartDaemon(ctx context.Context, daemon string) error
+}
+
+// EnableService enables a daemon service.
+func EnableService(ctx context.Context, service string) error {
+	return Client.EnableService(ctx, service)
+}
+
+// DisableService disables a daemon service. It essentially prevents the service
+// from starting automatically on restart.
+func DisableService(ctx context.Context, service string) error {
+	return Client.DisableService(ctx, service)
 }
 
 // RestartService restarts a systemd service. RestartMethod is applicable only
