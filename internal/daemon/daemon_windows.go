@@ -155,13 +155,13 @@ func openSvcController(name string) (*mgr.Mgr, *mgr.Service, error) {
 func closeSvcController(svcCtrlr *mgr.Service, svc *mgr.Mgr) {
 	if svcCtrlr != nil {
 		if err := svcCtrlr.Close(); err != nil {
-			galog.Warnf("Failed to close service controller(%q): %w", svcCtrlr.Name, err)
+			galog.Warnf("Failed to close service controller(%q): %v", svcCtrlr.Name, err)
 		}
 	}
 
 	if svc != nil {
 		if err := svc.Disconnect(); err != nil {
-			galog.Warnf("Failed to disconnect from windows services: %w", err)
+			galog.Warnf("Failed to disconnect from windows services: %v", err)
 		}
 	}
 }

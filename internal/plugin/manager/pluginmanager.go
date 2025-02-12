@@ -677,6 +677,12 @@ func (m *PluginManager) removePlugin(ctx context.Context, req *acpb.ConfigurePlu
 
 	// State directory should persist across plugin revisions and should be
 	// removed only when plugin is explicitly removed.
+	stateDir := p.stateDir()
+	if !file.Exists(stateDir, file.TypeDir) {
+		galog.Debugf("Plugin state directory %q does not exist, nothing to remove", stateDir)
+		return nil
+	}
+
 	return os.RemoveAll(p.stateDir())
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/config"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
 )
 
@@ -99,12 +100,12 @@ func readExtraConfig() ([]byte, error) {
 }
 
 func main() {
-	config, err := readExtraConfig()
+	extraCfg, err := readExtraConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to read extra config:", err)
 		os.Exit(1)
 	}
-	if err := cfg.Load(config); err != nil {
+	if err := cfg.Load(extraCfg); err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to load config:", err)
 		os.Exit(1)
 	}
@@ -135,6 +136,13 @@ func main() {
 		if err := events.FetchManager().AddWatcher(ctx, metadata.NewWatcher()); err != nil {
 			galog.Fatalf("Failed to add metadata watcher: %v", err)
 		}
+	}
+
+	// If core plugin config is written in config file, use that. Otherwise, use
+	// the command line flag. Test environment do rely on the command line flag.
+	if config.IsConfigFilePresent() {
+		skipCorePlugin = !config.IsCorePluginEnabled()
+		galog.Infof("Core plugin config file is present, setting skipCorePlugin to [%t]", skipCorePlugin)
 	}
 
 	opts := setup.Config{Version: version, CorePluginPath: corePluginPath, SkipCorePlugin: skipCorePlugin}

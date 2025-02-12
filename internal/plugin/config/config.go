@@ -25,6 +25,7 @@ import (
 	"strconv"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 const (
@@ -83,4 +84,10 @@ func IsCorePluginEnabled() bool {
 	}
 
 	return enableCorePlugin
+}
+
+// IsConfigFilePresent returns whether the core plugin enabled config file is
+// present or not.
+func IsConfigFilePresent() bool {
+	return file.Exists(CorePluginEnabledConfigFile, file.TypeFile)
 }

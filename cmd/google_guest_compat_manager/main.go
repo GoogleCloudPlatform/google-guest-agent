@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/google_guest_compat_manager/watcher"
 
@@ -28,6 +29,13 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
+)
+
+const (
+	// galogShutdownTimeout is the period of time we should wait galog to
+	// shutdown.
+	galogShutdownTimeout = time.Second
 )
 
 var (
@@ -56,7 +64,7 @@ func setupLogger(ctx context.Context) error {
 }
 
 func main() {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	if err := cfg.Load(nil); err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to load config:", err)
@@ -66,6 +74,14 @@ func main() {
 	if err := setupLogger(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
 		os.Exit(1)
+	}
+
+	if err := service.Init(ctx, func() {
+		galog.Info("Google Guest Agent Compat Manager Leaving (canceling context)...")
+		galog.Shutdown(galogShutdownTimeout)
+		cancel()
+	}); err != nil {
+		galog.Fatalf("Failed to initialize service manager: %s", err)
 	}
 
 	if err := setup(ctx); err != nil {
@@ -89,7 +105,9 @@ func setup(ctx context.Context) error {
 	subscriber := events.EventSubscriber{Name: "GuestCompatManager", Data: nil, Callback: watcher.Setup}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, subscriber)
 
-	galog.Infof("Done setting up guest compat manager")
+	galog.Debug("Compat manager subscriber registered for metadata longpoll event, setting service state to running...")
+	service.SetState(ctx, service.StateRunning)
+	galog.Infof("Google Guest Compat Manager (version: %q) Initialized...", version)
 
 	return nil
 }

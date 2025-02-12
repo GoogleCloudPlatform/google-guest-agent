@@ -127,3 +127,24 @@ func TestSetCorePluginEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestIsConfigFilePresent(t *testing.T) {
+	cfgFile := filepath.Join(t.TempDir(), "core-plugin-enabled")
+	orig := CorePluginEnabledConfigFile
+	CorePluginEnabledConfigFile = cfgFile
+	t.Cleanup(func() {
+		CorePluginEnabledConfigFile = orig
+	})
+
+	if IsConfigFilePresent() {
+		t.Errorf("IsConfigFilePresent() returned true, want: false")
+	}
+
+	if err := os.WriteFile(cfgFile, []byte("enabled=true"), 0644); err != nil {
+		t.Fatalf("Failed to write %q: %v", cfgFile, err)
+	}
+
+	if !IsConfigFilePresent() {
+		t.Errorf("IsConfigFilePresent() returned false, want: true")
+	}
+}

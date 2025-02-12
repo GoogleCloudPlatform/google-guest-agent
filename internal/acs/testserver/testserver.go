@@ -20,6 +20,7 @@
 package testserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -79,6 +80,10 @@ func (s *acsImplementation) add(msg *acpb.StreamAgentMessagesRequest) {
 	s.agentSentMsgs = append(s.agentSentMsgs, msg)
 }
 
+func (s *acsImplementation) SendAgentMessage(context.Context, *acpb.SendAgentMessageRequest) (*acpb.SendAgentMessageResponse, error) {
+	return nil, nil
+}
+
 // StreamAgentMessages implements the test ACS communication RPC.
 func (s *acsImplementation) StreamAgentMessages(stream acpb.AgentCommunication_StreamAgentMessagesServer) error {
 	closed := make(chan struct{})
@@ -124,9 +129,11 @@ func (s *acsImplementation) StreamAgentMessages(stream acpb.AgentCommunication_S
 		select {
 		case msg := <-s.toSend:
 			if err := stream.Send(msg); err != nil {
+				galog.Errorf("[TestACSServer] error sending message [%+v]: %v", msg, err)
 				return err
 			}
 		case err := <-s.recvErr:
+			galog.Errorf("[TestACSServer] received error on error stream: %v", err)
 			return err
 		}
 	}
