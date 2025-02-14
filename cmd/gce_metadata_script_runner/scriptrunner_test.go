@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package metadatascriptrunner
+package main
 
 import (
 	"context"
@@ -547,7 +547,7 @@ func TestDownloadURL(t *testing.T) {
 			w.WriteHeader(400)
 		}
 
-		fmt.Fprintf(w, r.URL.Path)
+		w.Write([]byte(r.URL.Path))
 		ctr[r.URL.Path] = ctr[r.URL.Path] + 1
 	}))
 	defer server.Close()
@@ -617,7 +617,7 @@ func TestDownloadGSURL(t *testing.T) {
 		if strings.Contains(r.URL.Path, "invalid") {
 			w.WriteHeader(404)
 		}
-		fmt.Fprintf(w, r.URL.Path)
+		w.Write([]byte(r.URL.Path))
 		ctr[r.URL.Path] = ctr[r.URL.Path] + 1
 	}))
 	defer server.Close()
@@ -685,7 +685,7 @@ func TestDownloadGSURL(t *testing.T) {
 	}
 }
 
-func TestRun(t *testing.T) {
+func TestHandleEvent(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	config := `[MetadataScripts]
@@ -706,8 +706,6 @@ func TestRun(t *testing.T) {
 
 	// linux - wantedKeys:  [startup-script startup-script-url]
 	// windows - wantedKeys: [windows-startup-script-ps1 windows-startup-script-cmd windows-startup-script-bat windows-startup-script-url]
-	// toSend := `{"startup-script":"echo"}`
-	// toSend = `{"windows-startup-script-cmd":"echo"}`
 	var toSend, toSendURL string
 
 	if runtime.GOOS == "windows" {
@@ -748,7 +746,7 @@ func TestRun(t *testing.T) {
 			ctx = context.WithValue(ctx, overrideStorageClient, testStorageClient)
 
 			client := &mdsClient{toSend: tt.toSend}
-			if err := Run(ctx, client, "startup"); err != nil {
+			if err := handleEvent(ctx, client, "startup"); err != nil {
 				t.Errorf("Run(ctx, %+v, startup, %s) error = [%v], want nil", client, runtime.GOOS, err)
 			}
 		})
