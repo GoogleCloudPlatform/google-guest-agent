@@ -1346,3 +1346,84 @@ func TestRemoveAllDynamicPlugins(t *testing.T) {
 		t.Errorf("RemoveAllDynamicPlugins(ctx) removed core plugin %s", corePlugin.Name)
 	}
 }
+
+func TestInitAdHocPluginManager(t *testing.T) {
+	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+	stateDir := t.TempDir()
+	addr := filepath.Join(t.TempDir(), "pluginA_revisionA.sock")
+
+	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\n[Core]\nacs_client = false\nsocket_connections_dir = %s", stateDir, filepath.Dir(addr))
+	if err := cfg.Load([]byte(tmp)); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
+	pluginManager.setInstanceID("test-instance-id")
+
+	pluginA := &Plugin{Name: "pluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr, EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3, MaxMetricDatapoints: 2, MetricsInterval: time.Second * 3}}
+	if err := pluginA.Store(); err != nil {
+		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
+	}
+
+	pluginB := &Plugin{Name: "pluginB", Revision: "revisionB", Protocol: udsProtocol, Address: "invalid-address", EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_DaemonPluginState_CRASHED}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3}}
+	if err := pluginB.Store(); err != nil {
+		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
+	}
+
+	// Reset the instance ID to test the ad-hoc plugin manager initialization.
+	pluginManager.setInstanceID("")
+
+	pm, err := InitAdHocPluginManager(ctx, "test-instance-id")
+	if err != nil {
+		t.Fatalf("InitAdHocPluginManager(ctx, test-instance-id) failed unexpectedly with error: %v", err)
+	}
+
+	if pm.instanceID != "test-instance-id" {
+		t.Errorf("InitAdHocPluginManager(ctx, test-instance-id) set instance ID to %q, want %q", pm.instanceID, "test-instance-id")
+	}
+
+	if len(pm.plugins) != 2 {
+		t.Errorf("InitAdHocPluginManager(ctx, test-instance-id) set %d plugins, want 2", len(pm.plugins))
+	}
+
+	for _, plugin := range []*Plugin{pluginA, pluginB} {
+		if pm.plugins[plugin.Name] == nil {
+			t.Errorf("InitAdHocPluginManager(ctx, test-instance-id) did not initialize plugin %s", plugin.Name)
+		}
+	}
+}
+
+func TestAdHocStopPlugin(t *testing.T) {
+	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+	connections := t.TempDir()
+	state := t.TempDir()
+	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\n[Core]\nacs_client = false", state)
+	if err := cfg.Load([]byte(tmp)); err != nil {
+		t.Fatalf("cfg.Load(%s) failed unexpectedly with error: %v", tmp, err)
+	}
+	ctc := setupConstraintTestClient(t)
+	cfg.Retrieve().Plugin.SocketConnectionsDir = connections
+
+	addr := filepath.Join(connections, "PluginA_RevisionA.sock")
+	ps := &testPluginServer{ctrs: make(map[string]int)}
+	startTestServer(t, ps, udsProtocol, addr)
+
+	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
+	createTestFile(t, entryPoint)
+
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
+	notRunningPlugin := &Plugin{Name: "PluginB", Revision: "RevisionB", Protocol: udsProtocol, Address: t.TempDir(), RuntimeInfo: &RuntimeInfo{Pid: -6666}, Manifest: &Manifest{StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
+
+	pm := &PluginManager{plugins: map[string]*Plugin{plugin.Name: plugin, notRunningPlugin.Name: notRunningPlugin}, protocol: udsProtocol, pluginMonitors: make(map[string]string)}
+
+	if err := pm.StopPlugin(ctx, plugin.Name); err != nil {
+		t.Fatalf("StopPlugin(ctx, %s) failed unexpectedly with error: %v", plugin.Name, err)
+	}
+
+	validatePluginRemoved(t, plugin, pm, ctc)
+
+	for _, plugin := range []string{notRunningPlugin.Name, "non-existing-plugin"} {
+		if err := pm.StopPlugin(ctx, plugin); err != nil {
+			t.Errorf("StopPlugin(ctx, %s) failed unexpectedly with error: %v", plugin, err)
+		}
+	}
+}

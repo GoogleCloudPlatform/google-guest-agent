@@ -16,12 +16,18 @@
 // linux it uses systemd and for windows it uses service control manager.
 package daemon
 
-import "context"
+import (
+	"context"
+
+	"github.com/GoogleCloudPlatform/galog"
+)
 
 // Client is the client for interacting with systemd.
 var Client ClientInterface
 
-// RestartMethod is a method with which to restart a service.
+// RestartMethod is a method with which to restart a service. Note that this is
+// applicable only to linux. Windows does not support restart methods and
+// ignores the method parameter.
 type RestartMethod int
 
 // ServiceStatus is the status of a systemd unit.
@@ -59,6 +65,29 @@ type ClientInterface interface {
 	StartDaemon(ctx context.Context, daemon string) error
 }
 
+const (
+	// These are methods with which to restart a service. Restarting in this case
+	// means stopping, then starting the service.
+
+	// Restart indicates to use `systemctl restart`, which stops and starts the
+	// service.
+	Restart RestartMethod = iota
+	// Reload indicates to use `systemctl reload`, which reloads the service-
+	// specific configuration.
+	Reload
+	// TryRestart indicates to use `systemctl try-restart`, which tries restarting
+	// the service. If the service is not running, this is no-op.
+	TryRestart
+	// ReloadOrRestart indicates to use `systemctl reload-or-restart`, which tries
+	// reloading the service, if supported. Otherwise, the service is restarted.
+	// If the service is not running, the service will be started.
+	ReloadOrRestart
+	// TryReloadOrRestart indicates to use `systemctl try-reload-or-restart`, which
+	// tries reloading the service, if supported. Otherwise, the service is
+	// restarted. If the service is not running, this is no-op.
+	TryReloadOrRestart
+)
+
 // EnableService enables a daemon service.
 func EnableService(ctx context.Context, service string) error {
 	return Client.EnableService(ctx, service)
@@ -74,6 +103,7 @@ func DisableService(ctx context.Context, service string) error {
 // to linux. Windows does not support restart methods and ignores the method
 // parameter.
 func RestartService(ctx context.Context, service string, method RestartMethod) error {
+	galog.Infof("Restarting service: %q", service)
 	return Client.RestartService(ctx, service, method)
 }
 
@@ -84,6 +114,7 @@ func CheckUnitExists(ctx context.Context, unit string) (bool, error) {
 
 // ReloadDaemon reloads a systemd daemon.
 func ReloadDaemon(ctx context.Context, daemon string) error {
+	galog.Infof("Reloading daemon: %q", daemon)
 	return Client.ReloadDaemon(ctx, daemon)
 }
 
@@ -94,10 +125,12 @@ func UnitStatus(ctx context.Context, unit string) (ServiceStatus, error) {
 
 // StopDaemon stops a daemon service.
 func StopDaemon(ctx context.Context, daemon string) error {
+	galog.Infof("Stopping daemon: %q", daemon)
 	return Client.StopDaemon(ctx, daemon)
 }
 
 // StartDaemon starts a daemon service.
 func StartDaemon(ctx context.Context, daemon string) error {
+	galog.Infof("Starting daemon: %q", daemon)
 	return Client.StartDaemon(ctx, daemon)
 }

@@ -170,6 +170,40 @@ func (m *PluginManager) currentInstanceID() string {
 	return m.instanceID
 }
 
+// InitAdHocPluginManager initializes and returns a PluginManager instance for
+// ad-hoc requests that does not go through ACS. This is generally used by other
+// local processes to temporarily leverage plugin manager functionality. Use
+// this instead of InitPluginManager if there's no active plugin management
+// required. InitAdHocPluginManager skips some initialization steps like
+// scheduling plugin monitors that are not required for ad-hoc requests.
+func InitAdHocPluginManager(ctx context.Context, instanceID string) (*PluginManager, error) {
+	galog.Infof("Initializing ad-hoc plugin manager for instance %q", instanceID)
+
+	pluginManager.setInstanceID(instanceID)
+	plugins, err := load(agentPluginState())
+	if err != nil {
+		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
+	}
+	pluginManager.plugins = plugins
+
+	return pluginManager, nil
+}
+
+// StopPlugin stops the plugin. This is used for ad-hoc requests that does not
+// go through ACS. In case the plugin is not found or is not running, it returns
+// nil error and is a no-op.
+func (m *PluginManager) StopPlugin(ctx context.Context, name string) error {
+	galog.Infof("Stopping plugin %q", name)
+
+	plugin, err := m.fetch(name)
+	if err != nil {
+		galog.Infof("Plugin %q state not found [err: %v], skipping stop request", name, err)
+		return nil
+	}
+
+	return m.stopAndRemovePlugin(ctx, plugin)
+}
+
 // InitPluginManager initializes and returns a PluginManager instance.
 // Plugin Manager can be initialized and used to support core plugins even if
 // ACS is disabled. Plugin Manager will be initialized during early Guest Agent
@@ -231,44 +265,47 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 	return pluginManager, nil
 }
 
-// RemoveAllDynamicPlugins generates a request and triggers plugin manager to
-// remove all dynamic plugins on the host.
+// RemoveAllDynamicPlugins filters out core plugins and triggers plugin manager
+// to remove all dynamic plugins on the host. It also removes the base state
+// directory to ensure that the entire state is cleaned up.
 func (m *PluginManager) RemoveAllDynamicPlugins(ctx context.Context) error {
 	var reqs []*acpb.ConfigurePluginStates_ConfigurePlugin
 	galog.Infof("Removing all dynamic plugins")
 
+	var toRemove []*Plugin
 	for _, p := range m.list() {
 		if p.PluginType == PluginTypeCore {
 			galog.Debugf("Skipping core plugin %q, it will be removed by package manager", p.Name)
 			continue
 		}
-
-		req := &acpb.ConfigurePluginStates_ConfigurePlugin{
-			Action: acpb.ConfigurePluginStates_REMOVE,
-			Plugin: &acpb.ConfigurePluginStates_Plugin{
-				Name:       p.Name,
-				RevisionId: p.Revision,
-			},
-		}
-
-		reqs = append(reqs, req)
+		toRemove = append(toRemove, p)
 	}
 
 	errChan := make(chan error, len(reqs))
 	wg := sync.WaitGroup{}
 
-	for _, req := range reqs {
+	for _, plugin := range toRemove {
 		wg.Add(1)
-		go func(req *acpb.ConfigurePluginStates_ConfigurePlugin) {
+		go func(p *Plugin) {
+			var err error
 			defer wg.Done()
-			err := m.removePlugin(ctx, req)
-			errChan <- err
-			galog.Infof("Remove plugin %q (revision %q) completed with error: [%v]", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId(), err)
-		}(req)
+
+			if err = m.StopPlugin(ctx, p.Name); err != nil {
+				galog.Infof("Remove plugin %q completed with error: [%v]", p.FullName(), err)
+				errChan <- err
+			}
+
+		}(plugin)
 	}
 
 	go func() {
 		wg.Wait()
+		baseStateDir := baseState()
+		if file.Exists(baseStateDir, file.TypeDir) {
+			if err := os.RemoveAll(baseStateDir); err != nil {
+				errChan <- fmt.Errorf("failed to remove file %q: %w", baseStateDir, err)
+			}
+		}
 		close(errChan)
 	}()
 
@@ -664,9 +701,8 @@ func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin) erro
 func (m *PluginManager) removePlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
 	galog.Infof("Removing plugin %q, revision %s", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
 
-	p, ok := m.plugins[req.GetPlugin().GetName()]
-
-	if !ok {
+	p, err := m.fetch(req.GetPlugin().GetName())
+	if err != nil {
 		sendEvent(ctx, &Plugin{Name: req.GetPlugin().GetName(), Revision: req.GetPlugin().GetRevisionId()}, acpb.PluginEventMessage_PLUGIN_REMOVE_FAILED, "Plugin not found.")
 		return fmt.Errorf("plugin %q not found", req.GetPlugin().GetName())
 	}

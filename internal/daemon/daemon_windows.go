@@ -27,6 +27,13 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
+const (
+	// GuestAgent is the name of the guest agent daemon.
+	GuestAgent = "GCEAgent"
+	// GuestAgentManager is the name of the guest agent manager daemon.
+	GuestAgentManager = "GCEAgentManager"
+)
+
 // serviceState is a map of windows service states to strings.
 var serviceState = map[svc.State]string{
 	1: "Stopped",

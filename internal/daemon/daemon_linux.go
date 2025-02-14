@@ -24,6 +24,13 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )
 
+const (
+	// GuestAgent is the name of the guest agent daemon.
+	GuestAgent = "google-guest-agent"
+	// GuestAgentManager is the name of the guest agent manager daemon.
+	GuestAgentManager = "google-guest-agent-manager"
+)
+
 func init() {
 	// Client is the client for interacting with systemd.
 	Client = systemdClient{}
@@ -31,29 +38,6 @@ func init() {
 
 // systemdClient is the linux implementation of ClientInterface.
 type systemdClient struct{}
-
-const (
-	// These are methods with which to restart a service. Restarting in this case
-	// means stopping, then starting the service.
-
-	// Restart indicates to use `systemctl restart`, which stops and starts the
-	// service.
-	Restart RestartMethod = iota
-	// Reload indicates to use `systemctl reload`, which reloads the service-
-	// specific configuration.
-	Reload
-	// TryRestart indicates to use `systemctl try-restart`, which tries restarting
-	// the service. If the service is not running, this is no-op.
-	TryRestart
-	// ReloadOrRestart indicates to use `systemctl reload-or-restart`, which tries
-	// reloading the service, if supported. Otherwise, the service is restarted.
-	// If the service is not running, the service will be started.
-	ReloadOrRestart
-	// TryReloadOrRestart indicates to use `systemctl try-reload-or-restart`, which
-	// tries reloading the service, if supported. Otherwise, the service is
-	// restarted. If the service is not running, this is no-op.
-	TryReloadOrRestart
-)
 
 // RestartService restarts a systemd service with the given method.
 func (systemdClient) RestartService(ctx context.Context, service string, method RestartMethod) error {

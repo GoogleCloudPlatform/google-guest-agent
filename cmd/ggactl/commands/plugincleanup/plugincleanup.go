@@ -49,7 +49,7 @@ func removeAllPlugins(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch instance ID: %w", err)
 	}
 
-	pm, err := manager.InitPluginManager(ctx, instanceID)
+	pm, err := manager.InitAdHocPluginManager(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to initialize plugin manager: %w", err)
 	}

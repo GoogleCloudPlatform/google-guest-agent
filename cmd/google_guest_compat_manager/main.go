@@ -101,7 +101,7 @@ func setup(ctx context.Context) error {
 		return fmt.Errorf("failed to add metadata watcher: %w", err)
 	}
 
-	watcher := watcher.Manager{}
+	watcher := watcher.NewManager()
 	subscriber := events.EventSubscriber{Name: "GuestCompatManager", Data: nil, Callback: watcher.Setup}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, subscriber)
 
