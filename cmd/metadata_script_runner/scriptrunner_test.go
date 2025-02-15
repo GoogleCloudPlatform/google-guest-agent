@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package metadatascriptrunner
+package main
 
 import (
 	"context"
@@ -547,7 +547,7 @@ func TestDownloadURL(t *testing.T) {
 			w.WriteHeader(400)
 		}
 
-		fmt.Fprintf(w, r.URL.Path)
+		w.Write([]byte(r.URL.Path))
 		ctr[r.URL.Path] = ctr[r.URL.Path] + 1
 	}))
 	defer server.Close()
@@ -617,7 +617,7 @@ func TestDownloadGSURL(t *testing.T) {
 		if strings.Contains(r.URL.Path, "invalid") {
 			w.WriteHeader(404)
 		}
-		fmt.Fprintf(w, r.URL.Path)
+		w.Write([]byte(r.URL.Path))
 		ctr[r.URL.Path] = ctr[r.URL.Path] + 1
 	}))
 	defer server.Close()
@@ -748,7 +748,7 @@ func TestRun(t *testing.T) {
 			ctx = context.WithValue(ctx, overrideStorageClient, testStorageClient)
 
 			client := &mdsClient{toSend: tt.toSend}
-			if err := Run(ctx, client, "startup"); err != nil {
+			if err := hanldeEvent(ctx, client, "startup"); err != nil {
 				t.Errorf("Run(ctx, %+v, startup, %s) error = [%v], want nil", client, runtime.GOOS, err)
 			}
 		})
