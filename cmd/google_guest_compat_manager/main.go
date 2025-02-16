@@ -26,6 +26,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -80,7 +81,7 @@ func main() {
 		galog.Info("Google Guest Agent Compat Manager Leaving (canceling context)...")
 		galog.Shutdown(galogShutdownTimeout)
 		cancel()
-	}); err != nil {
+	}, daemon.GuestAgentCompatManager); err != nil {
 		galog.Fatalf("Failed to initialize service manager: %s", err)
 	}
 

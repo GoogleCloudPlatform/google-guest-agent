@@ -90,12 +90,14 @@ const (
 
 // EnableService enables a daemon service.
 func EnableService(ctx context.Context, service string) error {
+	galog.Infof("Enabling service: %q", service)
 	return Client.EnableService(ctx, service)
 }
 
 // DisableService disables a daemon service. It essentially prevents the service
 // from starting automatically on restart.
 func DisableService(ctx context.Context, service string) error {
+	galog.Infof("Disabling service: %q", service)
 	return Client.DisableService(ctx, service)
 }
 

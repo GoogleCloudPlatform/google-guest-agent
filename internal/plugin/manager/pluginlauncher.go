@@ -250,6 +250,12 @@ func isUDSSupported() bool {
 	}
 
 	sockAddr := filepath.Join(connDir, "test-connection")
+	defer func() {
+		if err := os.RemoveAll(sockAddr); err != nil {
+			galog.Debugf("Failed to remove socket file %q: %v", sockAddr, err)
+		}
+	}()
+
 	listener, err := net.Listen(udsProtocol, sockAddr)
 	if err != nil {
 		galog.Infof("Failed to listen on %q, UDS is unsupported?: %v", sockAddr, err)
@@ -260,9 +266,6 @@ func isUDSSupported() bool {
 	// address is not reused.
 	if err := listener.Close(); err != nil {
 		galog.Debugf("Failed to close UDS listener: %v", err)
-	}
-	if err := os.RemoveAll(sockAddr); err != nil {
-		galog.Debugf("Failed to remove socket file %q: %v", sockAddr, err)
 	}
 
 	return true
