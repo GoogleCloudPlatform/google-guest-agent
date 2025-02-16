@@ -381,6 +381,9 @@ func TestInitPluginManager(t *testing.T) {
 	if got != pm {
 		t.Errorf("Instance() = %p, want same as InitPluginManager %p", got, pm)
 	}
+	if got.protocol != udsProtocol {
+		t.Errorf("Instance().protocol = %s, want %s", got.protocol, udsProtocol)
+	}
 }
 
 func TestConfigurePluginStates(t *testing.T) {
