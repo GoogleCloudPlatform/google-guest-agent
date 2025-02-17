@@ -69,7 +69,7 @@ func (w *Manager) Setup(ctx context.Context, evType string, opts any, evData *ev
 // enabled state and restarts the relevant services.
 func (w *Manager) enableDisableAgent(ctx context.Context, newEnabled bool) error {
 	if w.corePluginsEnabled == newEnabled {
-		galog.Debugf("Core plugin enabled state is unchanged, skipping guest agent enable/disable.")
+		galog.Debugf("Core plugin enabled state (%t) is unchanged, skipping guest agent enable/disable.", newEnabled)
 		return nil
 	}
 
@@ -109,6 +109,8 @@ func (w *Manager) enableCorePlugin(ctx context.Context) error {
 	if err := daemon.RestartService(ctx, w.guestAgentManagerProcessName, daemon.Restart); err != nil {
 		return fmt.Errorf("failed to restart guest agent manager: %w", err)
 	}
+
+	galog.Infof("Successfully enabled core plugin")
 	return nil
 }
 
@@ -140,6 +142,7 @@ func (w *Manager) disableCorePlugin(ctx context.Context) error {
 		return fmt.Errorf("failed to stop guest agent: %w", err)
 	}
 
+	galog.Infof("Successfully disabled core plugin")
 	return nil
 }
 

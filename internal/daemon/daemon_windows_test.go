@@ -71,7 +71,7 @@ func TestWinServiceClient(t *testing.T) {
 	}
 }
 
-func currentConfig(t *testing.T, service string) uint32 {
+func currentConfig(t *testing.T, service string) mgr.Config {
 	t.Helper()
 
 	m, ctrlr, err := openSvcController(service)
@@ -85,7 +85,7 @@ func currentConfig(t *testing.T, service string) uint32 {
 		t.Fatalf("ctrlr.Config() = %v, want nil", err)
 	}
 
-	return got.StartType
+	return got
 }
 
 func TestEnableDisableService(t *testing.T) {
@@ -97,7 +97,8 @@ func TestEnableDisableService(t *testing.T) {
 		t.Errorf("DisableService(ctx, w32time) = %v, want nil", err)
 	}
 
-	if got := currentConfig(t, unit); got != mgr.StartDisabled {
+	got := currentConfig(t, unit)
+	if got.StartType != mgr.StartDisabled {
 		t.Errorf("Config() StartType = %d, want %d", got, mgr.StartDisabled)
 	}
 
@@ -105,7 +106,11 @@ func TestEnableDisableService(t *testing.T) {
 		t.Errorf("EnableService(ctx, w32time) = %v, want nil", err)
 	}
 
-	if got := currentConfig(t, unit); got != mgr.StartAutomatic {
+	got = currentConfig(t, unit)
+	if got.StartType != mgr.StartAutomatic {
 		t.Errorf("Config() StartType = %d, want %d", got, mgr.StartAutomatic)
+	}
+	if !got.DelayedAutoStart {
+		t.Errorf("Config() DelayedAutoStart = %t, want true", got.DelayedAutoStart)
 	}
 }

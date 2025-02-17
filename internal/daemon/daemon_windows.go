@@ -32,6 +32,9 @@ const (
 	GuestAgent = "GCEAgent"
 	// GuestAgentManager is the name of the guest agent manager daemon.
 	GuestAgentManager = "GCEAgentManager"
+	// GuestAgentCompatManager is the name of the guest agent compat manager
+	// daemon.
+	GuestAgentCompatManager = "GCEWindowsCompatManager"
 )
 
 // serviceState is a map of windows service states to strings.
@@ -119,7 +122,10 @@ func (winServiceClient) EnableService(ctx context.Context, daemon string) error 
 		return fmt.Errorf("failed to get current config for service %q: %w", daemon, err)
 	}
 
+	// Set the start type to Automatic Delayed Start, this matches the current
+	// set up for the guest agent services.
 	currentConfig.StartType = mgr.StartAutomatic
+	currentConfig.DelayedAutoStart = true
 	return ctrlr.UpdateConfig(currentConfig)
 }
 
@@ -162,12 +168,13 @@ func waitForState(ctx context.Context, ctrlr *mgr.Service, state svc.State) erro
 			return fmt.Errorf("failed to query service %q: %w", ctrlr.Name, err)
 		}
 		if status.State != state {
-			return fmt.Errorf("service %q exected state %q, got %q", ctrlr.Name, serviceState[state], serviceState[status.State])
+			return fmt.Errorf("service %q expected state %q, got %q", ctrlr.Name, serviceState[state], serviceState[status.State])
 		}
+		galog.Infof("Service %q reached state %q", ctrlr.Name, serviceState[state])
 		return nil
 	}
 
-	policy := retry.Policy{MaxAttempts: 5, BackoffFactor: 2, Jitter: time.Second}
+	policy := retry.Policy{MaxAttempts: 5, BackoffFactor: 2, Jitter: time.Second * 2}
 	return retry.Run(ctx, policy, waitFunc)
 }
 
