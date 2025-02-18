@@ -29,6 +29,9 @@ const (
 	GuestAgent = "google-guest-agent"
 	// GuestAgentManager is the name of the guest agent manager daemon.
 	GuestAgentManager = "google-guest-agent-manager"
+	// GuestAgentCompatManager is the name of the guest agent compat manager
+	// daemon.
+	GuestAgentCompatManager = "google-guest-compat-manager"
 )
 
 func init() {

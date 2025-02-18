@@ -97,7 +97,7 @@ func TestSuccess(t *testing.T) {
 	ws := initWindowsService(t, true, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := Init(ctx, cancel); err != nil {
+	if err := Init(ctx, cancel, "test-service"); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 
@@ -126,8 +126,8 @@ func TestNotInService(t *testing.T) {
 	ws := initWindowsService(t, false, false)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	if err := Init(ctx, cancel); err != nil {
-		t.Fatalf("Init(ctx, cancel) failed unexpectedly with error: %v", err)
+	if err := Init(ctx, cancel, "test-service"); err != nil {
+		t.Fatalf("Init(ctx, cancel, test-service) failed unexpectedly with error: %v", err)
 	}
 
 	if err := SetState(ctx, StateRunning); err != nil {
@@ -143,7 +143,7 @@ func TestInitFail(t *testing.T) {
 	initWindowsService(t, false, true)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	if err := Init(ctx, cancel); err == nil {
-		t.Fatalf("Init(ctx, cancel) succeeded, want service check error")
+	if err := Init(ctx, cancel, "test-service"); err == nil {
+		t.Fatalf("Init(ctx, cancel, test-service) succeeded, want service check error")
 	}
 }

@@ -273,6 +273,14 @@ func TestStop(t *testing.T) {
 			}
 		})
 	}
+
+	// No connection, skip stop.
+	plugin.client = nil
+	msg := `plugin "testplugin_1" is not connected, cannot call Stop RPC`
+	_, err := plugin.Stop(ctx, false)
+	if err.Message() != msg {
+		t.Errorf("plugin.Stop(ctx, false) = error: %v, want error: %v", err, msg)
+	}
 }
 
 func TestGetStatus(t *testing.T) {

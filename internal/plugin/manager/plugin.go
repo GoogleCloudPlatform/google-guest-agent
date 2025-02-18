@@ -96,6 +96,10 @@ func (p *Plugin) Start(ctx context.Context) (*pb.StartResponse, *status.Status) 
 func (p *Plugin) Stop(ctx context.Context, cleanup bool) (*pb.StopResponse, *status.Status) {
 	galog.Debugf("Executing stop request on plugin %q", p.FullName())
 
+	if p.client == nil {
+		return nil, status.Convert(fmt.Errorf("plugin %q is not connected, cannot call Stop RPC", p.FullName()))
+	}
+
 	req := &pb.StopRequest{
 		Cleanup:  cleanup,
 		Deadline: &dpb.Duration{Seconds: int64(p.Manifest.StopTimeout.Seconds())},
