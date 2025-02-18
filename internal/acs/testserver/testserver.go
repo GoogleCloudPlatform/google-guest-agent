@@ -39,6 +39,11 @@ import (
 	apb "google.golang.org/protobuf/types/known/anypb"
 )
 
+const (
+	// rawToken is a dummy token used for testing.
+	rawToken = "eyJhbGciOiIiLCJ0eXAiOiIifQ.eyJpc3MiOiIiLCJhdWQiOiIiLCJleHAiOjEyNTc4OTc1OTAsImlhdCI6MTI1Nzg5Mzk5MH0.P1kofb3I0Eaxd6xAWI0mLrfR2k48sIU9K_iWpwXQIX66Cd95dXtkGJ8JQ74KIWHK_HSYB7i7kSbukDl6VjDc1HrZlRtM8pVNbIv0lHyDe8FZgvW2w33964hk96I0M2NcSLyj6jO42yvWEs0VFJwoAuWtX9jXUqb7vlQf-ElmUXbx5jsKvMqjS6KtT44wQzUg9MjsOTfU9AEKhn-p0liNb-QJxG2Z0NzGI6dCfKchd-mXgpnn0r_2OAZ0aCICNu50ye74hfPCkEpTK5w4PWDoLNhWhJabBSoM4umct49G3nZ5jO1Auh50QaprskS_c82ZzgttNvNzv3NShHAAODCI8w"
+)
+
 // acsImplementation struct holds all messages and address ACS server is running on.
 type acsImplementation struct {
 	addr string
@@ -156,7 +161,7 @@ func (s *Server) startMDS() error {
 		case "/computeMetadata/v1/instance/id":
 			fmt.Fprint(w, "test-instance")
 		case "/computeMetadata/v1/instance/service-accounts/default/identity":
-			fmt.Fprint(w, "test-token")
+			fmt.Fprint(w, rawToken)
 		}
 	}))
 
