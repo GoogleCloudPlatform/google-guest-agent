@@ -313,3 +313,55 @@ message PluginEventMessage {
   // This could be a serialized format like JSON or a protocol buffer.
   optional bytes event_details = 5;
 }
+
+message GuestAgentModuleMetrics {
+  repeated GuestAgentModuleMetric metrics = 1;
+}
+
+message GuestAgentModuleMetric {
+  enum Metric {
+    MODULE_UNSPECIFIED = 0;
+    NETWORK_INITIALIZATION = 1;
+    IOSCHED_INITIALIZATION = 2;
+    AGENT_CRYPTO_INITIALIZATION = 3;
+    CLOCK_INITIALIZATION = 4;
+    COMMAND_INITIALIZATION = 5;
+    DIAGNOSTICS_INITIALIZATION = 6;
+    FIRST_BOOT_INITIALIZATION = 7;
+    HOST_NAME_INITIALIZATION = 8;
+    METADATA_SSH_KEY_INITIALIZATION = 9;
+    OS_LOGIN_INITIALIZATION = 10;
+    PLAT_SCRIPT_INITIALIZATION = 11;
+    SNAPSHOT_INITIALIZATION = 12;
+    TELEMETRY_INITIALIZATION = 13;
+    WORKLOAD_CERT_REFRESH_INITIALIZATION = 14;
+    WSFC_HEALTH_CHECK_INITIALIZATION = 15;
+  }
+
+  enum ModuleStatus {
+    MODULE_STATUS_UNSPECIFIED = 0;
+    STATUS_SKIPPED = 1;
+    STATUS_FAILED = 2;
+    STATUS_SUCCEEDED = 3;
+  }
+
+  // Name of the metric.
+  Metric metric_name = 1;
+
+  // Start time is the time the module initialization started.
+  google.protobuf.Timestamp start_time = 2;
+
+  // End time is the time the module initialization ended.
+  google.protobuf.Timestamp end_time = 3;
+
+  // Status is the status of the module initialization.
+  ModuleStatus module_status = 4;
+
+  // Enabled indicates whether the module is enabled by customer in the VM or
+  // not.
+  bool enabled = 5;
+
+  // Error is the error of the module initialization if it failed.
+  // Empty if module initialization succeeded.
+  string error = 6;
+}
