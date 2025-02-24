@@ -1,10 +1,10 @@
 module github.com/GoogleCloudPlatform/google-guest-agent
 
-go 1.23
+go 1.23.0
 
 require (
 	cloud.google.com/go/storage v1.50.0
-	github.com/GoogleCloudPlatform/agentcommunication_client v0.0.0-20250211174452-71bfb94e6331
+	github.com/GoogleCloudPlatform/agentcommunication_client v0.0.0-20250224174617-3af1925f5857
 	github.com/GoogleCloudPlatform/galog v0.0.0-20250111014007-ec5a17cc0445
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/go-ini/ini v1.67.0
@@ -14,10 +14,10 @@ require (
 	github.com/google/go-tpm-tools v0.4.4
 	github.com/google/tink/go v1.7.0
 	github.com/spf13/cobra v1.8.1
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/sys v0.30.0
-	google.golang.org/api v0.220.0
+	google.golang.org/api v0.222.0
 	google.golang.org/grpc v1.70.0
 	google.golang.org/protobuf v1.36.5
 	software.sslmate.com/src/go-pkcs12 v0.5.0
@@ -26,7 +26,7 @@ require (
 require (
 	cel.dev/expr v0.19.1 // indirect
 	cloud.google.com/go v0.118.0 // indirect
-	cloud.google.com/go/auth v0.14.1 // indirect
+	cloud.google.com/go/auth v0.15.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.7 // indirect
 	cloud.google.com/go/compute/metadata v0.6.0 // indirect
 	cloud.google.com/go/iam v1.3.1 // indirect
@@ -71,12 +71,12 @@ require (
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/oauth2 v0.26.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
 	google.golang.org/genproto v0.0.0-20250124145028-65684f501c47 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250207221924-e9438ea467c6 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250207221924-e9438ea467c6 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20250219182151-9fdb1cabc7b2 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250224174004-546df14abb99 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
