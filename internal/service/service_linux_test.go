@@ -74,7 +74,7 @@ func TestNotInSystemdContext(t *testing.T) {
 	runner := initSystemdService(t, false, true)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := Init(ctx, cancel); err != nil {
+	if err := Init(ctx, cancel, "test-service"); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestSuccess(t *testing.T) {
 	runner := initSystemdService(t, true, true)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := Init(ctx, cancel); err != nil {
+	if err := Init(ctx, cancel, "test-service"); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestFailure(t *testing.T) {
 	_ = initSystemdService(t, true, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := Init(ctx, cancel); err == nil {
+	if err := Init(ctx, cancel, "test-service"); err == nil {
 		t.Error("Init() = nil, want: error")
 	}
 

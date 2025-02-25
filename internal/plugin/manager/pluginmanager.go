@@ -201,6 +201,10 @@ func (m *PluginManager) StopPlugin(ctx context.Context, name string) error {
 		return nil
 	}
 
+	if err := plugin.Connect(ctx); err != nil {
+		galog.Infof("Failed to connect to plugin %q [err: %v], skipping graceful stop", plugin.FullName(), err)
+	}
+
 	return m.stopAndRemovePlugin(ctx, plugin)
 }
 

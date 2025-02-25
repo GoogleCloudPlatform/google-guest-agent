@@ -38,7 +38,7 @@ const (
 
 var (
 	// nativeServiceName is the string used to register with the service manager.
-	nativeServiceName = "google_guest_agent"
+	nativeServiceName string
 	// nativeHandler is the OS specific implementation of serviceHandler.
 	nativeHandler serviceHandler
 	// serviceManagerSignal is the channel handle cases when the OS service
@@ -58,7 +58,8 @@ type serviceHandler interface {
 }
 
 // Init initializes the service management channels and signal handling.
-func Init(ctx context.Context, cancel context.CancelFunc) error {
+func Init(ctx context.Context, cancel context.CancelFunc, serviceName string) error {
+	nativeServiceName = serviceName
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGHUP)
 	go func() {
@@ -80,12 +81,6 @@ func Init(ctx context.Context, cancel context.CancelFunc) error {
 
 func registerNativeHandler(handler serviceHandler) {
 	nativeHandler = handler
-}
-
-// SetServiceName sets the service name used to register with the service
-// manager.
-func SetServiceName(serviceName string) {
-	nativeServiceName = serviceName
 }
 
 // SetState wraps the OS specific implementation for SetState operation.

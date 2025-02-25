@@ -67,7 +67,7 @@ func (ws *winService) serviceID() string {
 
 // register registers the application to the windows service.
 func (ws *winService) register(ctx context.Context) error {
-	galog.Debug("Checking if running as windows service")
+	galog.Debugf("Checking if %q is running as windows service", nativeServiceName)
 
 	// If process is not running as a windows service it will not have an access
 	// to connect to the service controller. This can happen is service is run
@@ -86,7 +86,7 @@ func (ws *winService) register(ctx context.Context) error {
 
 	go func() {
 		if err := windowsServiceRun(nativeServiceName, ws); err != nil {
-			galog.Fatalf("Failed to start as windows service: %v", err)
+			galog.Fatalf("Failed to start %q as windows service: %v", nativeServiceName, err)
 		}
 	}()
 
@@ -123,7 +123,7 @@ outer:
 			case svc.Interrogate:
 				statusChan <- request.CurrentStatus
 			case svc.Stop, svc.Shutdown:
-				galog.Info("Stopping windows service")
+				galog.Infof("Stopping %q windows service", nativeServiceName)
 				statusChan <- svc.Status{State: svc.StopPending}
 				serviceManagerSignal <- true
 				break outer

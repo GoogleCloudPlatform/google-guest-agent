@@ -45,29 +45,29 @@ func TestContextCancel(t *testing.T) {
 	registerNativeHandler(sv)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := Init(ctx, cancel); err != nil {
+	if err := Init(ctx, cancel, "test-service"); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 	cancel()
 }
 
-func TestSetServiceName(t *testing.T) {
-	serviceName := "test-service-name"
-	SetServiceName(serviceName)
-	if nativeServiceName != serviceName {
-		t.Errorf("SetServiceName(%q) = %q, want %q", serviceName, nativeServiceName, serviceName)
-	}
-}
-
 func TestSetState(t *testing.T) {
 	sv := &bypassService{registered: false, state: StateUnknown}
 	orig := nativeHandler
-	t.Cleanup(func() { registerNativeHandler(orig) })
+	origName := nativeServiceName
+	t.Cleanup(func() {
+		registerNativeHandler(orig)
+		nativeServiceName = origName
+	})
 	registerNativeHandler(sv)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := Init(ctx, cancel); err != nil {
+	if err := Init(ctx, cancel, "service1"); err != nil {
 		t.Fatalf("Init() failed: %v", err)
+	}
+
+	if nativeServiceName != "service1" {
+		t.Fatalf("Init() set nativeServiceName = %q, want %q", nativeServiceName, "service1")
 	}
 
 	if !sv.registered {

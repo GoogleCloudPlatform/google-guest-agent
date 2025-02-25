@@ -320,3 +320,27 @@ func TestConnectionSetup(t *testing.T) {
 		t.Errorf("connectionSetup(%s) did not create %q directory", connectionsDir, addr)
 	}
 }
+
+func TestIsUDSSupported(t *testing.T) {
+	if err := cfg.Load([]byte{}); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	connectionsDir := filepath.Join(t.TempDir(), "agent-connections")
+	cfg.Retrieve().Plugin.SocketConnectionsDir = connectionsDir
+
+	testConnection := filepath.Join(connectionsDir, "test-connection")
+	if !isUDSSupported() {
+		t.Errorf("isUDSSupported() = false, want true")
+	}
+
+	if runtime.GOOS == "linux" {
+		return
+	}
+
+	if file.Exists(testConnection, file.TypeFile) {
+		t.Errorf("file.Exists(%s, file.TypeFile) = true, want false", testConnection)
+	}
+	if !file.Exists(connectionsDir, file.TypeDir) {
+		t.Errorf("file.Exists(%s, file.TypeDir) = true, want false", connectionsDir)
+	}
+}
