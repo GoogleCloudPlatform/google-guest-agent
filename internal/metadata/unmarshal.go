@@ -122,6 +122,7 @@ type project struct {
 // attributes describes the project's attributes keys. This is the internal
 // representation used to parse the json formatted output of metadata server.
 type attributes struct {
+	CreatedBy             string
 	Hostname              string
 	BlockProjectKeys      bool
 	EnableCorePlugin      *bool
@@ -151,6 +152,7 @@ func (a *attributes) UnmarshalJSON(b []byte) error {
 	}
 	// Unmarshal to literal JSON types before doing anything else.
 	type inner struct {
+		CreatedBy             string      `json:"created-by"`
 		BlockProjectKeys      string      `json:"block-project-ssh-keys"`
 		Hostname              string      `json:"hostname"`
 		Diagnostics           string      `json:"diagnostics"`
@@ -180,6 +182,7 @@ func (a *attributes) UnmarshalJSON(b []byte) error {
 	a.WSFCAddresses = temp.WSFCAddresses
 	a.WSFCAgentPort = temp.WSFCAgentPort
 	a.WindowsKeys = temp.WindowsKeys
+	a.CreatedBy = temp.CreatedBy
 
 	if value, err := strconv.ParseBool(temp.BlockProjectKeys); err == nil {
 		a.BlockProjectKeys = value
