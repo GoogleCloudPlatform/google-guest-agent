@@ -381,6 +381,11 @@ func newAttributes(attributes attributes) *Attributes {
 	return res
 }
 
+// CreatedBy returns the attribute created-by.
+func (attr *Attributes) CreatedBy() string {
+	return attr.internal.CreatedBy
+}
+
 // Hostname returns the attribute hostname.
 func (attr *Attributes) Hostname() string {
 	return attr.internal.Hostname
