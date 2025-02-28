@@ -56,7 +56,7 @@ func (w *Manager) Setup(ctx context.Context, evType string, opts any, evData *ev
 		return true
 	}
 
-	enabled := isPluginEnabled(mds)
+	enabled := mds.HasCorePluginEnabled()
 
 	if err := w.enableDisableAgent(ctx, enabled); err != nil {
 		galog.Errorf("Failed to enable/disable guest agent, err: %v", err)
@@ -173,17 +173,4 @@ func (w *Manager) readInstanceID(ctx context.Context) error {
 
 	w.instanceID = id
 	return nil
-}
-
-// isPluginEnabled returns whether the Core Plugin is enabled or not based on
-// MDS descriptor. If neither instance or project level metadata is set, it
-// defaults to *false*.
-func isPluginEnabled(mds *metadata.Descriptor) bool {
-	if mds.Instance().Attributes().EnableCorePlugin() != nil {
-		return *mds.Instance().Attributes().EnableCorePlugin()
-	}
-	if mds.Project().Attributes().EnableCorePlugin() != nil {
-		return *mds.Project().Attributes().EnableCorePlugin()
-	}
-	return false
 }
