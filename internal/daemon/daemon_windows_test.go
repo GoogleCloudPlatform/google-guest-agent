@@ -99,7 +99,7 @@ func TestEnableDisableService(t *testing.T) {
 
 	got := currentConfig(t, unit)
 	if got.StartType != mgr.StartDisabled {
-		t.Errorf("Config() StartType = %d, want %d", got, mgr.StartDisabled)
+		t.Errorf("Config() StartType = %d, want %d", got.StartType, mgr.StartDisabled)
 	}
 
 	if err := svc.EnableService(ctx, unit); err != nil {
@@ -108,7 +108,7 @@ func TestEnableDisableService(t *testing.T) {
 
 	got = currentConfig(t, unit)
 	if got.StartType != mgr.StartAutomatic {
-		t.Errorf("Config() StartType = %d, want %d", got, mgr.StartAutomatic)
+		t.Errorf("Config() StartType = %d, want %d", got.StartType, mgr.StartAutomatic)
 	}
 	if !got.DelayedAutoStart {
 		t.Errorf("Config() DelayedAutoStart = %t, want true", got.DelayedAutoStart)
