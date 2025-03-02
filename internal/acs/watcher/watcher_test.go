@@ -34,6 +34,8 @@ type conn struct {
 	throwErr       bool
 }
 
+func (c *conn) Close() {}
+
 func (c *conn) SendMessage(msg *acpb.MessageBody) error {
 	return fmt.Errorf("not implemented")
 }

@@ -62,10 +62,12 @@ var (
 	isConnectionSet atomic.Bool
 )
 
-// ConnectionInterface is the minimum interface required by Agent to communicate with ACS.
+// ConnectionInterface is the minimum interface required by Agent to communicate
+// with ACS.
 type ConnectionInterface interface {
 	SendMessage(msg *acpb.MessageBody) error
 	Receive() (*acpb.MessageBody, error)
+	Close()
 }
 
 // ContextKey is the context key type to use for overriding.
@@ -178,6 +180,9 @@ func Send(ctx context.Context, labels map[string]string, msg proto.Message) erro
 		}
 		err := connection.SendMessage(&acpb.MessageBody{Labels: labels, Body: anyMsg})
 		if err != nil {
+			// Close connection if error occurs, this triggers to create a new ACS
+			// connection and ensures the previous connection is closed.
+			connection.Close()
 			// Reset connection if error occurs, this will trigger to create a new
 			// ACS connection.
 			isConnectionSet.Store(false)
@@ -208,6 +213,7 @@ func Watch(ctx context.Context) (*acpb.MessageBody, error) {
 		}
 		msg, err := connection.Receive()
 		if err != nil {
+			connection.Close()
 			isConnectionSet.Store(false)
 			return nil, err
 		}

@@ -39,6 +39,11 @@ type conn struct {
 	sendMessage     *apb.Any
 	isNotify        bool
 	throwErr        bool
+	closeCalled     bool
+}
+
+func (c *conn) Close() {
+	c.closeCalled = true
 }
 
 func (c *conn) SendMessage(msg *acpb.MessageBody) error {
@@ -119,11 +124,15 @@ func TestSend(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			connection = &conn{expectedMessage: tc.sendMsg, expectedLabels: labels, throwErr: tc.wantError}
+			testConn := &conn{expectedMessage: tc.sendMsg, expectedLabels: tc.labels, throwErr: tc.wantError}
+			connection = testConn
 			ctx = context.WithValue(ctx, OverrideConnection, connection)
 			err := Send(ctx, labels, msg)
 			if (err != nil) != tc.wantError {
 				t.Errorf("Send(ctx, %+v, %+v) = got error: %v, want error: %t", labels, msg, err, tc.wantError)
+			}
+			if tc.wantError && !testConn.closeCalled {
+				t.Errorf("Send(ctx, %+v, %+v) = connection.Close() called: false, want true", labels, msg)
 			}
 		})
 	}
@@ -156,15 +165,18 @@ func TestWatch(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			connection = &conn{sendMessage: tc.wantMsg, throwErr: tc.wantError}
+			testClient := &conn{sendMessage: tc.wantMsg, throwErr: tc.wantError}
+			connection = testClient
 			ctx := context.WithValue(ctx, OverrideConnection, connection)
 			got, err := Watch(ctx)
 			if (err != nil) != tc.wantError {
 				t.Errorf("Watch(ctx) = error: %v, want error: %t", err, tc.wantError)
 			}
-
 			if diff := cmp.Diff(tc.wantMsg, got.GetBody(), protocmp.Transform()); diff != "" {
 				t.Errorf("Unexpected message, diff (-want +got):\n%s", diff)
+			}
+			if tc.wantError && !testClient.closeCalled {
+				t.Errorf("Watch(ctx) = connection.Close() called: false, want true")
 			}
 		})
 	}

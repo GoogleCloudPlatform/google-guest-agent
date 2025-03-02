@@ -38,6 +38,8 @@ type fakeConnection struct {
 	throwErr    bool
 }
 
+func (c *fakeConnection) Close() {}
+
 func (c *fakeConnection) SendMessage(msg *acpb.MessageBody) error {
 	if c.throwErr {
 		return fmt.Errorf("test_error")
