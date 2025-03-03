@@ -170,6 +170,7 @@ func initCloudLogging(ctx context.Context, eventType string, data any, event *ev
 		FlushCadence:          cloudLoggingFlushCadence,
 		Instance:              mds.Instance().Name(),
 		WithoutAuthentication: opts.cloudLoggingWithoutAuthentication,
+		MIG:                   mds.Instance().Attributes().CreatedBy(),
 	}
 
 	if err := opts.cloudLoggingBackend.InitClient(ctx, cloudOpts); err != nil {
