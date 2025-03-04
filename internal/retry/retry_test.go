@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 )
@@ -118,30 +119,30 @@ func TestBackoff(t *testing.T) {
 			name:     "constant_backoff",
 			factor:   1,
 			attempts: 5,
-			jitter:   time.Duration(10),
-			want:     []time.Duration{10, 10, 10, 10, 10},
+			jitter:   time.Minute * 10,
+			want:     []time.Duration{time.Minute * 10, time.Minute * 10, time.Minute * 10, time.Minute * 10, time.Minute * 10},
 		},
 		{
 			name:     "exponential_backoff_2",
 			factor:   2,
 			attempts: 4,
-			jitter:   time.Duration(10),
-			want:     []time.Duration{10, 20, 40, 80},
+			jitter:   time.Second * 10,
+			want:     []time.Duration{time.Second * 10, time.Second * 20, time.Second * 40, time.Second * 80},
 		},
 		{
 			name:     "exponential_backoff_3",
 			factor:   3,
 			attempts: 4,
-			jitter:   time.Duration(10),
-			want:     []time.Duration{10, 30, 90, 270},
+			jitter:   time.Second * 10,
+			want:     []time.Duration{time.Second * 10, time.Second * 30, time.Second * 90, time.Second * 270},
 		},
 		{
 			name:       "exponential_backoff_3_with_max",
 			factor:     3,
-			attempts:   4,
+			attempts:   10,
 			maxBackoff: time.Duration(100),
 			jitter:     time.Duration(10),
-			want:       []time.Duration{10, 30, 90, 100},
+			want:       []time.Duration{10, 30, 90, 100, 100, 100, 100, 100, 100, 100},
 		},
 	}
 	for _, tt := range tests {
@@ -218,5 +219,60 @@ func TestInfiniteRetry(t *testing.T) {
 	}
 	if ctr != infinite {
 		t.Errorf("RetryWithResponse(ctx, %+v, fn) retried %d times, should've returned after %d retries", policy, ctr, infinite)
+	}
+}
+
+func TestBackoffOverflow(t *testing.T) {
+	max := math.MaxInt
+
+	tests := []struct {
+		name    string
+		policy  Policy
+		attempt int
+		want    float64
+	}{
+		{
+			name:    "inf_overflow_with_max_backoff",
+			attempt: math.MaxInt,
+			policy:  Policy{Jitter: time.Second * 2, BackoffFactor: 2, MaximumBackoff: time.Minute * 40},
+			want:    time.Duration(time.Minute * 40).Minutes(),
+		},
+		{
+			name:    "scientific_exponent_with_max_backoff",
+			attempt: 35,
+			policy:  Policy{Jitter: time.Second * 2, BackoffFactor: 2, MaximumBackoff: time.Minute * 40},
+			want:    time.Duration(time.Minute * 40).Minutes(),
+		},
+		{
+			name:    "inf_overflow_without_max_backoff",
+			attempt: math.MaxInt,
+			policy:  Policy{Jitter: time.Second * 2, BackoffFactor: 2},
+			want:    DefaultMaximumBackoff.Minutes(),
+		},
+		{
+			name:    "scientific_exponent_without_max_backoff",
+			attempt: 35,
+			policy:  Policy{Jitter: time.Second * 2, BackoffFactor: 2},
+			want:    DefaultMaximumBackoff.Minutes(),
+		},
+		{
+			name:    "attempt_overflow",
+			attempt: max + 1,
+			policy:  Policy{Jitter: time.Second * 2, BackoffFactor: 2},
+			want:    DefaultMaximumBackoff.Minutes(),
+		},
+		{
+			name:    "attempt_overflow_wraparound",
+			attempt: max + max,
+			policy:  Policy{Jitter: time.Second * 2, BackoffFactor: 2},
+			want:    DefaultMaximumBackoff.Minutes(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := backoff(tt.attempt, tt.policy); got.Minutes() != tt.want {
+				t.Errorf("backoff(%d, %+v) = %f, want %f", tt.attempt, tt.policy, got.Minutes(), tt.want)
+			}
+		})
 	}
 }

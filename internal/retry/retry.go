@@ -25,6 +25,12 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 )
 
+const (
+	// DefaultMaximumBackoff is the maximum backoff time between retries. Backoff
+	// will be capped to this value if not set in the policy.
+	DefaultMaximumBackoff = time.Minute * 20
+)
+
 // IsRetriable is method signature for implementing to override default logic of
 // retrying each error.
 type IsRetriable func(error) bool
@@ -45,7 +51,8 @@ type Policy struct {
 	ShouldRetry IsRetriable
 	// MaximumBackoff is the maximum backoff time between retries. Backoff will be
 	// capped to this value. If not set, then backoff will keep increasing based
-	// on BackoffFactor and Jitter.
+	// on BackoffFactor and Jitter until [DefaultMaximumBackoff] to prevent
+	// overflow.
 	MaximumBackoff time.Duration
 }
 
@@ -53,16 +60,25 @@ type Policy struct {
 // jitter*(backoffFactor^attempt). For e.g. if jitter was set to 10 and factor
 // was 3, backoff between attempts would be [10, 30, 90, 270...].
 func backoff(attempt int, policy Policy) time.Duration {
-	b := float64(policy.Jitter) * math.Pow(policy.BackoffFactor, float64(attempt))
-	d := time.Duration(b)
-
-	if policy.MaximumBackoff == 0 {
-		return d
+	maxBackoff := policy.MaximumBackoff
+	if maxBackoff == 0 {
+		maxBackoff = DefaultMaximumBackoff
 	}
 
-	if d > policy.MaximumBackoff {
-		return policy.MaximumBackoff
+	if attempt < 0 {
+		galog.V(2).Debugf("Attempt is negative [%d] probably due to overflow, using max backoff [%v] instead", attempt, maxBackoff)
+		return maxBackoff
 	}
+
+	b := policy.Jitter.Seconds() * math.Pow(policy.BackoffFactor, float64(attempt))
+
+	// Check for overflow BEFORE converting to time.Duration
+	if b > maxBackoff.Seconds() {
+		galog.V(2).Debugf("Computed backoff [%v] exceeds max backoff [%v], using max backoff instead", b, maxBackoff)
+		return maxBackoff
+	}
+
+	d := time.Duration(b * float64(time.Second))
 	return d
 }
 
