@@ -949,6 +949,8 @@ type fakeACS struct {
 	throwErr  bool
 }
 
+func (c *fakeACS) Close() {}
+
 func (c *fakeACS) SendMessage(msg *pb.MessageBody) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
