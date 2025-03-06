@@ -56,6 +56,7 @@ const (
 	// configuration sections.
 	defaultConfigTemplate = `
 [Core]
+cloud_logging_enabled = true
 log_level = 3
 log_verbosity = 0
 log_file =
@@ -242,6 +243,10 @@ type ACS struct {
 // Core contains the core configuration entries of guest agent, all
 // configurations not tied/specific to a subsystem are defined in here.
 type Core struct {
+	// CloudLoggingEnabled config toggle controls Guest Agent cloud logger.
+	// Disabling it will stop Guest Agent for configuring and logging to Cloud
+	// Logging.
+	CloudLoggingEnabled bool `ini:"cloud_logging_enabled,omitempty"`
 	// LogLevel defines the log level of the guest-agent. The CLI's flag takes
 	// precedence over this configuration.
 	LogLevel int `ini:"log_level,omitempty"`

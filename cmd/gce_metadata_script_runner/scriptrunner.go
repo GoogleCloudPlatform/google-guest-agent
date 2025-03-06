@@ -12,10 +12,9 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-// Package metadatascriptrunner handles the running of metadata scripts on
-// Google Compute Engine instances. Its generally triggered on VM startup or
-// shutdown.
-package metadatascriptrunner
+// Package main handles the running of metadata scripts on Google Compute Engine
+// instances. Its generally triggered on VM startup or shutdown.
+package main
 
 import (
 	"context"
@@ -35,6 +34,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
@@ -52,9 +52,14 @@ const (
 	objectRegex = "(.+)"
 	// overrideStorageClient is a context key to override the storage client.
 	overrideStorageClient contextKey = "override_storage_client"
+	// galogShutdownTimeout is the period of time we should wait galog to
+	// shutdown.
+	galogShutdownTimeout = time.Second
 )
 
 var (
+	// version is the version of the binary.
+	version = "unknown"
 	// powerShellArgs is the list of arguments to pass when powershell script is
 	// executed.
 	powerShellArgs = []string{"-NoProfile", "-NoLogo", "-ExecutionPolicy", "Unrestricted", "-File"}
@@ -400,9 +405,9 @@ func readExistingKeys(ctx context.Context, mdsClient metadata.MDSClientInterface
 	return nil, nil
 }
 
-// Run is the entrypoint for metadata script runner. This is expected to invoked
-// on receiving VM startup/shutdown/specialze(windows sysprep) event.
-func Run(ctx context.Context, mdsClient metadata.MDSClientInterface, event string) error {
+// handleEvent is the entrypoint for metadata script runner. This is expected to
+// be invoked on receiving VM startup/shutdown/specialze(windows sysprep) event.
+func handleEvent(ctx context.Context, mdsClient metadata.MDSClientInterface, event string) error {
 	galog.Infof("Running metadata script runner for %q event", event)
 
 	wantedKeys, err := mdsScriptKeys(event, runtime.GOOS)
@@ -437,4 +442,38 @@ func Run(ctx context.Context, mdsClient metadata.MDSClientInterface, event strin
 
 	galog.Infof("Finished running %s scripts", event)
 	return nil
+}
+
+func main() {
+	ctx := context.Background()
+
+	if err := cfg.Load(nil); err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to load config:", err)
+		os.Exit(1)
+	}
+
+	coreCfg := cfg.Retrieve().Core
+	logOpts := logger.Options{
+		Ident:             "google_metadata_script_runner",
+		CloudIdent:        "GCEGuestMetadataScriptRunner",
+		ProgramVersion:    version,
+		LogToCloudLogging: coreCfg.CloudLoggingEnabled,
+		LogFile:           coreCfg.LogFile,
+		Level:             coreCfg.LogLevel,
+		Verbosity:         coreCfg.LogVerbosity,
+	}
+
+	if err := logger.Init(ctx, logOpts); err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
+		os.Exit(1)
+	}
+	defer galog.Shutdown(galogShutdownTimeout)
+
+	if len(os.Args) != 2 {
+		galog.Fatalf("No valid event type (%v) provided, usage: %s <startup|shutdown|specialize>", os.Args, os.Args[0])
+	}
+
+	if err := handleEvent(ctx, metadata.New(), os.Args[1]); err != nil {
+		galog.Fatalf("Failed to handle event %q: %v", os.Args[1], err)
+	}
 }
