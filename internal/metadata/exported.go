@@ -517,3 +517,17 @@ func (wk *WindowsKey) PasswordLength() int {
 func (desc *Descriptor) HasServiceAccount() bool {
 	return len(desc.Instance().internal.ServiceAccounts) > 0
 }
+
+// HasCorePluginEnabled returns whether the Core Plugin is enabled or not based
+// on MDS descriptor. If neither instance or project level metadata is set, it
+// defaults to *false*.
+func (desc *Descriptor) HasCorePluginEnabled() bool {
+	if desc.Instance().Attributes().EnableCorePlugin() != nil {
+		return *desc.Instance().Attributes().EnableCorePlugin()
+	}
+	if desc.Project().Attributes().EnableCorePlugin() != nil {
+		return *desc.Project().Attributes().EnableCorePlugin()
+	}
+
+	return false
+}
