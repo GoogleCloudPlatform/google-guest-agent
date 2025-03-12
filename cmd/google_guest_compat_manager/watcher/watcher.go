@@ -106,6 +106,10 @@ func (w *Manager) enableCorePlugin(ctx context.Context) error {
 		return fmt.Errorf("failed to enable core plugin config: %w", err)
 	}
 
+	if err := w.disableCertRefresher(ctx); err != nil {
+		return fmt.Errorf("failed to disable cert refresher: %w", err)
+	}
+
 	if err := daemon.RestartService(ctx, w.guestAgentManagerProcessName, daemon.Restart); err != nil {
 		return fmt.Errorf("failed to restart guest agent manager: %w", err)
 	}
@@ -132,6 +136,10 @@ func (w *Manager) disableCorePlugin(ctx context.Context) error {
 
 	if err := daemon.StartDaemon(ctx, w.guestAgentManagerProcessName); err != nil {
 		return fmt.Errorf("failed to restart guest agent manager: %w", err)
+	}
+
+	if err := w.enableCertRefresher(ctx); err != nil {
+		return fmt.Errorf("failed to disable cert refresher: %w", err)
 	}
 
 	if err := daemon.EnableService(ctx, w.guestAgentProcessName); err != nil {

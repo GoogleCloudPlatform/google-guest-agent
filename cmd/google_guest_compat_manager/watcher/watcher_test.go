@@ -223,6 +223,21 @@ func TestEnableDisableAgent(t *testing.T) {
 		config.CorePluginEnabledConfigFile = orig
 	})
 
+	wantEnableCmds := []string{"disable", "stop", "disable", "stop", "restart"}
+	wantEnableServices := []string{"test-guest-agent", "test-guest-agent", "gce-workload-cert-refresh.timer", "gce-workload-cert-refresh.timer", "test-guest-agent-manager"}
+
+	wantDisableCmds := []string{"stop", "start", "enable", "start", "enable", "start"}
+	wantDisableServices := []string{"test-guest-agent-manager", "test-guest-agent-manager", "gce-workload-cert-refresh.timer", "gce-workload-cert-refresh.timer", "test-guest-agent", "test-guest-agent"}
+
+	if runtime.GOOS == "windows" {
+		wantEnableCmds = []string{"disable", "stop", "restart"}
+		wantEnableServices = []string{"test-guest-agent", "test-guest-agent", "test-guest-agent-manager"}
+
+		wantDisableCmds = []string{"stop", "start", "enable", "start"}
+		wantDisableServices = []string{"test-guest-agent-manager", "test-guest-agent-manager", "test-guest-agent", "test-guest-agent"}
+
+	}
+
 	// default state is disabled.
 	watcher := Manager{corePluginsEnabled: false, guestAgentProcessName: "test-guest-agent", guestAgentManagerProcessName: "test-guest-agent-manager", instanceID: "test-instance-id"}
 
@@ -235,8 +250,8 @@ func TestEnableDisableAgent(t *testing.T) {
 	}{
 		{
 			name:                  "enable_core_plugin",
-			wantCmds:              []string{"disable", "stop", "restart"},
-			wantServices:          []string{"test-guest-agent", "test-guest-agent", "test-guest-agent-manager"},
+			wantCmds:              wantEnableCmds,
+			wantServices:          wantEnableServices,
 			wantCorePluginEnabled: true,
 			prevCorePluginEnabled: false,
 		},
@@ -247,8 +262,8 @@ func TestEnableDisableAgent(t *testing.T) {
 		},
 		{
 			name:                  "disable_core_plugin",
-			wantCmds:              []string{"stop", "start", "enable", "start"},
-			wantServices:          []string{"test-guest-agent-manager", "test-guest-agent-manager", "test-guest-agent", "test-guest-agent"},
+			wantCmds:              wantDisableCmds,
+			wantServices:          wantDisableServices,
 			wantCorePluginEnabled: false,
 			prevCorePluginEnabled: true,
 		},
