@@ -17,6 +17,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -63,6 +64,14 @@ func TestSetupError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("metadata.UnmarshalDescriptor(%s) failed unexpectedly: %v", mdsDisableData, err)
 	}
+
+	guestAgentBinaryPath = filepath.Join(t.TempDir(), "guest_agent")
+	if err := os.WriteFile(guestAgentBinaryPath, []byte("test"), 0755); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Remove(guestAgentBinaryPath)
+	})
 
 	tests := []struct {
 		name               string
