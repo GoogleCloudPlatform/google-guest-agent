@@ -32,6 +32,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/config"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 var (
@@ -139,14 +140,7 @@ func main() {
 		}
 	}
 
-	// If core plugin config is written in config file, use that. Otherwise, use
-	// the command line flag. Test environment do rely on the command line flag.
-	if config.IsConfigFilePresent() {
-		skipCorePlugin = !config.IsCorePluginEnabled()
-		galog.Infof("Core plugin config file is present, setting skipCorePlugin to [%t]", skipCorePlugin)
-	}
-
-	opts := setup.Config{Version: version, CorePluginPath: corePluginPath, SkipCorePlugin: skipCorePlugin}
+	opts := setup.Config{Version: version, CorePluginPath: corePluginPath, SkipCorePlugin: ignoreCorePlugin()}
 	// ACS watcher requires ACS client enabled.
 	if (forceOnDemandPlugins || cfg.Retrieve().Core.OnDemandPlugins) && cfg.Retrieve().Core.ACSClient {
 		opts.EnableACSWatcher = true
@@ -160,5 +154,33 @@ func main() {
 	if err := events.FetchManager().Run(ctx); err != nil {
 		galog.Fatalf("Failed to run events manager: %v", err)
 	}
+}
 
+// ignoreCorePlugin returns true if core plugin should be skipped.
+func ignoreCorePlugin() bool {
+	binaryPath := agentBinaryPath()
+	// This is a configuration guardrail to see if the guest agent binary is
+	// present. If it is not present, we enable the core plugin. Ignore this
+	// check in test environment as binary path is expected to be not present.
+	if !file.Exists(binaryPath, file.TypeFile) && os.Getenv("TEST_UNDECLARED_OUTPUTS_DIR") == "" {
+		galog.Infof("Guest agent binary %q not found, enabling core plugin", binaryPath)
+		return false
+	}
+
+	// If core plugin config is written in config file, use that. Otherwise, use
+	// the command line flag. Test environment do rely on the command line flag.
+	if config.IsConfigFilePresent() {
+		galog.Infof("Core plugin config file is present, setting skipCorePlugin to [%t]", skipCorePlugin)
+		return !config.IsCorePluginEnabled()
+	}
+
+	return skipCorePlugin
+}
+
+// agentBinaryPath returns the path to the guest agent binary based on the OS.
+func agentBinaryPath() string {
+	if runtime.GOOS == "windows" {
+		return `C:\Program Files\Google\Compute Engine\agent\GCEWindowsAgent.exe`
+	}
+	return "/usr/bin/google_guest_agent"
 }

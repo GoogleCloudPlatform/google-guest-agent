@@ -18,6 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -116,6 +118,11 @@ func TestLaunchScriptRunner(t *testing.T) {
 	ctx := context.Background()
 	event := "startup"
 
+	metadataScriptRunnerLegacy = filepath.Join(t.TempDir(), "metadata_script_runner_legacy")
+	if err := os.WriteFile(metadataScriptRunnerLegacy, []byte("test"), 0755); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
 	tests := []struct {
 		name        string
 		runner      *testRunner
@@ -175,5 +182,19 @@ func TestLaunchScriptRunner(t *testing.T) {
 				t.Errorf("launchScriptRunner(ctx, %+v, %q) executed args = %v, want %v", test.mdsClient, event, test.runner.seenArgs, test.wantArgs)
 			}
 		})
+	}
+
+	if err := os.Remove(metadataScriptRunnerLegacy); err != nil {
+		t.Fatalf("Failed to remove test file: %v", err)
+	}
+
+	testRunner := &testRunner{}
+	setupTestRunner(t, testRunner)
+	mdsClient := &MDSClient{instanceEnable: false}
+	if err := launchScriptRunner(ctx, mdsClient, event); err != nil {
+		t.Errorf("launchScriptRunner(ctx, %+v, %q) error = %v, want nil", mdsClient, event, err)
+	}
+	if testRunner.seenCommand != metadataScriptRunnerNew {
+		t.Errorf("launchScriptRunner(ctx, %+v, %q) executed command = %q, want %q", mdsClient, event, testRunner.seenCommand, metadataScriptRunnerNew)
 	}
 }
