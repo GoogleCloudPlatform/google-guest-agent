@@ -22,6 +22,11 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 )
 
+var (
+	// guestAgentBinaryPath is the path to the guest agent binary.
+	guestAgentBinaryPath = "/usr/bin/google_guest_agent"
+)
+
 const (
 	// workloadCertRefresherServiceName is the name of the workload cert refresher
 	// service.
