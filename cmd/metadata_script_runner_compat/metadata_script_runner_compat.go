@@ -28,6 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 var (
@@ -90,6 +91,11 @@ func launchScriptRunner(ctx context.Context, mdsClient metadata.MDSClientInterfa
 		if enabled = mds.HasCorePluginEnabled(); enabled {
 			opts.Name = metadataScriptRunnerNew
 		}
+	}
+
+	if !file.Exists(metadataScriptRunnerLegacy, file.TypeFile) {
+		galog.Infof("Script runner binary %q not found, running in test environment, overriding to new script runner", metadataScriptRunnerLegacy)
+		opts.Name = metadataScriptRunnerNew
 	}
 
 	galog.Infof("Enable core plugin set to: [%t], launching script runner for event %q from %q", enabled, event, opts.Name)
