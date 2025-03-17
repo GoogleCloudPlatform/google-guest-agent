@@ -365,9 +365,10 @@ type MDS struct {
 
 // NetworkInterfaces contains the configurations of NetworkInterfaces section.
 type NetworkInterfaces struct {
-	DHCPCommand  string `ini:"dhcp_command,omitempty"`
-	IPForwarding bool   `ini:"ip_forwarding,omitempty"`
-	Setup        bool   `ini:"setup,omitempty"`
+	DHCPCommand      string `ini:"dhcp_command,omitempty"`
+	IPForwarding     bool   `ini:"ip_forwarding,omitempty"`
+	Setup            bool   `ini:"setup,omitempty"`
+	ManagePrimaryNIC bool   `ini:"manage_primary_nic,omitempty"`
 }
 
 // Snapshots contains the configurations of Snapshots section.

@@ -1228,6 +1228,9 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 
 			config := &cfg.Sections{
 				IPForwarding: &cfg.IPForwarding{},
+				NetworkInterfaces: &cfg.NetworkInterfaces{
+					ManagePrimaryNIC: true,
+				},
 			}
 
 			nics, err := nic.NewConfigs(mds, config, nil)
@@ -1441,6 +1444,9 @@ func TestSetupVlanInterfaces(t *testing.T) {
 
 			config := &cfg.Sections{
 				IPForwarding: &cfg.IPForwarding{},
+				NetworkInterfaces: &cfg.NetworkInterfaces{
+					ManagePrimaryNIC: true,
+				},
 			}
 
 			nics, err := nic.NewConfigs(mds, config, nil)
