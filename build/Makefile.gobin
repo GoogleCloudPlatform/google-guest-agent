@@ -10,7 +10,8 @@ GO_BINARIES = \
 	cmd/google_authorized_keys/google_authorized_keys \
 	cmd/google_guest_agent/google_guest_agent \
 	cmd/google_guest_compat_manager/google_guest_compat_manager \
-	cmd/gce_metadata_script_runner/gce_metadata_script_runner
+	cmd/gce_metadata_script_runner/gce_metadata_script_runner \
+	cmd/metadata_script_runner_compat/gce_compat_metadata_script_runner
 
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
 
