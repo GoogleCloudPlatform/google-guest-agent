@@ -226,6 +226,9 @@ func TestRunManagerSetup(t *testing.T) {
 		{
 			name: "no-active-managers",
 			opts: &service.Options{
+				NICConfigs: []*nic.Configuration{
+					{},
+				},
 				Data: []*service.Handle{},
 			},
 			wantError: true,
@@ -233,6 +236,9 @@ func TestRunManagerSetup(t *testing.T) {
 		{
 			name: "failing-setup-manager",
 			opts: &service.Options{
+				NICConfigs: []*nic.Configuration{
+					{},
+				},
 				Data: []*service.Handle{
 					{
 						ID: "manager-1",
@@ -248,7 +254,7 @@ func TestRunManagerSetup(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "error-no-nics",
+			name: "success-no-nics",
 			opts: &service.Options{
 				Data: []*service.Handle{
 					{
@@ -262,7 +268,7 @@ func TestRunManagerSetup(t *testing.T) {
 					},
 				},
 			},
-			wantError: true,
+			wantError: false,
 		},
 		{
 			name: "error-ismanaging",

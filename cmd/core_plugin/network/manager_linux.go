@@ -67,7 +67,8 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 	}
 
 	if len(opts.NICConfigs) == 0 {
-		return fmt.Errorf("no NICs to configure")
+		galog.Infof("Skipping network setup - no NICs to configure.")
+		return nil
 	}
 
 	active, err := activeManager(ctx, managers, opts)
