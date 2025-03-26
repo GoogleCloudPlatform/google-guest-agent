@@ -23,6 +23,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/google/go-cmp/cmp"
 	"golang.org/x/exp/slices"
 )
 
@@ -224,6 +225,83 @@ func TestInitACSClientLogging(t *testing.T) {
 			got := client.DebugLogging
 			if got != tc.want {
 				t.Errorf("Init(ctx, %+v) set acs.DebugLogging = %t, want %t", tc.opts, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseMIGLabels(t *testing.T) {
+	tests := []struct {
+		name    string
+		mds     string
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name: "no-created-by",
+			mds:  `{}`,
+			want: map[string]string{},
+		},
+		{
+			name: "zonal",
+			mds: `
+{
+	"instance": {
+		"attributes": {
+			"created-by": "projects/test-project/zones/us-central1-a/instanceGroupManagers/test-mig"
+		}
+	}
+}
+`,
+			want: map[string]string{
+				migNameLabel: "test-mig",
+				migZoneLabel: "us-central1-a",
+			},
+		},
+		{
+			name: "regional",
+			mds: `
+{
+	"instance": {
+		"attributes": {
+			"created-by": "projects/test-project/regions/us-central1/instanceGroupManagers/test-mig"
+		}
+	}
+}
+`,
+			want: map[string]string{
+				migNameLabel:   "test-mig",
+				migRegionLabel: "us-central1",
+			},
+		},
+		{
+			name: "invalid-created-by",
+			mds: `
+{
+	"instance": {
+		"attributes": {
+			"created-by": "random-string"
+		}
+	}
+}
+`,
+			want: map[string]string{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mds, err := metadata.UnmarshalDescriptor(tc.mds)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", tc.mds, err)
+			}
+			got, err := parseMIGLabels(mds)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("parseMIGLabels(%q) returned an unexpected error: %v", tc.mds, err)
+			}
+
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("parseMIGLabels(%q) returned an unexpected diff (-want +got): %v", tc.mds, diff)
 			}
 		})
 	}

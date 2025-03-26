@@ -34,6 +34,7 @@ var mdsData = `
 {
   "instance": {
     "attributes": {
+			"created-by": "projects/test-project/zones/us-central1-a/instanceGroupManagers/test-mig",
 			"block-project-ssh-keys": "true",
 			"hostname": "hostname",
       "enable-oslogin": "true",
@@ -62,6 +63,7 @@ func newTestAttributes(expiry string) *attributes {
 	*truebool = true
 
 	return &attributes{
+		CreatedBy:             "projects/test-project/zones/us-central1-a/instanceGroupManagers/test-mig",
 		BlockProjectKeys:      true,
 		Hostname:              "hostname",
 		EnableOSLogin:         truebool,

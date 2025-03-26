@@ -6,7 +6,7 @@ guest agent. These components are installed on Windows and Linux GCE VMs in
 order to enable GCE platform features.
 
 ## Building Guest Agent
-In the code base there's a Gnu Make based build system with targets to build and
+In the codebase there's a GNU Make based build system with targets to build and
 test the guest agent.
 
 In order to build both the `guest-agent` and `core_plugins`, run

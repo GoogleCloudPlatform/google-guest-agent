@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/GoogleCloudPlatform/agentcommunication_client"
@@ -90,6 +91,14 @@ const (
 	// ManagerLogPrefix is a human readable prefix added to all log entries for
 	// plugin manager.
 	ManagerLogPrefix = "GCEGuestAgentManager"
+
+	// The following are MIG labels added to the cloud logging logs.
+	// MIGNameLabel is the MIG name label.
+	migNameLabel = `compute.googleapis.com/instance_group_manager/name`
+	// migZoneLabel is the MIG zone label.
+	migZoneLabel = `compute.googleapis.com/instance_group_manager/zone`
+	// migRegionLabel is the MIG region label.
+	migRegionLabel = `compute.googleapis.com/instance_group_manager/region`
 )
 
 // Init initializes the logger.
@@ -139,6 +148,37 @@ func Init(ctx context.Context, opts Options) error {
 	return nil
 }
 
+// parseMIGLabels parses the MIG labels from the created-by metadata attribute.
+// This is used to add extra labels to the Cloud Logging logs.
+func parseMIGLabels(mds *metadata.Descriptor) (map[string]string, error) {
+	labels := make(map[string]string)
+	createdBy := mds.Instance().Attributes().CreatedBy()
+	if createdBy == "" {
+		return labels, nil
+	}
+
+	// Make sure the `created-by` is set by MIG.
+	migRe, err := regexp.Compile(`^projects/[^/]+/(zones|regions)/([^/]+)/instanceGroupManagers/([^/]+)$`)
+	if err != nil {
+		return labels, err
+	}
+	migMatch := migRe.FindStringSubmatch(mds.Instance().Attributes().CreatedBy())
+	if migMatch == nil {
+		return labels, nil
+	}
+
+	var locationLabel string
+	switch migMatch[1] {
+	case "zones":
+		locationLabel = migZoneLabel
+	case "regions":
+		locationLabel = migRegionLabel
+	}
+	labels[migNameLabel] = migMatch[3]
+	labels[locationLabel] = migMatch[2]
+	return labels, nil
+}
+
 // initCloudLogging is a subscribed event handler to metadata event. Cloud
 // Logging initialization depends on data provided by metadata server, we can
 // only initialize if after having the first descriptor being available. This
@@ -158,6 +198,11 @@ func initCloudLogging(ctx context.Context, eventType string, data any, event *ev
 		return true
 	}
 
+	extraLabels, err := parseMIGLabels(mds)
+	if err != nil {
+		galog.Errorf("Failed to parse MIG labels: %v", err)
+	}
+
 	programName := filepath.Base(os.Args[0])
 	cloudOpts := &galog.CloudOptions{
 		Ident: opts.CloudIdent,
@@ -170,6 +215,7 @@ func initCloudLogging(ctx context.Context, eventType string, data any, event *ev
 		FlushCadence:          cloudLoggingFlushCadence,
 		Instance:              mds.Instance().Name(),
 		WithoutAuthentication: opts.cloudLoggingWithoutAuthentication,
+		ExtraLabels:           extraLabels,
 	}
 
 	if err := opts.cloudLoggingBackend.InitClient(ctx, cloudOpts); err != nil {
