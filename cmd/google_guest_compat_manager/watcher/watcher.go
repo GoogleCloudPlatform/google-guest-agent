@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/config"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 // Manager is the event watcher for the guest compat. It watches for metadata
@@ -53,6 +54,13 @@ func (w *Manager) Setup(ctx context.Context, evType string, opts any, evData *ev
 	mds, ok := evData.Data.(*metadata.Descriptor)
 	if !ok {
 		galog.Errorf("Failed to setup guest compat manager, invalid event.Data type passed to event callback.")
+		return true
+	}
+
+	// If guest agent is not present and core plugin is we launch core plugin. In
+	// this case we don't need to enable/disable guest agent.
+	if !file.Exists(guestAgentBinaryPath, file.TypeFile) {
+		galog.Infof("Guest agent binary %q not found, running in test environment, skipping setup.", guestAgentBinaryPath)
 		return true
 	}
 

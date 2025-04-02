@@ -20,6 +20,10 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 )
 
+var (
+	guestAgentBinaryPath = `C:\Program Files\Google\Compute Engine\agent\GCEWindowsAgent.exe`
+)
+
 // disableCertRefresher disables and stops the workload cert refresher service.
 func (w *Manager) disableCertRefresher(ctx context.Context) error {
 	galog.Infof("Windows does not support cert refresher service, skipping disable")
