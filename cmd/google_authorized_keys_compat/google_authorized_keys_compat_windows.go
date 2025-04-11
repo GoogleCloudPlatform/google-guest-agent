@@ -32,10 +32,10 @@ import (
 const (
 	// authorizedKeysNew is the path to the new authorized keys script.
 	// This is the binary that will be used if the core plugin is enabled.
-	authorizedKeysNew = "C:\\Program Files\\Google\\Compute Engine\\agent\\GCEAuthorizedKeys.exe"
+	authorizedKeysNew = "C:\\Program Files\\Google\\Compute Engine\\agent\\GCEAuthorizedKeysNew.exe"
 	// authorizedKeysLegacy is the path to the legacy authorized keys script.
 	// This is the binary that will be used if the core plugin is disabled.
-	authorizedKeysLegacy = "C:\\Program Files\\Google\\Compute Engine\\agent\\GCEAuthorizedKeysCommand.exe"
+	authorizedKeysLegacy = "C:\\Program Files\\Google\\Compute Engine\\agent\\GCEAuthorizedKeys.exe"
 )
 
 func launchAuthorizedKeys(ctx context.Context, mdsClient metadata.MDSClientInterface, username string) error {
