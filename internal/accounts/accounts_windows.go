@@ -37,11 +37,13 @@ type windowsUserInfo struct {
 
 var (
 	// AdminGroup is the administrator group.
-	AdminGroup = &Group{Name: "Administrators"}
+	// https://learn.microsoft.com/en-us/windows/win32/secauthz/well-known-sids
+	AdminGroup = &Group{GID: "S-1-5-32-544"}
 
 	// The following has been stubbed out for error injection testing.
-	lookupUser  = user.Lookup
-	lookupGroup = user.LookupGroup
+	lookupUser      = user.Lookup
+	lookupGroup     = user.LookupGroup
+	lookupGroupByID = user.LookupGroupId
 
 	netUserAdd         = defaultNetUserAdd
 	netUserDel         = defaultNetUserDel
@@ -118,6 +120,23 @@ func DelUser(_ context.Context, u *User) error {
 	return nil
 }
 
+// handleGroup handles the group name and ID. If the name is empty, then it will
+// look up the group by ID. If neither are provided, then an error is returned.
+func handleGroup(ctx context.Context, g *Group) (*Group, error) {
+	// Name takes precedence over ID, since syscalls use the name.
+	if g.Name != "" {
+		return g, nil
+	}
+	if g.GID == "" {
+		return nil, fmt.Errorf("group name and id are empty")
+	}
+	group, err := FindGroupByID(ctx, g.GID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find group with name %s: %w", g.Name, err)
+	}
+	return group, nil
+}
+
 // CreateGroup creates a new group with the given name.
 func CreateGroup(_ context.Context, group string) error {
 	if err := netLocalGroupAdd(group); err != nil {
@@ -127,8 +146,13 @@ func CreateGroup(_ context.Context, group string) error {
 }
 
 // DelGroup deletes the group from the system.
-func DelGroup(_ context.Context, g *Group) error {
-	if err := netLocalGroupDel(g.Name); err != nil {
+func DelGroup(ctx context.Context, g *Group) error {
+	group, err := handleGroup(ctx, g)
+	if err != nil {
+		return fmt.Errorf("failed to handle group: %w", err)
+	}
+
+	if err := netLocalGroupDel(group.Name); err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
 	}
 	return nil
@@ -144,14 +168,30 @@ func FindGroup(_ context.Context, name string) (*Group, error) {
 	return &Group{Name: groupInfo.Name, GID: groupInfo.Gid}, nil
 }
 
+// FindGroupByID returns the group with the given ID. If the group does not exist,
+// it returns an error.
+func FindGroupByID(_ context.Context, id string) (*Group, error) {
+	groupInfo, err := lookupGroupByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find group: %w", err)
+	}
+	return &Group{Name: groupInfo.Name, GID: groupInfo.Gid}, nil
+}
+
 // AddUserToGroup adds the user to the given group.
-func AddUserToGroup(_ context.Context, u *User, g *Group) error {
+func AddUserToGroup(ctx context.Context, u *User, g *Group) error {
 	osSpecific, ok := u.osSpecific.(*windowsUserInfo)
 	if !ok {
 		return fmt.Errorf("failed to get os specific user info for user")
 	}
 
-	if err := netLocalGroupAddMembers(osSpecific.SID, g.Name); err != nil {
+	// If the group name is empty, we need to look it up by id.
+	group, err := handleGroup(ctx, g)
+	if err != nil {
+		return fmt.Errorf("failed to handle group: %w", err)
+	}
+
+	if err := netLocalGroupAddMembers(osSpecific.SID, group.Name); err != nil {
 		return fmt.Errorf("failed to add user %s to group %v: %w", u.Username, g.Name, err)
 	}
 	return nil
@@ -159,13 +199,19 @@ func AddUserToGroup(_ context.Context, u *User, g *Group) error {
 
 // RemoveUserFromGroup removes the provided user from the given group. If the
 // user is not a member of the group, this is a no-op.
-func RemoveUserFromGroup(_ context.Context, u *User, g *Group) error {
+func RemoveUserFromGroup(ctx context.Context, u *User, g *Group) error {
 	osSpecific, ok := u.osSpecific.(*windowsUserInfo)
 	if !ok {
 		return fmt.Errorf("failed to get os specific user info for user")
 	}
 
-	if err := netLocalGroupDelMembers(osSpecific.SID, g.Name); err != nil {
+	// If the group name is empty, we need to look it up by id.
+	group, err := handleGroup(ctx, g)
+	if err != nil {
+		return fmt.Errorf("failed to handle group: %w", err)
+	}
+
+	if err := netLocalGroupDelMembers(osSpecific.SID, group.Name); err != nil {
 		return fmt.Errorf("failed to remove user %s from group %v: %w", u.Username, g.Name, err)
 	}
 	return nil
