@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/agentcommunication_client"
+	"github.com/GoogleCloudPlatform/agentcommunication_client/gapic"
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/testserver"
@@ -94,6 +95,8 @@ func TestSend(t *testing.T) {
 	defaultRetrypolicy.BackoffFactor = 1
 	defaultRetrypolicy.Jitter = time.Millisecond
 
+	ctx := context.Background()
+
 	msg := &acmpb.AgentInfo{
 		Name:         "testagent",
 		Version:      "testversion",
@@ -121,17 +124,22 @@ func TestSend(t *testing.T) {
 			wantError: true,
 		},
 	}
-	ctx := context.Background()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testConn := &conn{expectedMessage: tc.sendMsg, expectedLabels: tc.labels, throwErr: tc.wantError}
-			connection = testConn
-			ctx = context.WithValue(ctx, OverrideConnection, connection)
+			acs.connection = testConn
+			ctx = context.WithValue(ctx, OverrideConnection, acs.connection)
 			err := Send(ctx, labels, msg)
 			if (err != nil) != tc.wantError {
 				t.Errorf("Send(ctx, %+v, %+v) = got error: %v, want error: %t", labels, msg, err, tc.wantError)
 			}
-			if tc.wantError && !testConn.closeCalled {
+			if !tc.wantError {
+				return
+			}
+			if acs.isConnectionSet.Load() {
+				t.Errorf("Send(ctx, %+v, %+v) connection.Close() did not set isConnectionSet to false", labels, msg)
+			}
+			if !testConn.closeCalled {
 				t.Errorf("Send(ctx, %+v, %+v) = connection.Close() called: false, want true", labels, msg)
 			}
 		})
@@ -166,8 +174,8 @@ func TestWatch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			testClient := &conn{sendMessage: tc.wantMsg, throwErr: tc.wantError}
-			connection = testClient
-			ctx := context.WithValue(ctx, OverrideConnection, connection)
+			acs.connection = testClient
+			ctx := context.WithValue(ctx, OverrideConnection, acs.connection)
 			got, err := Watch(ctx)
 			if (err != nil) != tc.wantError {
 				t.Errorf("Watch(ctx) = error: %v, want error: %t", err, tc.wantError)
@@ -215,8 +223,8 @@ func TestNotify(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			connection = &conn{expectedMessage: tc.event, throwErr: tc.wantErr, expectedLabels: tc.labels, isNotify: true}
-			ctx = context.WithValue(ctx, OverrideConnection, connection)
+			acs.connection = &conn{expectedMessage: tc.event, throwErr: tc.wantErr, expectedLabels: tc.labels, isNotify: true}
+			ctx = context.WithValue(ctx, OverrideConnection, acs.connection)
 			err := Notify(ctx, tc.event)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("Notify(ctx, %+v) got error: %v, want error: %t", tc.event, err, tc.wantErr)
@@ -228,8 +236,10 @@ func TestNotify(t *testing.T) {
 func TestFetchACSClientOverride(t *testing.T) {
 	testConn := &conn{isNotify: true, throwErr: false}
 	ctx := context.WithValue(context.Background(), OverrideConnection, testConn)
-	setConnection(ctx)
-	if diff := cmp.Diff(testConn, connection, cmp.AllowUnexported(conn{})); diff != "" {
+	if err := acs.connect(ctx); err != nil {
+		t.Fatalf("Failed to set test connection: %v", err)
+	}
+	if diff := cmp.Diff(testConn, acs.connection, cmp.AllowUnexported(conn{})); diff != "" {
 		t.Errorf("Unexpected connection, diff (-want +got):\n%s", diff)
 	}
 	if defaultRetrypolicy.MaxAttempts != 2 {
@@ -246,14 +256,17 @@ func setupACS(ctx context.Context, t *testing.T) *testserver.Server {
 	addr := filepath.Join(t.TempDir(), "acs_test_server.sock")
 	s := testserver.NewTestServer(addr)
 
-	t.Cleanup(s.CleanUp)
+	t.Cleanup(func() {
+		s.CleanUp()
+		acs = &acsHelper{}
+	})
 
 	if err := s.Start(); err != nil {
 		t.Fatalf("Failed to start test server: %v", err)
 	}
 
-	isConnectionSet.Store(false)
-	if err := setConnection(ctx); err != nil {
+	acs.isConnectionSet.Store(false)
+	if err := acs.connect(ctx); err != nil {
 		t.Fatalf("Failed to set test connection: %v", err)
 	}
 
@@ -263,6 +276,10 @@ func setupACS(ctx context.Context, t *testing.T) *testserver.Server {
 func TestACSSend(t *testing.T) {
 	ctx := context.Background()
 	s := setupACS(ctx, t)
+
+	if acs.channelID != defaultAgentChannelID {
+		t.Errorf("acs.channelID = %q, want %q", acs.channelID, defaultAgentChannelID)
+	}
 
 	req := &acmpb.PluginEventMessage{
 		PluginName:     "test_plugin",
@@ -309,6 +326,7 @@ func TestACSWatch(t *testing.T) {
 
 	labels := make(map[string]string)
 	labels[messageType] = "agent_controlplane.ConfigurePluginStates"
+
 	if err := s.SendToAgent(req, labels); err != nil {
 		t.Fatalf("SendToAgent(%+v) failed unexpectedly with error: %v", req, err)
 	}
@@ -406,5 +424,160 @@ func TestIsNilInterface(t *testing.T) {
 				t.Errorf("isNilInterface(%v) = %t, want: %t", tc.a, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSendMessage(t *testing.T) {
+	ctx := context.Background()
+	setupACS(ctx, t)
+
+	origPolicy := defaultRetrypolicy
+	orig := sendAgentMessage
+
+	sendAgentMessage = func(ctx context.Context, channelID string, acsClient *agentcommunication.Client, msg *acpb.MessageBody) (*acpb.SendAgentMessageResponse, error) {
+		label := msg.GetLabels()["test_label"]
+
+		switch label {
+		case "successful_request":
+			return &acpb.SendAgentMessageResponse{
+				MessageBody: msg,
+			}, nil
+		default:
+			return nil, fmt.Errorf("test error")
+		}
+	}
+	defaultRetrypolicy.MaxAttempts = 2
+	defaultRetrypolicy.Jitter = time.Millisecond
+
+	t.Cleanup(func() {
+		sendAgentMessage = orig
+		defaultRetrypolicy = origPolicy
+	})
+
+	msg := &acmpb.GuestAgentModuleMetrics{
+		Metrics: []*acmpb.GuestAgentModuleMetric{
+			&acmpb.GuestAgentModuleMetric{
+				MetricName:   acmpb.GuestAgentModuleMetric_NETWORK_INITIALIZATION,
+				StartTime:    tpb.New(time.Date(2025, time.April, 1, 0, 0, 0, 0, time.UTC)),
+				EndTime:      tpb.New(time.Date(2025, time.April, 1, 1, 0, 0, 0, time.UTC)),
+				ModuleStatus: acmpb.GuestAgentModuleMetric_STATUS_SUCCEEDED,
+				Enabled:      true,
+				Error:        "test_error",
+			},
+		},
+	}
+
+	anyMsg, err := apb.New(msg)
+	if err != nil {
+		t.Fatalf("apb.New(%+v) failed unexpectedly with error: %v", msg, err)
+	}
+
+	tests := []struct {
+		name      string
+		label     string
+		wantError bool
+	}{
+		{
+			name:  "success",
+			label: "successful_request",
+		},
+		{
+			name:      "error",
+			label:     "error_request",
+			wantError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			labels := map[string]string{"a": "b", "test_label": tc.label}
+
+			resp, err := SendMessage(ctx, labels, msg)
+			if (err != nil) != tc.wantError {
+				t.Errorf("SendMessage(ctx, %+v, %+v) = got error: %v, want error: %t", labels, msg, err, tc.wantError)
+			}
+
+			if tc.wantError {
+				return
+			}
+
+			if diff := cmp.Diff(anyMsg, resp.GetMessageBody().GetBody(), protocmp.Transform()); diff != "" {
+				t.Errorf("SendMessage(ctx, %+v, %+v) returned unexpected message diff (-want +got):\n%s", labels, msg, diff)
+			}
+		})
+	}
+}
+
+func TestShouldReconnect(t *testing.T) {
+	tests := []struct {
+		name string
+		acs  *acsHelper
+		want bool
+	}{
+		{
+			name: "default",
+			acs:  &acsHelper{},
+			want: true,
+		},
+		{
+			name: "connectionsetup_bool_unset",
+			acs:  &acsHelper{connection: &client.Connection{}, client: &agentcommunication.Client{}},
+			want: true,
+		},
+		{
+			name: "connection_unset",
+			acs: func() *acsHelper {
+				h := &acsHelper{client: &agentcommunication.Client{}}
+				h.isConnectionSet.Store(true)
+				return h
+			}(),
+			want: true,
+		},
+		{
+			name: "client_unset",
+			acs: func() *acsHelper {
+				h := &acsHelper{connection: &client.Connection{}}
+				h.isConnectionSet.Store(true)
+				return h
+			}(),
+			want: true,
+		},
+		{
+			name: "all_set",
+			acs: func() *acsHelper {
+				h := &acsHelper{connection: &client.Connection{}, client: &agentcommunication.Client{}}
+				h.isConnectionSet.Store(true)
+				return h
+			}(),
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.acs.shouldReconnect(); got != tc.want {
+				t.Errorf("shouldReconnect() = %t, want: %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClose(t *testing.T) {
+	ctx := context.Background()
+
+	orig := acs
+	t.Cleanup(func() { acs = orig })
+
+	testConnection := &conn{}
+	acs.connection = testConnection
+	acs.isConnectionSet.Store(true)
+	ctx = context.WithValue(ctx, OverrideConnection, acs.connection)
+
+	acs.close(ctx)
+	if !testConnection.closeCalled {
+		t.Errorf("close() = connection.Close() called: false, want true")
+	}
+	if acs.isConnectionSet.Load() {
+		t.Errorf("close() = isConnectionSet.Load() = true, want false")
 	}
 }

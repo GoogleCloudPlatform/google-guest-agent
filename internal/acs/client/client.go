@@ -23,6 +23,7 @@ import (
 	"time"
 
 	client "github.com/GoogleCloudPlatform/agentcommunication_client"
+	"github.com/GoogleCloudPlatform/agentcommunication_client/gapic"
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
 	"github.com/GoogleCloudPlatform/galog"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
@@ -53,13 +54,8 @@ var (
 	// and will not achieve much in this case but overwhelm instance by consuming
 	// too much CPU/memory.
 	watcherRetrypolicy = retry.Policy{Jitter: time.Second * 2, BackoffFactor: 2, MaximumBackoff: time.Minute * 20}
-	// connMu protects connection.
-	connMu sync.Mutex
-	// connection is cached ACS Connection, reuse across Agent if its already set.
-	connection ConnectionInterface
-	// isConnectionSet is set if connection is initialized and still valid.
-	// Its reset to false in error case to trigger reconnection.
-	isConnectionSet atomic.Bool
+	// acs manages ACS connection and implements all ACS client methods.
+	acs = &acsHelper{}
 )
 
 // ConnectionInterface is the minimum interface required by Agent to communicate
@@ -68,6 +64,22 @@ type ConnectionInterface interface {
 	SendMessage(msg *acpb.MessageBody) error
 	Receive() (*acpb.MessageBody, error)
 	Close()
+}
+
+// acsHelper is a helper struct to manage ACS connection.
+type acsHelper struct {
+	// channelID is the channel ID used by this ACS connection.
+	channelID string
+	// connMu protects connection.
+	connMu sync.Mutex
+	// connection is cached ACS Connection, reuse across Agent if its already set.
+	// connection uses the acsClient to send and receive messages.
+	connection ConnectionInterface
+	// client is a client for interacting with Agent Communication API.
+	client *agentcommunication.Client
+	// isConnectionSet is set if connection is initialized and still valid.
+	// Its reset to false in error case to trigger reconnection.
+	isConnectionSet atomic.Bool
 }
 
 // ContextKey is the context key type to use for overriding.
@@ -120,38 +132,144 @@ func clientOptions(ctx context.Context) ([]option.ClientOption, error) {
 	return opts, nil
 }
 
-// setConnection creates new stream and connection to ACS and sets the client.
+// Close closes the ACS connection and client.
+func (acs *acsHelper) close(ctx context.Context) {
+	galog.Debugf("Closing ACS connection")
+	acs.connMu.Lock()
+	defer acs.connMu.Unlock()
+
+	// Reset connection state, this will trigger to create a new ACS connection
+	// on next send/receive.
+	acs.isConnectionSet.Store(false)
+	acs.connection.Close()
+
+	if ctx.Value(OverrideConnection) != nil {
+		// Skip closing the client in override mode, it might not be set.
+		return
+	}
+
+	if err := acs.client.Close(); err != nil {
+		galog.V(2).Warnf("Failed to close ACS client: %v", err)
+	}
+}
+
+// shouldReconnect returns true if the new acs connection needs to be created.
+func (acs *acsHelper) shouldReconnect() bool {
+	return !acs.isConnectionSet.Load() || (acs.client == nil) || isNilInterface(acs.connection)
+}
+
+// connect creates new stream and connection to ACS and sets the client.
 // New connection is created if found nil or [isConnectionSet] is unset.
 // isConnectionSet can be unset to trigger new connection creation which is
 // generally required on send/receive error.
-func setConnection(ctx context.Context) error {
-	connMu.Lock()
-	defer connMu.Unlock()
+func (acs *acsHelper) connect(ctx context.Context) error {
+	acs.connMu.Lock()
+	defer acs.connMu.Unlock()
 
 	// Used of unit testing. Create connection makes a http call which must be avoided in unit tests.
 	if ctx.Value(OverrideConnection) != nil {
-		connection = ctx.Value(OverrideConnection).(ConnectionInterface)
+		acs.connection = ctx.Value(OverrideConnection).(ConnectionInterface)
 		// Override max retry attempts for unit tests to avoid spending too much
 		// time waiting in retries.
 		defaultRetrypolicy.MaxAttempts = 2
 		return nil
 	}
 
-	if !isConnectionSet.Load() || isNilInterface(connection) {
-		galog.Debugf("Creating new ACS connection")
-		opts, err := clientOptions(ctx)
-		if err != nil {
-			return fmt.Errorf("unable to get client options, err: %w", err)
-		}
-		connection, err = client.CreateConnection(ctx, channelID(), false, opts...)
-		if err != nil {
-			return fmt.Errorf("unable to create new ACS connection, err: %w", err)
-		}
-		isConnectionSet.Store(true)
-		galog.Debugf("Created ACS connection")
+	if !acs.shouldReconnect() {
+		return nil
 	}
 
+	galog.Debugf("Creating new ACS connection")
+	acs.channelID = channelID()
+	opts, err := clientOptions(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to get client options, err: %w", err)
+	}
+	acs.client, err = client.NewClient(ctx, false, opts...)
+	if err != nil {
+		return fmt.Errorf("unable to create new ACS client, err: %w", err)
+	}
+	acs.connection, err = client.NewConnection(ctx, acs.channelID, acs.client)
+	if err != nil {
+		return fmt.Errorf("unable to create new ACS connection, err: %w", err)
+	}
+	acs.isConnectionSet.Store(true)
+	galog.Debugf("Created ACS connection")
 	return nil
+}
+
+// sendStream sends a message to ACS stream.
+func (acs *acsHelper) sendStream(ctx context.Context, labels map[string]string, msg *anypb.Any) error {
+	// [connection] will be nil if [CreateConnection] ever fails. In that case
+	// simply retrying will result into [SIGSEGV]. Make sure connection is set
+	// before sending message.
+	if err := acs.connect(ctx); err != nil {
+		return fmt.Errorf("unable to set connection for sending msg, err: %w", err)
+	}
+	err := acs.connection.SendMessage(&acpb.MessageBody{Labels: labels, Body: msg})
+	if err != nil {
+		// Close connection if error occurs, this triggers to create a new ACS
+		// connection and ensures the previous connection is closed.
+		acs.close(ctx)
+	}
+
+	return err
+}
+
+// sendAgentMessage is a wrapper around client.SendAgentMessage to allow for
+// mocking in unit tests.
+var sendAgentMessage = func(ctx context.Context, channelID string, acsClient *agentcommunication.Client, msg *acpb.MessageBody) (*acpb.SendAgentMessageResponse, error) {
+	return client.SendAgentMessage(ctx, channelID, acsClient, msg)
+}
+
+// sendStream sends a message and wait for response from ACS.
+func (acs *acsHelper) sendMessage(ctx context.Context, labels map[string]string, msg *anypb.Any) (*acpb.SendAgentMessageResponse, error) {
+	if err := acs.connect(ctx); err != nil {
+		return nil, fmt.Errorf("unable to connect for sending msg, err: %w", err)
+	}
+
+	resp, err := sendAgentMessage(ctx, acs.channelID, acs.client, &acpb.MessageBody{Labels: labels, Body: msg})
+	if err != nil {
+		acs.close(ctx)
+	}
+	return resp, err
+}
+
+func (acs *acsHelper) receiveStream(ctx context.Context) (*acpb.MessageBody, error) {
+	if err := acs.connect(ctx); err != nil {
+		return nil, fmt.Errorf("unable to connect for watching new messages on channel, err: %w", err)
+	}
+	msg, err := acs.connection.Receive()
+	if err != nil {
+		acs.close(ctx)
+		return nil, err
+	}
+	return msg, err
+}
+
+// SendMessage sends a message to ACS and waits for response. This is normally
+// used for sending metrics to ACS.
+func SendMessage(ctx context.Context, labels map[string]string, msg proto.Message) (*acpb.SendAgentMessageResponse, error) {
+	if !cfg.Retrieve().Core.ACSClient {
+		galog.V(2).Debugf("ACS client is disabled, ignoring send message request %v", msg)
+		return nil, nil
+	}
+
+	anyMsg, err := anypb.New(msg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to marshal message, err: %w", err)
+	}
+
+	fn := func() (*acpb.SendAgentMessageResponse, error) {
+		resp, err := acs.sendMessage(ctx, labels, anyMsg)
+		if err != nil {
+			return nil, fmt.Errorf("unable to send message, err: %w", err)
+		}
+		galog.V(2).Debugf("Successfully sent message [%s] to ACS, resp: %s", anyMsg.String(), resp.String())
+		return resp, nil
+	}
+
+	return retry.RunWithResponse(ctx, defaultRetrypolicy, fn)
 }
 
 // Notify sends an event notification on ACS.
@@ -172,32 +290,14 @@ func Send(ctx context.Context, labels map[string]string, msg proto.Message) erro
 	}
 
 	fn := func() error {
-		// [connection] will be nil if [CreateConnection] ever fails. In that case
-		// simply retrying will result into [SIGSEGV]. Make sure connection is set
-		// before sending message.
-		if err := setConnection(ctx); err != nil {
-			return fmt.Errorf("unable to set connection for sending msg, err: %w", err)
+		if err := acs.sendStream(ctx, labels, anyMsg); err != nil {
+			return fmt.Errorf("unable to send message on stream, err: %w", err)
 		}
-		err := connection.SendMessage(&acpb.MessageBody{Labels: labels, Body: anyMsg})
-		if err != nil {
-			// Close connection if error occurs, this triggers to create a new ACS
-			// connection and ensures the previous connection is closed.
-			connection.Close()
-			// Reset connection if error occurs, this will trigger to create a new
-			// ACS connection.
-			isConnectionSet.Store(false)
-			// Throw error for retry to try sending again after connection reset.
-			return err
-		}
-		galog.V(2).Debugf("Sent message [%s] to ACS", anyMsg.String())
+		galog.V(2).Debugf("Successfully sent message [%s] to ACS", anyMsg.String())
 		return nil
 	}
 
-	if err := retry.Run(ctx, defaultRetrypolicy, fn); err != nil {
-		return fmt.Errorf("unable to send message, err: %w", err)
-	}
-
-	return nil
+	return retry.Run(ctx, defaultRetrypolicy, fn)
 }
 
 // Watch checks for a new message from ACS and returns.
@@ -208,24 +308,14 @@ func Watch(ctx context.Context) (*acpb.MessageBody, error) {
 	}
 
 	fn := func() (*acpb.MessageBody, error) {
-		if err := setConnection(ctx); err != nil {
-			return nil, fmt.Errorf("unable to set connection for watching channel, err: %w", err)
-		}
-		msg, err := connection.Receive()
+		msg, err := acs.receiveStream(ctx)
 		if err != nil {
-			connection.Close()
-			isConnectionSet.Store(false)
-			return nil, err
+			return nil, fmt.Errorf("unable to listen on stream for new message, err: %w", err)
 		}
-		return msg, err
+		return msg, nil
 	}
 
-	msg, err := retry.RunWithResponse(ctx, watcherRetryPolicy(ctx), fn)
-	if err != nil {
-		return nil, fmt.Errorf("unable to receive message, err: %w", err)
-	}
-
-	return msg, nil
+	return retry.RunWithResponse(ctx, watcherRetryPolicy(ctx), fn)
 }
 
 func watcherRetryPolicy(ctx context.Context) retry.Policy {
