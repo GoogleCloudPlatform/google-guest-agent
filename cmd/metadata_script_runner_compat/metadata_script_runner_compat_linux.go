@@ -16,10 +16,13 @@
 
 package main
 
-const (
+var (
 	// metadataScriptRunnerLegacy is the path to the legacy metadata script runner.
 	// This is the binary that will be used if the core plugin is disabled.
 	metadataScriptRunnerLegacy = "/usr/bin/google_metadata_script_runner"
+)
+
+const (
 	// metadataScriptRunnerNew is the path to the new metadata script runner.
 	// This is the binary that will be used if the core plugin is enabled.
 	metadataScriptRunnerNew = "/usr/bin/gce_metadata_script_runner"
