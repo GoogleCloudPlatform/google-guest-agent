@@ -87,8 +87,8 @@ func (s *Scheduler) remove(jobID string) {
 	delete(s.jobs, jobID)
 }
 
-// isScheduled returns true if job is already scheduled.
-func (s *Scheduler) isScheduled(jobID string) bool {
+// IsScheduled returns true if job is already scheduled.
+func (s *Scheduler) IsScheduled(jobID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.jobs[jobID]
@@ -107,7 +107,7 @@ func run(ctx context.Context, job Job) bool {
 
 // ScheduleJob adds a job to schedule at defined interval.
 func (s *Scheduler) ScheduleJob(ctx context.Context, job Job) error {
-	if s.isScheduled(job.ID()) {
+	if s.IsScheduled(job.ID()) {
 		galog.Infof("Skipping schedule job request for %q, its already scheduled", job.ID())
 		return nil
 	}
@@ -165,7 +165,7 @@ func (s *Scheduler) runOnSchedule(ctx context.Context, j *jobConfig) {
 // UnscheduleJob removes the job from schedule.
 func (s *Scheduler) UnscheduleJob(jobID string) {
 	galog.Infof("Unscheduling job %q", jobID)
-	if !s.isScheduled(jobID) {
+	if !s.IsScheduled(jobID) {
 		return
 	}
 	s.mu.Lock()
