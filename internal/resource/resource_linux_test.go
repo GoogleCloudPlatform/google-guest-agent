@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -42,6 +43,13 @@ func constraintTestSetup(t *testing.T, opts constraintTestOpts) (ConstraintClien
 	if err := os.MkdirAll(testCgroupDir, 0755); err != nil {
 		t.Fatalf("failed to create test cgroup directory: %v", err)
 	}
+
+	// Since the temp directory is in an actual file system, we need to use
+	// os.RemoveAll to remove the cgroup directory.
+	remove = os.RemoveAll
+	t.Cleanup(func() {
+		remove = syscall.Rmdir
+	})
 
 	if opts.cgroupVersion == 1 {
 		// Create all the fake controllers -- cpu and memory.
@@ -66,7 +74,7 @@ func constraintTestSetup(t *testing.T, opts constraintTestOpts) (ConstraintClien
 		}, testCgroupDir
 	}
 	// Make a fake cgroup.controllers file.
-	controllers := []string{}
+	controllers := make([]string, 0)
 	if opts.hasCPUController || opts.overrideAll {
 		controllers = append(controllers, "cpu")
 	}

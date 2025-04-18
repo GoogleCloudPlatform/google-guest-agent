@@ -18,12 +18,14 @@ package resource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -66,6 +68,11 @@ const (
 	// maxCycles is the maximum number of cycles for CPU periods. This is the
 	// default used by cgroups.
 	maxCycles = 100000
+)
+
+var (
+	// remove is the function to remove a cgroup directory. This is stubbed out for testing.
+	remove = syscall.Rmdir
 )
 
 func init() {
@@ -250,7 +257,7 @@ func (c cgroupv2Client) Apply(constraint Constraint) error {
 				return fmt.Errorf("failed to create guest_agent cgroup: %w", err)
 			}
 
-			subtreeControl := []string{}
+			subtreeControl := make([]string, 0)
 			if cpuEnabled {
 				subtreeControl = append(subtreeControl, "+cpu")
 			}
@@ -315,7 +322,8 @@ func removeCgroup(ctx context.Context, dir string) error {
 
 	policy := retry.Policy{MaxAttempts: 5, Jitter: time.Millisecond * 100, BackoffFactor: 2}
 	return retry.Run(ctx, policy, func() error {
-		if err := os.RemoveAll(dir); err != nil {
+		// NOENT is ignored in case the directory was already removed or never existed.
+		if err := remove(dir); err != nil && !errors.Is(err, syscall.ENOENT) {
 			return fmt.Errorf("unable to remove cgroup directory %q: %w", dir, err)
 		}
 		return nil
