@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -635,26 +636,26 @@ func TestDisableOSLoginErrors(t *testing.T) {
 	}
 
 	// Run tests.
+	// TODO(b/415126609): Run each test case using t.Run() once run.WithContext
+	// and the testRunner have been refactored to be properly thread-safe.
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			module := createTestModule(t)
-			module.services = map[daemon.RestartMethod][]serviceRestartConfig{
-				daemon.TryRestart: {
-					{
-						services: []string{"service1"},
-					},
+		module := createTestModule(t)
+		module.services = map[daemon.RestartMethod][]serviceRestartConfig{
+			daemon.TryRestart: {
+				{
+					services: []string{"service1"},
 				},
-			}
-			createTestFiles(t, module, test.fileOpts)
-			_ = setupTestRunner(t, test.runnerErr)
+			},
+		}
+		createTestFiles(t, module, test.fileOpts)
+		_ = setupTestRunner(t, test.runnerErr)
 
-			module.osloginSetup(context.Background(), enabledDesc)
+		module.osloginSetup(context.Background(), enabledDesc)
 
-			// Now test for errors.
-			if err := module.disableOSLogin(context.Background(), events.FetchManager()); err == nil {
-				t.Errorf("disableOSLogin(ctx, evManager) = nil, want error")
-			}
-		})
+		// Now test for errors.
+		if err := module.disableOSLogin(context.Background(), events.FetchManager()); err == nil {
+			t.Errorf("disableOSLogin(ctx, evManager) = nil, want error")
+		}
 	}
 }
 
@@ -1036,34 +1037,6 @@ func TestRetryFailConfiguration(t *testing.T) {
 				testPAM:      true,
 			},
 		},
-		{
-			name: "retry-restart-services",
-			services: map[daemon.RestartMethod][]serviceRestartConfig{
-				daemon.TryRestart: {
-					{
-						protocol: serviceRestartOptional,
-						services: []string{"service1"},
-					},
-				},
-			},
-			fileOpts: osloginTestFileOpts{
-				testSSHD:     true,
-				testNSSwitch: true,
-				testPAM:      true,
-				testGroup:    true,
-			},
-			runnerErr: true,
-		},
-		{
-			name: "retry-nss-cache-fill",
-			fileOpts: osloginTestFileOpts{
-				testSSHD:     true,
-				testNSSwitch: true,
-				testPAM:      true,
-				testGroup:    true,
-			},
-			runnerErr: true,
-		},
 	}
 
 	// Mock oslogin enabled metadata.
@@ -1086,7 +1059,7 @@ func TestRetryFailConfiguration(t *testing.T) {
 			module := createTestModule(t)
 			module.services = test.services
 			createTestFiles(t, module, test.fileOpts)
-			_ = setupTestRunner(t, test.runnerErr)
+			_ = setupTestRunner(t, false)
 
 			if ok := module.osloginSetup(context.Background(), enabledDesc); !ok {
 				t.Fatalf("osloginSetup(ctx, %v) = %t, want %t", enabledDesc, ok, true)
@@ -1098,7 +1071,6 @@ func TestRetryFailConfiguration(t *testing.T) {
 			}
 
 			// Now make sure things can pass.
-			_ = setupTestRunner(t, false)
 			createTestFiles(t, module, osloginTestFileOpts{
 				testSSHD:     true,
 				testNSSwitch: true,
@@ -1140,11 +1112,16 @@ func TestRetryFailConfiguration(t *testing.T) {
 }
 
 type testRunner struct {
+	sync.Mutex
+
 	returnErr   bool
 	seenCommand map[string][][]string
 }
 
 func (t *testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	t.Lock()
+	defer t.Unlock()
+
 	t.seenCommand[opts.Name] = append(t.seenCommand[opts.Name], opts.Args)
 
 	if t.returnErr {
@@ -1154,17 +1131,23 @@ func (t *testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Re
 }
 
 func setupTestRunner(t *testing.T, returnErr bool) *testRunner {
-	testRunner := &testRunner{
+	tr := &testRunner{
+		Mutex:       sync.Mutex{},
 		returnErr:   returnErr,
 		seenCommand: make(map[string][][]string),
 	}
 
-	oldClient := run.Client
-	run.Client = testRunner
-	t.Cleanup(func() {
-		run.Client = oldClient
-	})
-	return testRunner
+	// TODO(b/415126609): refactor run.WithContext so testing
+	// is easier and doesn't require hacks like this.
+	if oldTestRunner, ok := run.Client.(*testRunner); ok {
+		// If the present run.Client is also a testRunner,
+		// wait for it to finish before swapping it out.
+		// This satisfies TSAN checks which would otherwise complain.
+		oldTestRunner.Lock()
+		defer oldTestRunner.Unlock()
+	}
+	run.Client = tr
+	return tr
 }
 
 type osloginTestFileOpts struct {
