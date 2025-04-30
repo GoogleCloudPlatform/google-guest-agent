@@ -54,6 +54,11 @@ func (p *PluginMetrics) ID() string {
 	return fmt.Sprintf("%s-metrics", p.plugin.FullName())
 }
 
+// MetricName returns the metric name for the job.
+func (p *PluginMetrics) MetricName() acpb.GuestAgentModuleMetric_Metric {
+	return acpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED
+}
+
 // Interval returns the interval of the getting plugin metrics.
 func (p *PluginMetrics) Interval() (time.Duration, bool) {
 	return p.interval, true

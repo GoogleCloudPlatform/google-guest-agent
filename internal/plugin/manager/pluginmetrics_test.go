@@ -93,6 +93,10 @@ func TestPluginMetrics(t *testing.T) {
 	wantInterval := 1 * time.Second
 	pm := NewPluginMetrics(p, wantInterval)
 
+	if pm.MetricName() != acpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED {
+		t.Errorf("pm.MetricName() = %v, want %v", pm.MetricName().String(), acpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED.String())
+	}
+
 	wantID := "A_12-metrics"
 	if pm.ID() != wantID {
 		t.Errorf("ID() = %q, want %q", pm.ID(), wantID)

@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/agentcrypto/proto/credentials"
+	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/uefi"
 )
@@ -227,6 +228,11 @@ func (j *CredsJob) Run(ctx context.Context) (bool, error) {
 // ID returns the ID for this job.
 func (j *CredsJob) ID() string {
 	return MTLSSchedulerID
+}
+
+// MetricName returns the metric name for the job.
+func (j *CredsJob) MetricName() acppb.GuestAgentModuleMetric_Metric {
+	return acppb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION
 }
 
 // Interval returns the interval at which job is executed.

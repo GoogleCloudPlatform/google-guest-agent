@@ -164,3 +164,10 @@ func (mr *MetricRegistry) Flush(ctx context.Context) {
 		}
 	}
 }
+
+// Metrics returns the buffered metrics. This is used for testing purposes only.
+func (mr *MetricRegistry) Metrics() []proto.Message {
+	mr.metricsMu.Lock()
+	defer mr.metricsMu.Unlock()
+	return mr.metrics
+}
