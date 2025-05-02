@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 )
@@ -31,10 +30,6 @@ func TestScheduleJob(t *testing.T) {
 	s := scheduler.Instance()
 	job := New()
 	job.forceShouldEnable = true
-
-	if job.MetricName() != acppb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION {
-		t.Errorf("MetricName() = %s, want %s", job.MetricName().String(), acppb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION.String())
-	}
 
 	ctx := context.Background()
 	s.ScheduleJob(ctx, job)

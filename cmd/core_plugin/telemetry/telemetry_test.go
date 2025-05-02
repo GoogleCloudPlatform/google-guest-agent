@@ -107,10 +107,6 @@ func TestJobInterface(t *testing.T) {
 		t.Errorf("j.ID() = %s, want %s", j.ID(), telemetryModuleID)
 	}
 
-	if j.MetricName() != acppb.GuestAgentModuleMetric_TELEMETRY_INITIALIZATION {
-		t.Errorf("j.MetricName() = %s, want %s", j.MetricName().String(), acppb.GuestAgentModuleMetric_TELEMETRY_INITIALIZATION.String())
-	}
-
 	interval, enable := j.Interval()
 	if interval != telemetryInterval {
 		t.Errorf("j.Interval() = interval %v, want %v", interval, telemetryInterval)

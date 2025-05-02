@@ -77,11 +77,6 @@ func (j *Job) ID() string {
 	return telemetryModuleID
 }
 
-// MetricName returns the metric name for the job.
-func (j *Job) MetricName() acppb.GuestAgentModuleMetric_Metric {
-	return acppb.GuestAgentModuleMetric_TELEMETRY_INITIALIZATION
-}
-
 // Run records telemetry data.
 func (j *Job) Run(ctx context.Context) (bool, error) {
 	osInfo, err := formatOSInfo(j.osInfoReader())

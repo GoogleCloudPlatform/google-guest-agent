@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 )
@@ -67,11 +66,6 @@ func NewCertRefresher() *RefresherJob {
 // ID returns the job id.
 func (j *RefresherJob) ID() string {
 	return certRefresherModuleID
-}
-
-// MetricName returns the metric name for the job.
-func (j *RefresherJob) MetricName() acmpb.GuestAgentModuleMetric_Metric {
-	return acmpb.GuestAgentModuleMetric_WORKLOAD_CERT_REFRESH_INITIALIZATION
 }
 
 // Interval returns the interval at which job should be rescheduled and [true]

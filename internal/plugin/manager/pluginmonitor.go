@@ -60,11 +60,6 @@ func (m *PluginMonitor) ID() string {
 	return fmt.Sprintf("plugin_%s_monitor", m.plugin.FullName())
 }
 
-// MetricName returns the metric name for the job.
-func (m *PluginMonitor) MetricName() acpb.GuestAgentModuleMetric_Metric {
-	return acpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED
-}
-
 // Interval returns the interval for scheduler to run this job.
 func (m *PluginMonitor) Interval() (time.Duration, bool) {
 	return m.interval, true

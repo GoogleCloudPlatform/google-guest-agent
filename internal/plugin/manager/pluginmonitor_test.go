@@ -42,10 +42,6 @@ func TestPluginMonitoring(t *testing.T) {
 	wantInterval := time.Duration(2) * time.Millisecond
 	pm := NewPluginMonitor(p, wantInterval)
 
-	if pm.MetricName() != acpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED {
-		t.Errorf("pm.MetricName() = %v, want %v", pm.MetricName().String(), acpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED.String())
-	}
-
 	wantID := "plugin_A_12_monitor"
 	if pm.ID() != wantID {
 		t.Errorf("pm.ID() = %q, want %q", pm.ID(), wantID)
