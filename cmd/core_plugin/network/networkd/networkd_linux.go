@@ -33,6 +33,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
@@ -61,7 +62,7 @@ func (sn *Module) ID() string {
 func (sn *Module) IsManaging(ctx context.Context, opts *service.Options) (bool, error) {
 	galog.Debugf("Checking if systemd-networkd is managing the network interfaces.")
 
-	iface := opts.NICConfigs[0].Interface.Name()
+	iface := opts.GetPrimaryNIC().Interface.Name()
 
 	// Check the version.
 	if _, err := execLookPath("networkctl"); err != nil {
@@ -160,21 +161,35 @@ func (sn *Module) interfaceConfiguredJSON(ctx context.Context, iface string) (bo
 }
 
 // WriteDropins writes the networkd drop-in files based on the provided NICs.
-func (sn *Module) WriteDropins(nics []*nic.Configuration, filePrefix string) (bool, error) {
+func (sn *Module) WriteDropins(nics []*nic.Configuration, filePrefix, primaryNICConfigIdentifier string) (bool, error) {
 	galog.Debugf("Writing systemd-networkd drop-in files.")
 
 	changed := false
-
-	for ii, nic := range nics {
-		filePath := sn.dropinFile(filePrefix, nic.Interface.Name())
+	for _, nic := range nics {
+		filePath := sn.dropinFile(filePrefix, fmt.Sprintf("a-%s", nic.Interface.Name()))
+		if primaryNICConfigIdentifier != "" && !cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC && nic.Index == 0 {
+			filePath = sn.dropinFile(filePrefix, primaryNICConfigIdentifier)
+		}
 
 		dir := filepath.Dir(filePath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return changed, fmt.Errorf("error creating drop-in directory %s: %v", dir, err)
 		}
 
-		if err := sn.writeEthernetConfig(nic, filePath, false, ii == 0); err != nil {
-			return changed, fmt.Errorf("error writing systemd-networkd drop-in configs: %v", err)
+		// Only write the drop-in files for the primary NIC if the primary NIC is
+		// managed by guest-agent.
+		if cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC || nic.Index != 0 {
+			galog.Debugf("Writing systemd-networkd drop-in file: %s", filePath)
+			if err := sn.writeEthernetConfig(nic, filePath, false, nic.Index == 0); err != nil {
+				return changed, fmt.Errorf("error writing systemd-networkd drop-in configs: %v", err)
+			}
+		} else {
+			// Otherwise, write a drop-in for only the routes.
+			galog.Debugf("Writing systemd-networkd route drop-in file: %s", filePath)
+			_, err := sn.writeRoutesDropin(nic, filePath)
+			if err != nil {
+				return changed, fmt.Errorf("error writing systemd-networkd route drop-in configs: %v", err)
+			}
 		}
 
 		changed = true
@@ -184,11 +199,16 @@ func (sn *Module) WriteDropins(nics []*nic.Configuration, filePrefix string) (bo
 }
 
 // RollbackDropins rolls back the drop-in files previously created by us.
-func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix string) error {
+func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix, primaryNICConfigIdentifier string) error {
 	galog.Debugf("Rolling back systemd-networkd drop-in files.")
 
 	for _, nic := range nics {
-		filePath := sn.dropinFile(filePrefix, nic.Interface.Name())
+		filePath := sn.dropinFile(filePrefix, fmt.Sprintf("a-%s", nic.Interface.Name()))
+		if primaryNICConfigIdentifier != "" && nic.Index == 0 {
+			if _, err := rollbackConfiguration(sn.dropinFile(filePrefix, primaryNICConfigIdentifier)); err != nil {
+				return fmt.Errorf("error rolling back systemd-networkd routes drop-in config: %w", err)
+			}
+		}
 
 		if _, err := rollbackConfiguration(filePath); err != nil {
 			return fmt.Errorf("error rolling back systemd-networkd drop-in config: %w", err)
@@ -206,14 +226,19 @@ func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix string) 
 // Setup sets up the network interfaces using systemd-networkd.
 func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 	galog.Info("Setting up systemd-networkd interfaces.")
+	nicConfigs := opts.FilteredNICConfigs()
 
 	var keepVlanConfigs []string
 
 	// Write the config files.
-	for index, nic := range opts.NICConfigs {
+	for _, nic := range nicConfigs {
+		if !cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC && nic.Index == 0 {
+			continue
+		}
+
 		filePath := sn.networkFile(nic.Interface.Name())
 
-		if err := sn.writeEthernetConfig(nic, filePath, true, index == 0); err != nil {
+		if err := sn.writeEthernetConfig(nic, filePath, true, nic.Index == 0); err != nil {
 			return fmt.Errorf("error writing network configs: %v", err)
 		}
 
@@ -241,7 +266,7 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 
 	// If we've not changed any configuration we shouldn't have to reload
 	// systemd-networkd.
-	if len(opts.NICConfigs) == 0 && !vlanCleanedup {
+	if len(nicConfigs) == 0 && !vlanCleanedup {
 		return nil
 	}
 
@@ -412,13 +437,15 @@ func (sn *Module) writeEthernetConfig(nic *nic.Configuration, filePath string, w
 	}
 
 	if nic.ExtraAddresses != nil && writeRoutes {
+		var routes []*networkdRoute
 		for _, ipAddress := range nic.ExtraAddresses.MergedSlice() {
-			data.Network.Routes = append(data.Network.Routes, &networkdRoute{
+			routes = append(routes, &networkdRoute{
 				Destination: ipAddress.String(),
 				Scope:       "host",
 				Type:        "local",
 			})
 		}
+		data.Route = routes
 	}
 
 	if err := data.write(sn.networkFile(nic.Interface.Name())); err != nil {
@@ -426,6 +453,49 @@ func (sn *Module) writeEthernetConfig(nic *nic.Configuration, filePath string, w
 	}
 
 	return nil
+}
+
+// writeRoutesDropin writes the systemd config for the provided interfaces'
+// routes.
+//
+// This is only used for routes for the primary NIC if the guest agent is not
+// managing the primary NIC. Since the routes are written as part of the network
+// configuration, if such a configuration is not written, the routes will not be
+// setup otherwise. This will override the existing default route configuration
+// for the primary NIC.
+func (sn *Module) writeRoutesDropin(nic *nic.Configuration, filePath string) (bool, error) {
+	galog.Debugf("Write systemd-networkd route drop-in config for %s.", nic.Interface.Name())
+	if nic.ExtraAddresses == nil || len(nic.ExtraAddresses.MergedSlice()) == 0 {
+		galog.Debugf("No routes to write for %s.", nic.Interface.Name())
+
+		// If there are no routes, we should remove the existing override configuration.
+		changed, err := rollbackConfiguration(filePath)
+		if err != nil {
+			return changed, fmt.Errorf("failed to rollback systemd-networkd route drop-in config: %w", err)
+		}
+		return changed, nil
+	}
+	addrs := nic.ExtraAddresses.MergedSlice()
+
+	routeConfig := &networkdRoutesDropinConfig{}
+	var routes []*networkdRoute
+	for _, addr := range addrs {
+		route := &networkdRoute{
+			Destination: addr.String(),
+			Scope:       "host",
+			Type:        "local",
+		}
+		routes = append(routes, route)
+	}
+	routeConfig.Route = routes
+
+	// Since there can be multiple routes for an interface, we need to allow
+	// non-unique sections.
+	if err := ini.WriteIniFile(filePath, routeConfig, ini.LoadOptions{AllowNonUniqueSections: true}); err != nil {
+		return false, fmt.Errorf("failed to write networkd's route drop-in config: %w", err)
+	}
+
+	return true, nil
 }
 
 // netdevFile returns the networkd's .netdev file path.
@@ -472,7 +542,7 @@ func (sn *Module) Rollback(ctx context.Context, opts *service.Options) error {
 	ethernetRequiresReload := false
 
 	// Rollback ethernet interfaces.
-	for _, nic := range opts.NICConfigs {
+	for _, nic := range opts.NICConfigs() {
 		iface := nic.Interface.Name()
 
 		reqRestart1, err := rollbackConfiguration(sn.networkFile(iface))
@@ -524,9 +594,12 @@ type networkdConfig struct {
 
 	// Link is the systemd-networkd init file's [Link] section.
 	Link *networkdLinkConfig `ini:",omitempty"`
+
+	// Route specifies the routes to be installed for this network.
+	Route []*networkdRoute `ini:",omitempty,nonunique"`
 }
 
-// write writes the networkd's configuration file to its destination.
+// write writes the networkd configuration file to its destination.
 func (sc *networkdConfig) write(fPath string) error {
 	galog.V(2).Debugf("Writing systemd-networkd's configuration file: %s.", fPath)
 

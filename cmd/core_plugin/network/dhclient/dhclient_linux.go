@@ -30,7 +30,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/route"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
@@ -130,7 +129,7 @@ func (ds *dhclientService) Setup(ctx context.Context, opts *service.Options) err
 	}
 
 	// Setup VLAN interfaces.
-	for _, nicConfig := range opts.NICConfigs {
+	for _, nicConfig := range opts.FilteredNICConfigs() {
 		if err := ds.setupVlanInterfaces(ctx, nicConfig); err != nil {
 			return err
 		}
@@ -242,7 +241,7 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 		return err
 	}
 
-	partitions, err := newInterfacePartitions(opts.NICConfigs)
+	partitions, err := newInterfacePartitions(opts.FilteredNICConfigs())
 	if err != nil {
 		return fmt.Errorf("error partitioning interfaces: %w", err)
 	}
@@ -268,27 +267,6 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 		}
 	}
 
-	// Setup all nics routes.
-	for _, nic := range opts.NICConfigs {
-		galog.Debugf("Attempting to add any missing route for nic: %s", nic.Interface.Name())
-
-		if nic.ExtraAddresses == nil {
-			galog.V(2).Debugf("No extra addresses to add routes for: %s", nic.Interface.Name())
-			continue
-		}
-
-		data, err := route.MissingRoutes(ctx, nic.Interface.Name(), nic.ExtraAddresses.MergedMap())
-		if err != nil {
-			return fmt.Errorf("failed to list missing routes: %w", err)
-		}
-
-		for _, addMe := range data {
-			if err := route.Add(ctx, addMe); err != nil {
-				return fmt.Errorf("failed to add route: %w", err)
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -296,7 +274,7 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 func (ds *dhclientService) setupIPV6Interfaces(ctx context.Context, opts *service.Options, partitions *interfacePartitions) error {
 	// Wait for tentative IPs to resolve as part of SLAAC for primary network
 	// interface.
-	primaryInterface := opts.NICConfigs[0].Interface.Name()
+	primaryInterface := opts.GetPrimaryNIC().Interface.Name()
 	tentative := []string{"-6", "-o", "a", "s", "dev", primaryInterface, "scope", "link", "tentative"}
 
 	// Run the ip command in a retry loop to wait for the tentative IP to resolve.
@@ -402,7 +380,7 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options) 
 	}
 
 	// Release all the interface leases from dhclient.
-	for _, iface := range opts.NICConfigs {
+	for _, iface := range opts.NICConfigs() {
 		ifaceName := iface.Interface.Name()
 
 		// Release IPv4 leases.
@@ -433,10 +411,6 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options) 
 
 		if err := ds.removeVlanInterfaces(ctx, iface, nil); err != nil {
 			return fmt.Errorf("failed to remove vlan interfaces: %w", err)
-		}
-
-		if err := route.RemoveRoutes(ctx, iface.Interface.Name()); err != nil {
-			return fmt.Errorf("failed to remove routes managed by dhclient manager: %w", err)
 		}
 	}
 

@@ -254,10 +254,11 @@ func (lc *linuxClient) MissingRoutes(ctx context.Context, iface string, addresse
 
 	config := cfg.Retrieve()
 
+	// Ethernet Proto ID is left out to ensure we don't mark routes as missing that
+	// are already installed for the given interface.
 	opts := Options{
 		Table:  "local",
 		Type:   "local",
-		Proto:  config.IPForwarding.EthernetProtoID,
 		Device: iface,
 	}
 

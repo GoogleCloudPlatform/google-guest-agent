@@ -31,6 +31,12 @@ const (
 	// ifcfg files are stored.
 	defaultNetworkScriptsDir = "/etc/sysconfig/network-scripts"
 
+	// defaultNetworkManagerConfig is the default NetworkManager configuration location.
+	defaultNetworkManagerConfig = "/run/NetworkManager/system-connections/Wired connection 1.nmconnection"
+
+	// defaultNetworkManagerConnID is the default NetworkManager connection ID.
+	defaultNetworkManagerConnID = "Wired connection 1"
+
 	// nmConfigFileMode is the file mode for the NetworkManager config files.
 	// The permissions need to be 600 in order for nmcli to load and use the file
 	// correctly.

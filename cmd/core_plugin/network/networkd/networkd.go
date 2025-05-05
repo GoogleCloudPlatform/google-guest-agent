@@ -30,7 +30,7 @@ const (
 
 	// DefaultDropinDir is the directory where systemd-networkd's drop-in files
 	// are located.
-	DefaultDropinDir = "/etc/systemd/network/"
+	DefaultDropinDir = "/run/systemd/network/"
 
 	// DefaultConfigDir is the directory where systemd-networkd's configuration
 	// files are located.
@@ -78,9 +78,13 @@ type networkdNetworkConfig struct {
 
 	// VLAN specifies the VLANs this network should be member of.
 	VLANS []string `ini:"VLAN,omitempty,allowshadow"`
+}
 
-	// Routes specifies the routes to be installed for this network.
-	Routes []*networkdRoute `ini:"Route,omitempty,allowshadow"`
+// networkdRoutesDropinConfig contains the systemd-networkd's routes drop-in
+// configuration.
+type networkdRoutesDropinConfig struct {
+	// Route is the list of routes to be added to the interface.
+	Route []*networkdRoute `ini:",nonunique"`
 }
 
 // networkdRoute contains the systemd-networkd's route configuration.
@@ -88,9 +92,9 @@ type networkdRoute struct {
 	// Destination is the destination of the route.
 	Destination string
 	// Scope is the scope of the route (i.e. link, site, global, host).
-	Scope string
+	Scope string `ini:",omitempty"`
 	// Type is the type of the route (i.e. local).
-	Type string
+	Type string `ini:",omitempty"`
 }
 
 // networkdDHCPConfig contains the dhcp specific configurations for a

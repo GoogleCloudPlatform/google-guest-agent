@@ -49,8 +49,8 @@ func (rm *runMock) WithContext(ctx context.Context, opts run.Options) (*run.Resu
 type testBackend struct {
 	IDCb              func() string
 	IsManagingCb      func(context.Context, *service.Options) (bool, error)
-	WriteDropinsCb    func([]*nic.Configuration, string) (bool, error)
-	RollbackDropinsCb func([]*nic.Configuration, string) error
+	WriteDropinsCb    func([]*nic.Configuration, string, string) (bool, error)
+	RollbackDropinsCb func([]*nic.Configuration, string, string) error
 	ReloadCb          func(context.Context) error
 }
 
@@ -62,12 +62,12 @@ func (tb *testBackend) IsManaging(ctx context.Context, opts *service.Options) (b
 	return tb.IsManagingCb(ctx, opts)
 }
 
-func (tb *testBackend) WriteDropins(nics []*nic.Configuration, filePrefix string) (bool, error) {
-	return tb.WriteDropinsCb(nics, filePrefix)
+func (tb *testBackend) WriteDropins(nics []*nic.Configuration, filePrefix string, _ string) (bool, error) {
+	return tb.WriteDropinsCb(nics, filePrefix, "")
 }
 
-func (tb *testBackend) RollbackDropins(nics []*nic.Configuration, filePrefix string) error {
-	return tb.RollbackDropinsCb(nics, filePrefix)
+func (tb *testBackend) RollbackDropins(nics []*nic.Configuration, filePrefix string, _ string) error {
+	return tb.RollbackDropinsCb(nics, filePrefix, "")
 }
 
 func (tb *testBackend) Reload(ctx context.Context) error {
@@ -105,11 +105,11 @@ func (tb *testNetplanBackend) IsManaging(ctx context.Context, opts *service.Opti
 	return tb.IsManagingCb(ctx, opts)
 }
 
-func (tb *testNetplanBackend) WriteDropins([]*nic.Configuration, string) (bool, error) {
+func (tb *testNetplanBackend) WriteDropins([]*nic.Configuration, string, string) (bool, error) {
 	return false, nil
 }
 
-func (tb *testNetplanBackend) RollbackDropins([]*nic.Configuration, string) error {
+func (tb *testNetplanBackend) RollbackDropins([]*nic.Configuration, string, string) error {
 	return nil
 }
 
@@ -207,13 +207,11 @@ func TestIsManaging(t *testing.T) {
 				NameOp: func() string { return "iface" },
 			}
 
-			opts := &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: iface,
-					},
+			opts := service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: iface,
 				},
-			}
+			})
 
 			got, err := svc.IsManaging(context.Background(), opts)
 			if (err == nil) == tc.wantErr {
@@ -245,7 +243,7 @@ func TestSetup(t *testing.T) {
 			dropinRoutes: true,
 			opts:         &service.Options{},
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return false, nil
 				},
 			},
@@ -254,17 +252,15 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "fail-write-backend-dropins",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, errors.New("write dropins failed")
 				},
 			},
@@ -276,17 +272,15 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "fail-networkctl",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -305,18 +299,23 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "fail-netplan-apply",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						SupportsIPv6: true,
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+				{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface2" },
+					},
+					Index: 1,
+				},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -332,18 +331,16 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "success",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						SupportsIPv6: true,
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -355,7 +352,7 @@ func TestSetup(t *testing.T) {
 				Network: netplanNetwork{
 					Version: netplanConfigVersion,
 					Ethernets: map[string]netplanEthernet{
-						"iface": netplanEthernet{
+						"a-iface": netplanEthernet{
 							Match: netplanMatch{
 								Name: "iface",
 							},
@@ -376,24 +373,23 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "success-no-use-domains-on-secondary-nics",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						SupportsIPv6: true,
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-1" },
-						},
-					},
-					&nic.Configuration{
-						SupportsIPv6: true,
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-1" },
 					},
 				},
-			},
+				&nic.Configuration{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 1,
+				},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -405,7 +401,7 @@ func TestSetup(t *testing.T) {
 				Network: netplanNetwork{
 					Version: netplanConfigVersion,
 					Ethernets: map[string]netplanEthernet{
-						"iface-1": netplanEthernet{
+						"a-iface-1": netplanEthernet{
 							Match: netplanMatch{
 								Name: "iface-1",
 							},
@@ -418,7 +414,7 @@ func TestSetup(t *testing.T) {
 								UseDomains: &trueVal,
 							},
 						},
-						"iface-2": netplanEthernet{
+						"a-iface-2": netplanEthernet{
 							Match: netplanMatch{
 								Name: "iface-2",
 							},
@@ -439,21 +435,19 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "success-extra-addresses",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						SupportsIPv6: true,
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						ExtraAddresses: &address.ExtraAddresses{
-							IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					ExtraAddresses: &address.ExtraAddresses{
+						IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -465,7 +459,7 @@ func TestSetup(t *testing.T) {
 				Network: netplanNetwork{
 					Version: netplanConfigVersion,
 					Ethernets: map[string]netplanEthernet{
-						"iface": netplanEthernet{
+						"a-iface": netplanEthernet{
 							Match: netplanMatch{
 								Name: "iface",
 							},
@@ -479,12 +473,14 @@ func TestSetup(t *testing.T) {
 							},
 							Routes: []netplanRoute{
 								{
-									To:   "10.10.10.10",
-									Type: "local",
+									To:    "10.10.10.10",
+									Type:  "local",
+									Scope: "host",
 								},
 								{
-									To:   "10.10.10.0/24",
-									Type: "local",
+									To:    "10.10.10.0/24",
+									Type:  "local",
+									Scope: "host",
 								},
 							},
 						},
@@ -496,21 +492,19 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "success-extra-addresses-no-dropin-routes",
 			dropinRoutes: false,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						SupportsIPv6: true,
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						ExtraAddresses: &address.ExtraAddresses{
-							IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					ExtraAddresses: &address.ExtraAddresses{
+						IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -522,7 +516,7 @@ func TestSetup(t *testing.T) {
 				Network: netplanNetwork{
 					Version: netplanConfigVersion,
 					Ethernets: map[string]netplanEthernet{
-						"iface": netplanEthernet{
+						"a-iface": netplanEthernet{
 							Match: netplanMatch{
 								Name: "iface",
 							},
@@ -543,18 +537,16 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "success-no-extra-addresses-no-dropin-routes",
 			dropinRoutes: false,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						SupportsIPv6: true,
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -571,7 +563,7 @@ func TestSetup(t *testing.T) {
 				Network: netplanNetwork{
 					Version: netplanConfigVersion,
 					Ethernets: map[string]netplanEthernet{
-						"iface": netplanEthernet{
+						"a-iface": netplanEthernet{
 							Match: netplanMatch{
 								Name: "iface",
 							},
@@ -592,29 +584,27 @@ func TestSetup(t *testing.T) {
 		{
 			name:         "success-vlan",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						SupportsIPv6: true,
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
-								Vlan: 12,
-								IPv6Addresses: []*address.IPAddr{
-									&address.IPAddr{},
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					SupportsIPv6: true,
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
+							},
+							Vlan: 12,
+							IPv6Addresses: []*address.IPAddr{
+								&address.IPAddr{},
 							},
 						},
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+					},
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+				WriteDropinsCb: func([]*nic.Configuration, string, string) (bool, error) {
 					return true, nil
 				},
 				ReloadCb: networkdModule.Reload,
@@ -626,7 +616,7 @@ func TestSetup(t *testing.T) {
 				Network: netplanNetwork{
 					Version: netplanConfigVersion,
 					Ethernets: map[string]netplanEthernet{
-						"iface": netplanEthernet{
+						"a-iface": netplanEthernet{
 							Match: netplanMatch{
 								Name: "iface",
 							},
@@ -647,7 +637,7 @@ func TestSetup(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := cfg.Load(nil); err != nil {
+	if err := cfg.Load([]byte("[NetworkInterfaces]\nmanage_primary_nic = true\n")); err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
@@ -713,12 +703,14 @@ func TestSetup(t *testing.T) {
 					if diff := cmp.Diff(tc.want, &got); diff != "" {
 						t.Errorf("Setup() returned diff (-want +got):\n%s", diff)
 					}
+				} else {
+					t.Errorf("Setup() did not generate a drop-in file")
 				}
 			}
 
 			// If vlan interfaces are present, the vlan drop-in file should not exist.
-			if len(tc.opts.NICConfigs) > 0 && len(tc.opts.NICConfigs[0].VlanInterfaces) > 0 {
-				tc.opts.NICConfigs[0].VlanInterfaces = nil
+			if len(tc.opts.NICConfigs()) > 0 && len(tc.opts.NICConfigs()[0].VlanInterfaces) > 0 {
+				tc.opts.NICConfigs()[0].VlanInterfaces = nil
 
 				err := svc.Setup(ctx, tc.opts)
 				if (err == nil) == tc.wantErr {
@@ -748,17 +740,15 @@ func TestRollback(t *testing.T) {
 		{
 			name:         "fail-rollback-backend-dropins",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				RollbackDropinsCb: func([]*nic.Configuration, string, string) error {
 					return errors.New("rollback dropins failed")
 				},
 			},
@@ -767,17 +757,15 @@ func TestRollback(t *testing.T) {
 		{
 			name:         "fail-rollback-dropins",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				RollbackDropinsCb: func([]*nic.Configuration, string, string) error {
 					return nil
 				},
 			},
@@ -786,17 +774,15 @@ func TestRollback(t *testing.T) {
 		{
 			name:         "success",
 			dropinRoutes: true,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				RollbackDropinsCb: func([]*nic.Configuration, string, string) error {
 					return nil
 				},
 			},
@@ -807,25 +793,23 @@ func TestRollback(t *testing.T) {
 		{
 			name:         "success-native-routes",
 			dropinRoutes: false,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						ExtraAddresses: &address.ExtraAddresses{
-							IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					ExtraAddresses: &address.ExtraAddresses{
+						IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
 					},
 				},
-			},
+			}),
 			runner: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, nil
 				},
 			},
 			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				RollbackDropinsCb: func([]*nic.Configuration, string, string) error {
 					return nil
 				},
 			},
@@ -992,9 +976,9 @@ func TestSetOSFlags(t *testing.T) {
 				OS:      "debian",
 				Version: osinfo.Ver{Major: 12},
 			},
-			wantPriority:         debian12Priority,
+			wantPriority:         defaultPriority,
 			wantNetplanConfigDir: debian12NetplanConfigDir,
-			wantEthernetSuffix:   debian12EthenetSuffix,
+			wantEthernetSuffix:   netplanEthernetSuffix,
 			wantBackendReload:    true,
 			wantDropinRoutes:     true,
 		},
@@ -1005,7 +989,7 @@ func TestSetOSFlags(t *testing.T) {
 			svc := &serviceNetplan{}
 			svc.defaultConfig()
 
-			svc.setOSFlags(tc.os)
+			svc.setOSFlags(tc.os, service.NewOptions(nil, nil))
 
 			if svc.backendReload != tc.wantBackendReload {
 				t.Errorf("backendReload = %v, want %v", svc.backendReload, tc.wantBackendReload)

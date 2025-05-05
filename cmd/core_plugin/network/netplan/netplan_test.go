@@ -42,11 +42,11 @@ func (tb *noopBackend) IsManaging(context.Context, *service.Options) (bool, erro
 	return true, nil
 }
 
-func (tb *noopBackend) WriteDropins([]*nic.Configuration, string) (bool, error) {
+func (tb *noopBackend) WriteDropins([]*nic.Configuration, string, string) (bool, error) {
 	return true, nil
 }
 
-func (tb *noopBackend) RollbackDropins([]*nic.Configuration, string) error {
+func (tb *noopBackend) RollbackDropins([]*nic.Configuration, string, string) error {
 	return nil
 }
 

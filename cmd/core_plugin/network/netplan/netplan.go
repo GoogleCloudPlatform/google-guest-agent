@@ -51,6 +51,10 @@ const (
 	// directory we can override the default netplan configuration.
 	debian12NetplanConfigDir = "/run/netplan"
 
+	// debian12PrimaryNICConfigIdentifier is the identifier for the default primary
+	// NIC configuration for debian 12.
+	debian12PrimaryNICConfigIdentifier = "all-en"
+
 	// netplanConfigVersion defines the version we are using for netplan's drop-in
 	// files.
 	netplanConfigVersion = 2
@@ -122,6 +126,8 @@ type netplanRoute struct {
 	To string `yaml:"to"`
 	// Type is the type of the route.
 	Type string `yaml:"type,omitempty"`
+	// Scope is the scope of the route.
+	Scope string `yaml:"scope,omitempty"`
 }
 
 // netplanEthernet describes the actual ethernet configuration.
@@ -168,10 +174,10 @@ type netplanBackend interface {
 	IsManaging(context.Context, *service.Options) (bool, error)
 
 	// WriteDropins writes the backend's drop-in files based on the provided NICs.
-	WriteDropins([]*nic.Configuration, string) (bool, error)
+	WriteDropins([]*nic.Configuration, string, string) (bool, error)
 
 	// RollbackDropins rolls back the drop-in files previously created by us.
-	RollbackDropins([]*nic.Configuration, string) error
+	RollbackDropins([]*nic.Configuration, string, string) error
 
 	// Reload reloads the backend's configuration.
 	Reload(context.Context) error
@@ -204,13 +210,15 @@ type serviceNetplan struct {
 
 	// ethernetDropinIdentifier is the identifier to use for the ethernet drop-in
 	// file, i.e. by default it's "google-guest-agent" resulting in a drop-in file
-	// name like "20-google-guest-agent-ethernet.yaml", now for debian 12 the
-	// identifier is "default" resulting in a drop-in file name like
-	// "90-default.yaml".
+	// name like "20-google-guest-agent-ethernet.yaml".
 	ethernetDropinIdentifier string
 
 	// ethernetSuffix is the suffix to use for the ethernet drop-in file.
 	ethernetSuffix string
+
+	// primaryNICConfigIdentifier is the identifier to use for the primary NIC
+	// configuration.
+	primaryNICConfigIdentifier string
 }
 
 // defaultModule returns the default module for netplan.

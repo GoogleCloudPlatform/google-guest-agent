@@ -581,7 +581,7 @@ func TestMissingRoutes(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					args := strings.Join(opts.Args, " ")
 
-					if opts.Name == "ip" && args == "route list table local type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local type local dev eth0" {
 						return nil, fmt.Errorf("failed to find routes")
 					}
 
@@ -602,7 +602,7 @@ func TestMissingRoutes(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					args := strings.Join(opts.Args, " ")
 
-					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local scope host type local dev eth0" {
 						return nil, fmt.Errorf("failed to find routes")
 					}
 
@@ -627,7 +627,7 @@ func TestMissingRoutes(t *testing.T) {
 						"local 10.138.15.11 dev eth0 proto kernel scope host src 10.138.15.1",
 					}
 
-					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local scope host type local dev eth0" {
 						return &run.Result{Output: strings.Join(data, "\n")}, nil
 					}
 
@@ -652,7 +652,7 @@ func TestMissingRoutes(t *testing.T) {
 						"local 2001:db8::69 dev eth0 proto kernel scope host",
 					}
 
-					if opts.Name == "ip" && args == "route list table local type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local type local dev eth0" {
 						return &run.Result{Output: strings.Join(data, "\n")}, nil
 					}
 

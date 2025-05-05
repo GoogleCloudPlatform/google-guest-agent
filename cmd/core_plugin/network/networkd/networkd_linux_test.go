@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"github.com/go-ini/ini"
@@ -51,6 +52,28 @@ type systemdTestOpts struct {
 
 	// runnerOpts contains options for run mocking.
 	runnerOpts systemdRunnerOpts
+}
+
+// testNetworkdConfig is a wrapper for the systemd-networkd config file.
+// This is used to parse the config file and compare it to the expected values.
+type testNetworkdConfig struct {
+	// Match is the systemd-networkd ini file's [Match] section.
+	Match networkdMatchConfig
+
+	// Network is the systemd-networkd ini file's [Network] section.
+	Network networkdNetworkConfig
+
+	// DHCPv4 is the systemd-networkd ini file's [DHCPv4] section.
+	DHCPv4 *networkdDHCPConfig `ini:",omitempty"`
+
+	// DHCPv6 is the systemd-networkd ini file's [DHCPv4] section.
+	DHCPv6 *networkdDHCPConfig `ini:",omitempty"`
+
+	// Link is the systemd-networkd init file's [Link] section.
+	Link *networkdLinkConfig `ini:",omitempty"`
+
+	// Route specifies the routes to be installed for this network.
+	Route *[]*networkdRoute `ini:",omitempty,nonunique"`
 }
 
 // systemdLookPathOpts contains options for lookPath mocking.
@@ -87,7 +110,7 @@ type systemdStatusOpts struct {
 	configuredKey string
 }
 
-// systemdRunnerOpts are options to set for intializing the MockRunner.
+// systemdRunnerOpts are options to set for initializing the MockRunner.
 type systemdRunnerOpts struct {
 	// versionOpts are options for when running `networkctl --version`
 	versionOpts systemdVersionOpts
@@ -382,13 +405,11 @@ func TestSystemdNetworkdIsManaging(t *testing.T) {
 				NameOp: func() string { return "iface" },
 			}
 
-			opts := &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: iface,
-					},
+			opts := service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: iface,
 				},
-			}
+			})
 
 			res, err := mockSystemd.IsManaging(ctx, opts)
 
@@ -466,6 +487,11 @@ func TestSystemdNetworkdConfig(t *testing.T) {
 		},
 	}
 
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+	cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC = true
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			systemdTestSetup(t, systemdTestOpts{})
@@ -480,14 +506,15 @@ func TestSystemdNetworkdConfig(t *testing.T) {
 				nicConfig := &nic.Configuration{
 					Interface:    iface,
 					SupportsIPv6: tc.expectedDHCP[ii] == "yes",
+					Index:        uint32(ii),
 				}
 
 				nicConfigs = append(nicConfigs, nicConfig)
 			}
 
-			for ii, nic := range nicConfigs {
+			for _, nic := range nicConfigs {
 				filePath := mockSystemd.networkFile(nic.Interface.Name())
-				if err := mockSystemd.writeEthernetConfig(nic, filePath, true, ii == 0 /* primary interface? */); err != nil {
+				if err := mockSystemd.writeEthernetConfig(nic, filePath, true, nic.Index == 0 /* primary interface? */); err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			}
@@ -507,16 +534,18 @@ func TestSystemdNetworkdConfig(t *testing.T) {
 				// Check contents.
 				filePath := path.Join(mockSystemd.configDir, file.Name())
 				opts := ini.LoadOptions{
-					Loose:       true,
-					Insensitive: true,
+					Loose:                  true,
+					Insensitive:            true,
+					AllowNonUniqueSections: true,
 				}
 
 				config, err := ini.LoadSources(opts, filePath)
 				if err != nil {
 					t.Fatalf("error loading config file: %v", err)
 				}
+				t.Logf("Config sections: %v", config.SectionStrings())
 
-				sections := new(networkdConfig)
+				sections := new(testNetworkdConfig)
 				if err := config.MapTo(sections); err != nil {
 					t.Fatalf("error parsing config ini: %v", err)
 				}
@@ -549,6 +578,10 @@ func TestSystemdNetworkdConfig(t *testing.T) {
 }
 
 func TestSetup(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
 	type testOptions struct {
 		createConfigDir bool
 	}
@@ -557,20 +590,19 @@ func TestSetup(t *testing.T) {
 		NameOp: func() string { return "iface" },
 	}
 
-	vlanOptions := &service.Options{
-		NICConfigs: []*nic.Configuration{
-			&nic.Configuration{
-				Interface: iface,
-				VlanInterfaces: []*ethernet.VlanInterface{
-					&ethernet.VlanInterface{
-						Parent: iface,
-						MTU:    1500,
-						Vlan:   1,
-					},
+	vlanOptions := service.NewOptions(nil, []*nic.Configuration{
+		&nic.Configuration{
+			Interface: iface,
+			VlanInterfaces: []*ethernet.VlanInterface{
+				&ethernet.VlanInterface{
+					Parent: iface,
+					MTU:    1500,
+					Vlan:   1,
 				},
 			},
+			Index: 1,
 		},
-	}
+	})
 
 	tests := []struct {
 		name        string
@@ -593,31 +625,29 @@ func TestSetup(t *testing.T) {
 		},
 		{
 			name: "no-config-dir",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
+					Index: 1,
 				},
-			},
+			}),
 			wantErr: true,
 		},
 		{
 			name: "fail-to-reload-networkctl",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						ExtraAddresses: &address.ExtraAddresses{
-							IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
+					ExtraAddresses: &address.ExtraAddresses{
+						IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
+					},
+					Index: 1,
 				},
-			},
+			}),
 			testOptions: testOptions{
 				createConfigDir: true,
 			},
@@ -717,29 +747,26 @@ func TestRollback(t *testing.T) {
 		},
 		{
 			name: "success-no-files-removed",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			wantErr: false,
 		},
 		{
 			name: "success-fail-unmarshal-config",
 			data: "invalid data",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
+					Index: 1,
 				},
-			},
+			}),
 			wantErr: true,
 		},
 		{
@@ -748,15 +775,14 @@ func TestRollback(t *testing.T) {
 			[GuestAgent]
 			ManagedByGuestAgent = true
 			`,
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
+					Index: 1,
 				},
-			},
+			}),
 			wantErr: true,
 		},
 	}
@@ -773,11 +799,11 @@ func TestRollback(t *testing.T) {
 			}
 
 			if tc.data != "" {
-				nic := tc.opts.NICConfigs[0]
+				nic := tc.opts.NICConfigs()[0]
 				networkFile := mod.networkFile(nic.Interface.NameOp())
-				depreatedNetworkFile := mod.deprecatedNetworkFile(nic.Interface.NameOp())
+				deprecatedNetworkFile := mod.deprecatedNetworkFile(nic.Interface.NameOp())
 
-				for _, file := range []string{networkFile, depreatedNetworkFile} {
+				for _, file := range []string{networkFile, deprecatedNetworkFile} {
 					if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 						t.Fatalf("failed to create mock network config directory: %v", err)
 					}
@@ -915,15 +941,14 @@ func TestWriteDropins(t *testing.T) {
 		},
 		{
 			name: "success",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
+					Index: 1,
 				},
-			},
+			}),
 			wantErr: false,
 		},
 	}
@@ -947,9 +972,103 @@ func TestWriteDropins(t *testing.T) {
 				deprecatedPriority: deprecatedPriority,
 			}
 
-			_, err := mod.WriteDropins(tc.opts.NICConfigs, "default-prefix")
+			_, err := mod.WriteDropins(tc.opts.NICConfigs(), "default-prefix", "")
 			if (err == nil) == tc.wantErr {
 				t.Errorf("WriteDropins() = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestWriteRoutesDropin(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       *service.Options
+		createFile bool
+		wantFile   bool
+		wantRoutes []string
+	}{
+		{
+			name: "success",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					ExtraAddresses: &address.ExtraAddresses{
+						IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.0.128.0/24"}, nil),
+					},
+				},
+			}),
+			wantFile: true,
+			wantRoutes: []string{
+				"10.10.10.10",
+				"10.0.128.0",
+			},
+		},
+		{
+			name: "success-no-routes",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+				},
+			}),
+		},
+		{
+			name: "success-no-routes-file-removed",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+				},
+			}),
+			createFile: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mod := &Module{
+				dropinDir: t.TempDir(),
+			}
+			dropin := mod.dropinFile("test-prefix", "iface")
+			if err := os.MkdirAll(filepath.Dir(dropin), 0755); err != nil {
+				t.Fatalf("failed to create mock network config directory: %v", err)
+			}
+
+			if tc.createFile {
+				if err := os.WriteFile(dropin, []byte("test"), 0755); err != nil {
+					t.Fatalf("failed to write file: %v", err)
+				}
+			}
+
+			// Write the routes dropins.
+			if _, err := mod.writeRoutesDropin(tc.opts.GetPrimaryNIC(), dropin); err != nil {
+				t.Fatalf("failed to write routes dropin: %v", err)
+			}
+
+			// Check the routes dropin.
+			if tc.wantRoutes != nil {
+				contents, err := os.ReadFile(dropin)
+				if err != nil {
+					t.Fatalf("failed to read file: %v", err)
+				}
+				t.Logf("Addresses: %s\n", tc.opts.GetPrimaryNIC().ExtraAddresses.MergedSlice())
+				t.Logf("contents: %s\n", string(contents))
+
+				for _, route := range tc.wantRoutes {
+					if !strings.Contains(string(contents), route) {
+						t.Errorf("routes dropin file %s does not contain route %s", dropin, route)
+					}
+				}
+			}
+			if tc.createFile || !tc.wantFile {
+				if _, err := os.Stat(dropin); !os.IsNotExist(err) {
+					t.Errorf("routes dropin file %s was not removed", dropin)
+				}
 			}
 		})
 	}
@@ -969,28 +1088,24 @@ func TestRollbackDropins(t *testing.T) {
 		},
 		{
 			name: "fail-no-file",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			wantErr: false,
 		},
 		{
 			name: "success",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			data:    "key = value",
 			wantErr: false,
 		},
@@ -1008,7 +1123,7 @@ func TestRollbackDropins(t *testing.T) {
 
 			filePrefix := "default-prefix"
 			if tc.data != "" {
-				filePath := mod.dropinFile(filePrefix, tc.opts.NICConfigs[0].Interface.Name())
+				filePath := mod.dropinFile(filePrefix, fmt.Sprintf("a-%s", tc.opts.NICConfigs()[0].Interface.Name()))
 
 				if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 					t.Fatalf("failed to create mock network config directory: %v", err)
@@ -1019,7 +1134,7 @@ func TestRollbackDropins(t *testing.T) {
 				}
 			}
 
-			err := mod.RollbackDropins(tc.opts.NICConfigs, "default-prefix")
+			err := mod.RollbackDropins(tc.opts.NICConfigs(), "default-prefix", "")
 			if (err == nil) == tc.wantErr {
 				t.Errorf("WriteDropins() = %v, want %v", err, tc.wantErr)
 			}
