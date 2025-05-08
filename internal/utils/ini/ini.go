@@ -27,14 +27,17 @@ var (
 	ErrInvalidData = errors.New("invalid data pointer, ptr is nil")
 )
 
+// LoadOptions is a wrapper around ini.LoadOptions.
+type LoadOptions = ini.LoadOptions
+
 // WriteIniFile writes ptr data into filePath file marshalled in a ini file
 // format.
-func WriteIniFile(filePath string, ptr any) error {
+func WriteIniFile(filePath string, ptr any, opts ...LoadOptions) error {
 	if ptr == nil {
 		return ErrInvalidData
 	}
 
-	config := ini.Empty()
+	config := ini.Empty(opts...)
 
 	if err := ini.ReflectFrom(config, ptr); err != nil {
 		return fmt.Errorf("error marshalling file: %w", err)
@@ -48,12 +51,12 @@ func WriteIniFile(filePath string, ptr any) error {
 }
 
 // ReflectFrom reflects ptr data into an ini.File.
-func ReflectFrom(ptr any) (*ini.File, error) {
+func ReflectFrom(ptr any, opts ...LoadOptions) (*ini.File, error) {
 	if ptr == nil {
 		return nil, ErrInvalidData
 	}
 
-	config := ini.Empty()
+	config := ini.Empty(opts...)
 
 	if err := ini.ReflectFrom(config, ptr); err != nil {
 		return nil, fmt.Errorf("error marshalling file: %w", err)

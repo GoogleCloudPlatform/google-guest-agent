@@ -18,8 +18,8 @@
 package dhclient
 
 import (
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )

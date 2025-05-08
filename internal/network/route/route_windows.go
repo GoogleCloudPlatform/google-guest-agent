@@ -21,7 +21,8 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"golang.org/x/sys/windows"
 )
 
@@ -140,18 +141,23 @@ func (wc *windowsClient) Table() ([]Handle, error) {
 }
 
 // Find finds routes based on the provided options.
-func (wc *windowsClient) Find(_ context.Context, opts Options) ([]Handle, error) {
+func (wc *windowsClient) Find(context.Context, Options) ([]Handle, error) {
 	return nil, fmt.Errorf("not implemented on Windows")
 }
 
 // MissingRoutes given a map of wanted routes addresses returns the routes
 // that are missing from the system.
-func (wc *windowsClient) MissingRoutes(ctx context.Context, iface string, wantedRoutes address.IPAddressMap) ([]Handle, error) {
+func (wc *windowsClient) MissingRoutes(context.Context, string, address.IPAddressMap) ([]Handle, error) {
 	return nil, fmt.Errorf("not implemented on Windows")
 }
 
 // RemoveRoutes removes all the routes managed/installed by us for the given
 // interface.
-func (wc *windowsClient) RemoveRoutes(ctx context.Context, iface string) error {
+func (wc *windowsClient) RemoveRoutes(context.Context, string) error {
+	return fmt.Errorf("not implemented on Windows")
+}
+
+// Setup sets up the routes for the network interfaces.
+func (wc *windowsClient) Setup(context.Context, *service.Options) error {
 	return fmt.Errorf("not implemented on Windows")
 }

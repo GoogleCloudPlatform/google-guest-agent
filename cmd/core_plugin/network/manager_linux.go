@@ -24,10 +24,11 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/dhclient"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/netplan"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nm"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/wicked"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 )
 
 var (
@@ -44,11 +45,7 @@ var (
 // managerSetup sets up the network interfaces for linux.
 func managerSetup(ctx context.Context, nics []*nic.Configuration) error {
 	galog.Infof("Running linux network management module setup.")
-
-	opts := &service.Options{
-		Data:       defaultLinuxManagers,
-		NICConfigs: nics,
-	}
+	opts := service.NewOptions(defaultLinuxManagers, nics)
 
 	if err := runManagerSetup(ctx, opts); err != nil {
 		return fmt.Errorf("failed to setup network configuration: %w", err)
@@ -61,12 +58,12 @@ func managerSetup(ctx context.Context, nics []*nic.Configuration) error {
 // runManagerSetup runs the actual linux network manager setup steps, it
 // controls the configuration flow.
 func runManagerSetup(ctx context.Context, opts *service.Options) error {
-	managers, ok := opts.Data.([]*service.Handle)
+	managers, ok := opts.Data().([]*service.Handle)
 	if !ok {
 		return fmt.Errorf("failed get linux managers implementation list")
 	}
 
-	if len(opts.NICConfigs) == 0 {
+	if len(opts.NICConfigs()) == 0 {
 		galog.Infof("Skipping network setup - no NICs to configure.")
 		return nil
 	}
@@ -82,12 +79,16 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 	if err != nil {
 		galog.Warnf("Failed to rollback network configuration: %v.", err)
 	}
-
 	galog.Infof("Rolled back network configuration for %v.", rolledBack)
 
 	// Attempt to setup the network configuration for the active manager.
 	if err := active.Setup(ctx, opts); err != nil {
 		return fmt.Errorf("failed to setup network configuration(%q): %w", active.ID, err)
+	}
+
+	// Attempt to setup the routes.
+	if err := route.Setup(ctx, opts); err != nil {
+		return fmt.Errorf("failed to setup routes: %w", err)
 	}
 
 	return nil
@@ -126,6 +127,7 @@ func rollback(ctx context.Context, managers []*service.Handle, skipID string, op
 			continue
 		}
 
+		// Rollback network configurations for the manager.
 		if err := manager.Rollback(ctx, opts); err != nil {
 			return rolledBack, fmt.Errorf("failed to rollback network configuration(%q): %w", manager.ID, err)
 		}
@@ -134,5 +136,20 @@ func rollback(ctx context.Context, managers []*service.Handle, skipID string, op
 		galog.V(2).Debugf("Rolled back network configuration for %q.", manager.ID)
 	}
 
+	// Rollback the routes.
+	if err := rollbackRoutes(ctx, opts); err != nil {
+		return rolledBack, fmt.Errorf("failed to rollback routes: %w", err)
+	}
+
 	return rolledBack, nil
+}
+
+// rollbackRoutes removes all the routes managed by the core plugin for the network interfaces.
+func rollbackRoutes(ctx context.Context, opts *service.Options) error {
+	for _, nic := range opts.NICConfigs() {
+		if err := route.RemoveRoutes(ctx, nic.Interface.Name()); err != nil {
+			return fmt.Errorf("failed to remove routes for interface %q: %w", nic.Interface.Name(), err)
+		}
+	}
+	return nil
 }
