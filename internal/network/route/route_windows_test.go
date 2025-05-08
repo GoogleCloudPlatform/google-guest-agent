@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 )
 
 func TestAddRoute(t *testing.T) {
