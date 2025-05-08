@@ -19,8 +19,8 @@ import (
 	"context"
 	"os/exec"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 )
 
 const (

@@ -26,8 +26,8 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"

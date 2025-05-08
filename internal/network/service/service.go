@@ -18,7 +18,7 @@ package service
 import (
 	"context"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 )
 
 // Options contains the options for managing the network environment.
