@@ -410,7 +410,7 @@ func DelUser(ctx context.Context, u *User) error {
 }
 
 // FindGroup gets the information of the group, returning ErrGroupNotExist if
-// the group does not exist on the system. Returns the wrappe run error if the
+// the group does not exist on the system. Returns the wrapped run error if the
 // command failed.
 //
 // Any group returned by this function is guaranteed to have a valid GID - a
@@ -439,6 +439,17 @@ func FindGroup(ctx context.Context, groupName string) (*Group, error) {
 	}
 
 	return groupEntry, nil
+}
+
+// FindGroupByID gets the information of the group, returning ErrGroupNotExist if
+// the group does not exist on the system. Returns the wrapped run error if the
+// command failed.
+//
+// Any group returned by this function is guaranteed to have a valid GID - a
+// call to ValidateUnixGID() will never return an error.
+func FindGroupByID(ctx context.Context, groupID string) (*Group, error) {
+	// gid lookup can use the same function as name lookup.
+	return FindGroup(ctx, groupID)
 }
 
 // parseGroupEntry parses /etc/group style input for the named group.
