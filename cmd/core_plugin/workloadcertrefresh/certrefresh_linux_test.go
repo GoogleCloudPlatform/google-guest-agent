@@ -19,6 +19,8 @@ package workloadcertrefresh
 import (
 	"context"
 	"testing"
+
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 func TestNewModule(t *testing.T) {
@@ -42,6 +44,10 @@ func TestNewModule(t *testing.T) {
 
 func TestRefresherJobAPI(t *testing.T) {
 	r := NewCertRefresher()
+
+	if r.MetricName() != acpb.GuestAgentModuleMetric_WORKLOAD_CERT_REFRESH_INITIALIZATION {
+		t.Errorf("MetricName() = %s, want %s", r.MetricName().String(), acpb.GuestAgentModuleMetric_WORKLOAD_CERT_REFRESH_INITIALIZATION.String())
+	}
 
 	if r.ID() != certRefresherModuleID {
 		t.Errorf("ID() = %s, want %s", r.ID(), certRefresherModuleID)

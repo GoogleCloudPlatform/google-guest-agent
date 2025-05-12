@@ -20,12 +20,20 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
+
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 type testJob struct {
 	interval     time.Duration
 	shouldEnable bool
 	startingNow  bool
+	metricName   acmpb.GuestAgentModuleMetric_Metric
 	id           string
 	mu           sync.RWMutex
 	counter      int
@@ -49,6 +57,10 @@ func (j *testJob) Run(_ context.Context) (bool, error) {
 
 func (j *testJob) ID() string {
 	return j.id
+}
+
+func (j *testJob) MetricName() acmpb.GuestAgentModuleMetric_Metric {
+	return j.metricName
 }
 
 func (j *testJob) Interval() (time.Duration, bool) {
@@ -209,6 +221,10 @@ func (j *testLongJob) ID() string {
 	return j.id
 }
 
+func (j *testLongJob) MetricName() acmpb.GuestAgentModuleMetric_Metric {
+	return acmpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED
+}
+
 func (j *testLongJob) Interval() (time.Duration, bool) {
 	return 2 * time.Minute, true
 }
@@ -269,6 +285,10 @@ func TestScheduleJob(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
+	s := &Scheduler{}
+	ctx := context.Background()
+	s.enableMetricRecording(ctx)
+
 	tests := []struct {
 		desc string
 		job  Job
@@ -284,15 +304,66 @@ func TestRun(t *testing.T) {
 			job:  &testJob{continueRun: false, throwErr: true},
 			want: false,
 		},
+		{
+			desc: "record_success_metric",
+			job:  &testJob{id: "record_success_metric_job", continueRun: true, throwErr: false, metricName: acmpb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION},
+			want: true,
+		},
+		{
+			desc: "record_failure_metric",
+			job:  &testJob{id: "record_failure_metric_job", continueRun: false, throwErr: true, metricName: acmpb.GuestAgentModuleMetric_TELEMETRY_INITIALIZATION},
+			want: false,
+		},
 	}
-
-	ctx := context.Background()
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			if got := run(ctx, tc.job); got != tc.want {
+			if got := s.run(ctx, tc.job); got != tc.want {
 				t.Errorf("run(ctx, %+v) = %t, want: %t", tc.job, got, tc.want)
 			}
 		})
+	}
+
+	// Some jobs uses unspecified metric name, so only 2 metrics should be
+	// recorded.
+	if got := len(s.metrics.Metrics()); got != 2 {
+		t.Errorf("run(ctx) recorded %d metrics, want 0", got)
+	}
+
+	want := []proto.Message{
+		&acmpb.GuestAgentModuleMetric{
+			MetricName:   acmpb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION,
+			ModuleStatus: acmpb.GuestAgentModuleMetric_STATUS_SUCCEEDED,
+			Enabled:      true,
+		},
+		&acmpb.GuestAgentModuleMetric{
+			MetricName:   acmpb.GuestAgentModuleMetric_TELEMETRY_INITIALIZATION,
+			ModuleStatus: acmpb.GuestAgentModuleMetric_STATUS_FAILED,
+			Enabled:      true,
+			Error:        `Job "record_failure_metric_job" failed with error: test error`,
+		},
+	}
+
+	sortProtos := cmpopts.SortSlices(func(m1, m2 proto.Message) bool {
+		msg1 := m1.(*acmpb.GuestAgentModuleMetric)
+		msg2 := m2.(*acmpb.GuestAgentModuleMetric)
+		return msg1.GetMetricName().String() < msg2.GetMetricName().String()
+	})
+
+	if diff := cmp.Diff(want, s.metrics.Metrics(), sortProtos, protocmp.Transform(), protocmp.IgnoreFields(&acmpb.GuestAgentModuleMetric{}, "start_time", "end_time")); diff != "" {
+		t.Errorf("run(ctx) recorded metrics diff (-want +got):\n%s", diff)
+	}
+}
+
+func TestEnableMetricRecording(t *testing.T) {
+	s := &Scheduler{}
+	s.enableMetricRecording(context.Background())
+	if s.metrics == nil {
+		t.Errorf("enableMetricRecording(ctx) failed to create metric registry")
+	}
+	prev := s.metrics
+	s.enableMetricRecording(context.Background())
+	if s.metrics != prev {
+		t.Errorf("enableMetricRecording(ctx) created new metric registry, expected no-op")
 	}
 }

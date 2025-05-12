@@ -22,13 +22,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	tpb "google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/GoogleCloudPlatform/galog"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metricregistry"
 )
 
 // Job defines the interface between the schedule manager and the actual job.
 type Job interface {
 	// ID returns the job id.
 	ID() string
+	// Metric returns the metric name for the job. If the metric id is not defined
+	// it will skip the metric collection.
+	MetricName() acmpb.GuestAgentModuleMetric_Metric
 	// Interval returns the interval at which job should be rescheduled and
 	// a bool determining if job should be scheduled starting now.
 	// If false, first run will be at time now+interval.
@@ -56,6 +63,10 @@ type Scheduler struct {
 	mu sync.Mutex
 	// jobs is a map of task id to its task managed by this scheduler.
 	jobs map[string]*jobConfig
+	// metricsMu protects metric registry instance from concurrent access.
+	metricsMu sync.Mutex
+	// metrics is the metric registry for the scheduler.
+	metrics *metricregistry.MetricRegistry
 }
 
 // scheduler is the scheduler instance.
@@ -87,6 +98,17 @@ func (s *Scheduler) remove(jobID string) {
 	delete(s.jobs, jobID)
 }
 
+func (s *Scheduler) enableMetricRecording(ctx context.Context) {
+	s.metricsMu.Lock()
+	defer s.metricsMu.Unlock()
+	// If registry already exists, return.
+	if s.metrics != nil {
+		return
+	}
+
+	s.metrics = metricregistry.New(ctx, 1*time.Minute, 10, "scheduled-job-manager")
+}
+
 // isScheduled returns true if job is already scheduled.
 func (s *Scheduler) isScheduled(jobID string) bool {
 	s.mu.Lock()
@@ -96,17 +118,41 @@ func (s *Scheduler) isScheduled(jobID string) bool {
 }
 
 // run executes the job and returns if scheduler should continue scheduling.
-func run(ctx context.Context, job Job) bool {
+func (s *Scheduler) run(ctx context.Context, job Job) bool {
 	galog.Debugf("Executing job %q", job.ID())
+
+	metric := &acmpb.GuestAgentModuleMetric{
+		MetricName:   job.MetricName(),
+		StartTime:    tpb.Now(),
+		ModuleStatus: acmpb.GuestAgentModuleMetric_STATUS_SUCCEEDED,
+		Enabled:      true,
+	}
+
 	ok, err := job.Run(ctx)
 	if err != nil {
+		metric.ModuleStatus = acmpb.GuestAgentModuleMetric_STATUS_FAILED
+		metric.Error = fmt.Sprintf("Job %q failed with error: %v", job.ID(), err)
 		galog.Errorf("Job %q failed with error: %v", job.ID(), err)
 	}
+
+	if job.MetricName() == acmpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED {
+		return ok
+	}
+
+	// Attempt to record the metric only if module is not unspecified. Some jobs
+	// may not have/require a metric, skip recording in those cases.
+	metric.EndTime = tpb.Now()
+	s.metrics.Record(ctx, metric)
+
 	return ok
 }
 
 // ScheduleJob adds a job to schedule at defined interval.
 func (s *Scheduler) ScheduleJob(ctx context.Context, job Job) error {
+	// Enable metric recording if not already enabled. Its a no-op if already
+	// enabled.
+	s.enableMetricRecording(ctx)
+
 	if s.isScheduled(job.ID()) {
 		galog.Infof("Skipping schedule job request for %q, its already scheduled", job.ID())
 		return nil
@@ -119,7 +165,7 @@ func (s *Scheduler) ScheduleJob(ctx context.Context, job Job) error {
 	interval, startNow := job.Interval()
 	galog.Debugf("Adding job %q, to run at every %f seconds", job.ID(), interval.Seconds())
 
-	if startNow && !run(ctx, job) {
+	if startNow && !s.run(ctx, job) {
 		galog.Debugf("Job %q first execution returned false, won't be scheduled", job.ID())
 		return nil
 	}
@@ -145,7 +191,7 @@ func (s *Scheduler) runOnSchedule(ctx context.Context, j *jobConfig) {
 	for {
 		select {
 		case <-ticker.C:
-			if !j.markedRemoved.Load() && !run(ctx, j.job) {
+			if !j.markedRemoved.Load() && !s.run(ctx, j.job) {
 				galog.Infof("Job %q execution returned false, won't be rescheduled", j.job.ID())
 				j.markedRemoved.Store(true)
 				s.remove(j.job.ID())

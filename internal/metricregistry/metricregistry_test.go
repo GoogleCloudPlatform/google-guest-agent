@@ -21,7 +21,6 @@ import (
 
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/protobuf/proto"
@@ -32,9 +31,7 @@ func TestNew(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	sched := scheduler.Instance()
 	t.Cleanup(func() {
-		sched.Stop()
 		registries = make(map[string]*MetricRegistry)
 	})
 
