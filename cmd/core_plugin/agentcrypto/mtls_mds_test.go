@@ -21,12 +21,16 @@ import (
 	"time"
 
 	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 )
 
 func TestScheduleJob(t *testing.T) {
 	checkInitMaxAttempts := 10
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
 
 	s := scheduler.Instance()
 	job := New()

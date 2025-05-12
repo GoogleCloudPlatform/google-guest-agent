@@ -63,6 +63,9 @@ log_file =
 on_demand_plugins = true
 acs_client = true
 
+[Telemetry]
+metric_collection_enabled = true
+
 [Accounts]
 deprovision_remove = false
 gpasswd_add_cmd = gpasswd -a {user} {group}
@@ -149,6 +152,10 @@ fqdn_address_interface_index = 0
 type Sections struct {
 	// Core defines the core guest-agent's configuration entries/keys.
 	Core *Core `ini:"Core,omitempty"`
+
+	// Telemetry defines the telemetry configurations.
+	Telemetry *Telemetry `ini:"Telemetry,omitempty"`
+
 	// AccountManager defines the address management configurations. It takes
 	// precedence over instance's and project's metadata configuration. The
 	// default configuration doesn't define values to it, if the user has defined
@@ -238,6 +245,12 @@ type ACS struct {
 	// ClientDebugLogging is the ACS client debug logging. Enabling this will
 	// enable debug logging in the ACS client library.
 	ClientDebugLogging bool `ini:"client_debug_logging,omitempty"`
+}
+
+// Telemetry contains the configurations of Telemetry section.
+type Telemetry struct {
+	// MetricCollectionEnabled configures whether metric collection is enabled.
+	MetricCollectionEnabled bool `ini:"metric_collection_enabled,omitempty"`
 }
 
 // Core contains the core configuration entries of guest agent, all

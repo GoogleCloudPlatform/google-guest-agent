@@ -24,6 +24,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -77,6 +78,13 @@ func New(ctx context.Context, d time.Duration, maxRecords int, name string) *Met
 	}
 
 	registries[name] = mr
+
+	// Skip starting the flusher if metric collection is disabled.
+	if !cfg.Retrieve().Telemetry.MetricCollectionEnabled {
+		galog.Infof("Metric collection is disabled, skipping flusher for %q", mr.name)
+		return mr
+	}
+
 	go mr.runFlusher(ctx)
 	return mr
 }
@@ -130,6 +138,11 @@ func (mr *MetricRegistry) addEntry(metric proto.Message) {
 // Record adds a metric to buffered registry. If the registry is full, it
 // flushes the metrics before adding the new metric.
 func (mr *MetricRegistry) Record(ctx context.Context, metric proto.Message) {
+	if !cfg.Retrieve().Telemetry.MetricCollectionEnabled {
+		galog.V(2).Debugf("Metric collection is disabled, skipping flush for %q", mr.name)
+		return
+	}
+
 	if !isMetricValid(metric) {
 		galog.V(2).Warnf("Ignoring invalid metric: %+v", metric)
 		return
@@ -146,6 +159,11 @@ func (mr *MetricRegistry) Record(ctx context.Context, metric proto.Message) {
 // Flush forces immediate flush of metrics recorded so far instead of waiting on
 // next interval.
 func (mr *MetricRegistry) Flush(ctx context.Context) {
+	if !cfg.Retrieve().Telemetry.MetricCollectionEnabled {
+		galog.V(2).Debugf("Metric collection is disabled, skipping flush for %q", mr.name)
+		return
+	}
+
 	// Get the metrics to flush outside the lock to avoid holding the lock for
 	// too long as ACS flush can be slow based on the network conditions.
 	galog.V(2).Debugf("Flushing metrics for %q", mr.name)

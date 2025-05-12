@@ -27,6 +27,7 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 type testJob struct {
@@ -72,6 +73,9 @@ func (j *testJob) ShouldEnable(_ context.Context) bool {
 }
 
 func TestSchedule(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
 	job := &testJob{
 		interval:     time.Second / 2,
 		id:           "test_job",

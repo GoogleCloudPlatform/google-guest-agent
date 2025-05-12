@@ -28,9 +28,11 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-
 	t.Cleanup(func() {
 		registries = make(map[string]*MetricRegistry)
 	})
@@ -171,5 +173,26 @@ func TestMetricRecord(t *testing.T) {
 		if diff := cmp.Diff(tc.wantMetrics, mr.metrics, protocmp.Transform()); diff != "" {
 			t.Errorf("Record(%v) returned unexpected diff (-want +got) for test %q:\n%s", tc.metric, tc.name, diff)
 		}
+	}
+}
+
+func TestConfigSkip(t *testing.T) {
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+	cfg.Retrieve().Telemetry.MetricCollectionEnabled = false
+
+	mr := New(ctx, time.Nanosecond, 10, "test")
+
+	mr.Record(ctx, &acmpb.GuestAgentModuleMetric{})
+	if mr.size() != 0 {
+		t.Errorf("mr.size() = %d, want: %d when metric collection is disabled", mr.size(), 0)
+	}
+
+	mr.metrics = []proto.Message{&acmpb.GuestAgentModuleMetric{}}
+	mr.Flush(ctx)
+	if mr.size() != 1 {
+		t.Errorf("mr.size() = %d, want: %d, flush should not have any effect when metric collection is disabled", mr.size(), 1)
 	}
 }
