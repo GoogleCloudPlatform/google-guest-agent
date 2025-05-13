@@ -76,7 +76,7 @@ func (sn *serviceNetworkManager) IsManaging(ctx context.Context, opts *service.O
 	}
 
 	lines := strings.Split(res.Output, "\n")
-	iface := opts.NICConfigs[0].Interface.Name()
+	iface := opts.GetPrimaryNIC().Interface.Name()
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, iface) {
@@ -91,9 +91,14 @@ func (sn *serviceNetworkManager) IsManaging(ctx context.Context, opts *service.O
 // Setup sets up the network interface.
 func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Options) error {
 	galog.Info("Setting up NetworkManager interfaces.")
+	nicConfigs := opts.FilteredNICConfigs()
 
 	// Write the config files.
-	for _, nic := range opts.NICConfigs {
+	for _, nic := range nicConfigs {
+		if !nic.ShouldManage() {
+			continue
+		}
+
 		fPath := sn.configFilePath(nic.Interface.Name())
 
 		// Write the config file for the current NIC.
@@ -119,7 +124,11 @@ func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Option
 
 	// Enable the new connections. Ignore the primary interface as it will already
 	// be up.
-	for _, nic := range opts.NICConfigs {
+	for _, nic := range nicConfigs {
+		if !nic.ShouldManage() {
+			continue
+		}
+
 		connID := sn.connectionID(nic.Interface.Name())
 		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"conn", "up", connID}}
 		if _, err := run.WithContext(ctx, opt); err != nil {
@@ -202,28 +211,6 @@ func (sn *serviceNetworkManager) writeEthernetConfig(nic *nic.Configuration, fil
 		return fmt.Errorf("error marshalling ini file: %w", err)
 	}
 
-	if nic.ExtraAddresses != nil {
-		routeIndex := 1
-		for _, ipAddress := range nic.ExtraAddresses.MergedSlice() {
-			routeKey := fmt.Sprintf("route%d", routeIndex)
-			optionsKey := fmt.Sprintf("route%d_options", routeIndex)
-
-			section := "ipv6"
-			if !ipAddress.IsIPv6() {
-				section = "ipv4"
-			}
-
-			ipSection, err := inicfg.GetSection(section)
-			if err != nil {
-				return fmt.Errorf("error getting %s section: %w", section, err)
-			}
-
-			ipSection.Key(routeKey).SetValue(ipAddress.String())
-			ipSection.Key(optionsKey).SetValue("type=local")
-			routeIndex++
-		}
-	}
-
 	// Save the config file.
 	if err := inicfg.SaveTo(filePath); err != nil {
 		return fmt.Errorf("error writing NetworkManager config file: %v", err)
@@ -274,7 +261,7 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 	// Iterate over all NICs and remove their respective config file.
 	var deleteMe []removeOp
 
-	for _, nic := range opts.NICConfigs {
+	for _, nic := range opts.FilteredNICConfigs() {
 		deleteMe = append(deleteMe, removeOp{configType: "ethernet", configFile: sn.configFilePath(nic.Interface.Name())})
 
 		for _, vic := range nic.VlanInterfaces {
@@ -284,7 +271,7 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 
 	for _, op := range deleteMe {
 		galog.Debugf("Attempting to remove NetworkManager configuration: %q", op.configFile)
-		if err := os.RemoveAll(op.configFile); err != nil {
+		if err := os.RemoveAll(op.configFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("error deleting NetworkManager %s config file(%q): %v", op.configType, op.configFile, err)
 		}
 	}

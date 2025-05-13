@@ -581,7 +581,7 @@ func TestMissingRoutes(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					args := strings.Join(opts.Args, " ")
 
-					if opts.Name == "ip" && args == "route list table local type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local type local dev eth0" {
 						return nil, fmt.Errorf("failed to find routes")
 					}
 
@@ -602,7 +602,7 @@ func TestMissingRoutes(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					args := strings.Join(opts.Args, " ")
 
-					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local scope host type local dev eth0" {
 						return nil, fmt.Errorf("failed to find routes")
 					}
 
@@ -627,7 +627,7 @@ func TestMissingRoutes(t *testing.T) {
 						"local 10.138.15.11 dev eth0 proto kernel scope host src 10.138.15.1",
 					}
 
-					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local scope host type local dev eth0" {
 						return &run.Result{Output: strings.Join(data, "\n")}, nil
 					}
 
@@ -652,7 +652,7 @@ func TestMissingRoutes(t *testing.T) {
 						"local 2001:db8::69 dev eth0 proto kernel scope host",
 					}
 
-					if opts.Name == "ip" && args == "route list table local type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local type local dev eth0" {
 						return &run.Result{Output: strings.Join(data, "\n")}, nil
 					}
 
@@ -682,6 +682,105 @@ func TestMissingRoutes(t *testing.T) {
 
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("MissingRoutes(%v, %v) returned an unexpected diff (-want +got): %v", tc.iface, addresses, diff)
+			}
+		})
+	}
+}
+
+func TestExtraRoutes(t *testing.T) {
+	parseIP := func(ip string) *address.IPAddr {
+		t.Helper()
+		res, err := address.ParseIP(ip)
+		if err != nil {
+			t.Fatalf("ParseIP(%q) = %v, want nil", ip, err)
+		}
+		return res
+	}
+	routeTable := []string{
+		"local 10.138.15.10 dev eth0 proto 66 scope host",
+		"local 10.138.15.12 dev eth0 proto 66 scope host",
+	}
+	// These are fake IPs managed by the guest agent.
+	routeTableIPs := []string{
+		"10.138.15.10",
+		"10.138.15.12",
+	}
+
+	tests := []struct {
+		name       string
+		iface      string
+		addresses  []string
+		runner     *mockRunner
+		want       []Handle
+		wantErr    bool
+		wantCmdErr bool
+	}{
+		{
+			name:  "success",
+			iface: "eth0",
+			runner: &mockRunner{
+				callback: func(context.Context, run.Options) (*run.Result, error) {
+					return &run.Result{Output: strings.Join(routeTable, "\n")}, nil
+				},
+			},
+			want: []Handle{
+				Handle{
+					Table:         "local",
+					Destination:   parseIP("10.138.15.10"),
+					InterfaceName: "eth0",
+					Type:          "local",
+				},
+				Handle{
+					Table:         "local",
+					Destination:   parseIP("10.138.15.12"),
+					InterfaceName: "eth0",
+					Type:          "local",
+				},
+			},
+		},
+		{
+			name:  "fail-find-routes",
+			iface: "eth0",
+			runner: &mockRunner{
+				callback: func(context.Context, run.Options) (*run.Result, error) {
+					return nil, fmt.Errorf("failed to find routes")
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name:      "success-no-extra-routes",
+			iface:     "eth0",
+			addresses: routeTableIPs,
+			runner: &mockRunner{
+				callback: func(context.Context, run.Options) (*run.Result, error) {
+					return &run.Result{Output: strings.Join(routeTable, "\n")}, nil
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+	}
+
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldRunner := run.Client
+			run.Client = tc.runner
+			defer func() { run.Client = oldRunner }()
+
+			addresses := address.NewIPAddressMap(tc.addresses, nil)
+			extraRoutes, err := ExtraRoutes(ctx, tc.iface, addresses)
+			if (err == nil) == tc.wantErr {
+				t.Errorf("ExtraRoutes(%v, %v) = %v, want %v", tc.iface, addresses, err, tc.wantErr)
+			}
+
+			if diff := cmp.Diff(tc.want, extraRoutes); diff != "" {
+				t.Errorf("ExtraRoutes(%v, %v) returned an unexpected diff (-want +got): %v", tc.iface, addresses, diff)
 			}
 		})
 	}

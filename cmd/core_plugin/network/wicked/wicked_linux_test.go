@@ -127,15 +127,13 @@ func TestIsManaging(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			wantErr: true,
 			want:    false,
 		},
@@ -157,15 +155,13 @@ func TestIsManaging(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			wantErr: false,
 			want:    false,
 		},
@@ -187,15 +183,13 @@ func TestIsManaging(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			wantErr: false,
 			want:    false,
 		},
@@ -217,15 +211,13 @@ func TestIsManaging(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			wantErr: false,
 			want:    true,
 		},
@@ -247,15 +239,13 @@ func TestIsManaging(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
 				},
-			},
+			}),
 			wantErr: false,
 			want:    true,
 		},
@@ -305,20 +295,20 @@ func TestSetup(t *testing.T) {
 		},
 		{
 			name: "success",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			runMock: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, nil
@@ -330,20 +320,20 @@ func TestSetup(t *testing.T) {
 		{
 			name:    "success-with-hostname",
 			configs: "[Unstable]\nset_fqdn = true",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			runMock: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, nil
@@ -354,36 +344,36 @@ func TestSetup(t *testing.T) {
 		},
 		{
 			name: "success-with-vlan",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 1,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 1,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
 							},
 						},
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface-2" },
-								},
-							},
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface-2" },
+							},
+						},
+					},
+					Index: 2,
+				},
+			}),
 			runMock: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, nil
@@ -394,20 +384,20 @@ func TestSetup(t *testing.T) {
 		},
 		{
 			name: "fail-create-config-file",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			runMock: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, nil
@@ -418,36 +408,36 @@ func TestSetup(t *testing.T) {
 		},
 		{
 			name: "fail-create-config-file-with-vlan",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 1,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 1,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
 							},
 						},
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface-2" },
-								},
-							},
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface-2" },
+							},
+						},
+					},
+					Index: 2,
+				},
+			}),
 			runMock: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, nil
@@ -458,20 +448,20 @@ func TestSetup(t *testing.T) {
 		},
 		{
 			name: "fail-ifup",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			runMock: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, errors.New("unknown error")
@@ -482,36 +472,36 @@ func TestSetup(t *testing.T) {
 		},
 		{
 			name: "fail-ifup-with-vlan",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
 							},
 						},
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface-2" },
-								},
-							},
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface-2" },
+							},
+						},
+					},
+					Index: 2,
+				},
+			}),
 			runMock: &runMock{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					return &run.Result{}, errors.New("unknown error")
@@ -569,28 +559,26 @@ func TestRollback(t *testing.T) {
 		wantFileRemoved bool
 	}{
 		{
-			name: "success-no-interfaces",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{},
-			},
+			name:    "success-no-interfaces",
+			opts:    service.NewOptions(nil, []*nic.Configuration{}),
 			wantErr: false,
 		},
 		{
 			name: "success-no-config-file",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			wantFileRemoved: true,
 			wantErr:         false,
 		},
@@ -601,36 +589,36 @@ func TestRollback(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 1,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 1,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
 							},
 						},
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface-2" },
-								},
-							},
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface-2" },
+							},
+						},
+					},
+					Index: 2,
+				},
+			}),
 			wantFileRemoved: true,
 			wantErr:         false,
 		},
@@ -641,74 +629,74 @@ func TestRollback(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 1,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 1,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
 							},
 						},
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface-2" },
-								},
-							},
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface-2" },
+							},
+						},
+					},
+					Index: 2,
+				},
+			}),
 			wantFileRemoved: true,
 			wantErr:         false,
 		},
 		{
 			name: "success-invalid-header-size",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			data:    "# shorter header", // shorter than the google header/comment.
 			wantErr: false,
 		},
 		{
 			name: "success-invalid-header",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			data:    "# long header, longer than the google header/comment.",
 			wantErr: false,
 		},
@@ -719,55 +707,55 @@ func TestRollback(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 1,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 1,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
 							},
 						},
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface-2" },
-								},
-							},
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface-2" },
+							},
+						},
+					},
+					Index: 2,
+				},
+			}),
 			data:    "# shorter header", // shorter than the google header/comment.
 			wantErr: false,
 		},
 		{
 			name: "success",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					Index: 2,
+				},
+			}),
 			data:            googleComment,
 			wantFileRemoved: true,
 			wantErr:         false,
@@ -779,36 +767,36 @@ func TestRollback(t *testing.T) {
 					return &run.Result{}, nil
 				},
 			},
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 1,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface" },
-								},
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 1,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface" },
 							},
 						},
 					},
-					&nic.Configuration{
-						Interface: &ethernet.Interface{
-							NameOp: func() string { return "iface-2" },
-						},
-						VlanInterfaces: []*ethernet.VlanInterface{
-							&ethernet.VlanInterface{
-								Vlan: 2,
-								Parent: &ethernet.Interface{
-									NameOp: func() string { return "iface-2" },
-								},
-							},
-						},
-					},
+					Index: 1,
 				},
-			},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface-2" },
+					},
+					VlanInterfaces: []*ethernet.VlanInterface{
+						&ethernet.VlanInterface{
+							Vlan: 2,
+							Parent: &ethernet.Interface{
+								NameOp: func() string { return "iface-2" },
+							},
+						},
+					},
+					Index: 2,
+				},
+			}),
 			data:            googleComment,
 			wantFileRemoved: true,
 			wantErr:         false,
@@ -835,7 +823,7 @@ func TestRollback(t *testing.T) {
 				t.Fatalf("failed to create mock network config directory: %v", err)
 			}
 
-			for _, nic := range tc.opts.NICConfigs {
+			for _, nic := range tc.opts.NICConfigs() {
 				for _, vic := range nic.VlanInterfaces {
 					fPath := svc.ifcfgFilePath(vic.InterfaceName())
 					if err := os.WriteFile(fPath, []byte(googleComment), 0644); err != nil {
@@ -845,7 +833,7 @@ func TestRollback(t *testing.T) {
 			}
 
 			if tc.data != "" {
-				for _, iface := range tc.opts.NICConfigs {
+				for _, iface := range tc.opts.NICConfigs() {
 					fPath := svc.ifcfgFilePath(iface.Interface.Name())
 
 					if err := os.WriteFile(fPath, []byte(tc.data), 0644); err != nil {
@@ -859,7 +847,7 @@ func TestRollback(t *testing.T) {
 				t.Errorf("Rollback() = %v, want error: %v", err, tc.wantErr)
 			}
 
-			for _, iface := range tc.opts.NICConfigs {
+			for _, iface := range tc.opts.NICConfigs() {
 				fPath := svc.ifcfgFilePath(iface.Interface.Name())
 
 				exists := file.Exists(fPath, file.TypeFile)

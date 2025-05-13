@@ -22,8 +22,10 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -187,10 +189,11 @@ func TestRollback(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	opts := service.NewOptions(nil, []*nic.Configuration{})
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rolledBack, err := rollback(ctx, tc.managers, tc.skipID, nil)
+			rolledBack, err := rollback(ctx, tc.managers, tc.skipID, opts)
 			if (err == nil) == tc.wantError {
 				t.Errorf("rollback(ctx, %+v, %q, nil) = %v, want %v", tc.managers, tc.skipID, err, tc.wantError)
 			}
@@ -217,29 +220,19 @@ func TestRunManagerSetup(t *testing.T) {
 		wantError bool
 	}{
 		{
-			name: "invalid-managers",
-			opts: &service.Options{
-				Data: "expected to be a options pointer",
-			},
+			name:      "invalid-managers",
+			opts:      service.NewOptions("expected to be a options pointer", nil),
 			wantError: true,
 		},
 		{
-			name: "no-active-managers",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{},
-			},
+			name:      "no-active-managers",
+			opts:      service.NewOptions([]*service.Handle{}, []*nic.Configuration{{Index: 1}}),
 			wantError: true,
 		},
 		{
 			name: "failing-setup-manager",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{
+			opts: service.NewOptions(
+				[]*service.Handle{
 					{
 						ID: "manager-1",
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
@@ -250,33 +243,36 @@ func TestRunManagerSetup(t *testing.T) {
 						},
 					},
 				},
-			},
+				[]*nic.Configuration{
+					{
+						Index: 1,
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "eth0" },
+						},
+					},
+				},
+			),
 			wantError: true,
 		},
 		{
 			name: "success-no-nics",
-			opts: &service.Options{
-				Data: []*service.Handle{
-					{
-						ID: "manager-1",
-						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
-							return true, nil
-						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
-							return nil
-						},
+			opts: service.NewOptions([]*service.Handle{
+				{
+					ID: "manager-1",
+					IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
+						return true, nil
+					},
+					Setup: func(ctx context.Context, opts *service.Options) error {
+						return nil
 					},
 				},
-			},
+			}, nil),
 			wantError: false,
 		},
 		{
 			name: "error-ismanaging",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{
+			opts: service.NewOptions(
+				[]*service.Handle{
 					{
 						ID: "manager-1",
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
@@ -287,16 +283,21 @@ func TestRunManagerSetup(t *testing.T) {
 						},
 					},
 				},
-			},
+				[]*nic.Configuration{
+					{
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "eth0" },
+						},
+						Index: 1,
+					},
+				},
+			),
 			wantError: true,
 		},
 		{
 			name: "error-rollback",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{
+			opts: service.NewOptions(
+				[]*service.Handle{
 					{
 						ID: "manager-1",
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
@@ -316,16 +317,20 @@ func TestRunManagerSetup(t *testing.T) {
 						},
 					},
 				},
-			},
+				[]*nic.Configuration{
+					{
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "eth0" },
+						},
+					},
+				},
+			),
 			wantError: false,
 		},
 		{
 			name: "error-setup",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{
+			opts: service.NewOptions(
+				[]*service.Handle{
 					{
 						ID: "manager-1",
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
@@ -336,16 +341,21 @@ func TestRunManagerSetup(t *testing.T) {
 						},
 					},
 				},
-			},
+				[]*nic.Configuration{
+					{
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "eth0" },
+						},
+						Index: 1,
+					},
+				},
+			),
 			wantError: true,
 		},
 		{
 			name: "success",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{
+			opts: service.NewOptions(
+				[]*service.Handle{
 					{
 						ID: "manager-1",
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
@@ -356,12 +366,24 @@ func TestRunManagerSetup(t *testing.T) {
 						},
 					},
 				},
-			},
+				[]*nic.Configuration{
+					{
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "eth0" },
+						},
+						Index: 1,
+					},
+				},
+			),
 			wantError: false,
 		},
 	}
 
 	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			err := runManagerSetup(ctx, tc.opts)
@@ -380,11 +402,8 @@ func TestManagerSetup(t *testing.T) {
 	}{
 		{
 			name: "success",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{
+			opts: service.NewOptions(
+				[]*service.Handle{
 					{
 						ID: "manager-1",
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
@@ -404,16 +423,16 @@ func TestManagerSetup(t *testing.T) {
 						},
 					},
 				},
-			},
+				[]*nic.Configuration{
+					{Index: 1},
+				},
+			),
 			wantError: false,
 		},
 		{
 			name: "fail",
-			opts: &service.Options{
-				NICConfigs: []*nic.Configuration{
-					{},
-				},
-				Data: []*service.Handle{
+			opts: service.NewOptions(
+				[]*service.Handle{
 					{
 						ID: "manager-1",
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
@@ -433,7 +452,10 @@ func TestManagerSetup(t *testing.T) {
 						},
 					},
 				},
-			},
+				[]*nic.Configuration{
+					{Index: 1},
+				},
+			),
 			wantError: true,
 		},
 	}
@@ -441,9 +463,9 @@ func TestManagerSetup(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			managers, ok := tc.opts.Data.([]*service.Handle)
+			managers, ok := tc.opts.Data().([]*service.Handle)
 			if !ok {
-				t.Errorf("expected %+v to be a slice of service.Handle", tc.opts.Data)
+				t.Errorf("expected %+v to be a slice of service.Handle", tc.opts.Data())
 			}
 
 			oldManagers := defaultLinuxManagers
@@ -453,7 +475,7 @@ func TestManagerSetup(t *testing.T) {
 				defaultLinuxManagers = oldManagers
 			})
 
-			err := managerSetup(ctx, tc.opts.NICConfigs)
+			err := managerSetup(ctx, tc.opts.NICConfigs())
 			if (err == nil) == tc.wantError {
 				t.Errorf("runManagerSetup(ctx, %+v) = %v, want error", tc.opts, err)
 			}

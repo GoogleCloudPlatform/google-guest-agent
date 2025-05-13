@@ -24,9 +24,9 @@ import (
 // Options contains the options for managing the network environment.
 type Options struct {
 	// Data is a data pointer specific to the network manager.
-	Data any
-	// NicConfigs is the list of NIC configurations.
-	NICConfigs []*nic.Configuration
+	data any
+	// nicConfigs is the list of NIC configurations.
+	nicConfigs []*nic.Configuration
 }
 
 // Handle is the interface implemented by the linux network managers.
@@ -43,4 +43,40 @@ type Handle struct {
 
 	// Rollback rolls back the changes created in Setup.
 	Rollback func(context.Context, *Options) error
+}
+
+// NewOptions creates a new Options struct.
+func NewOptions(data any, nics []*nic.Configuration) *Options {
+	return &Options{
+		data:       data,
+		nicConfigs: nics,
+	}
+}
+
+// Data returns the data pointer specific to the network manager.
+func (o *Options) Data() any {
+	return o.data
+}
+
+// NICConfigs returns the NIC configurations.
+func (o *Options) NICConfigs() []*nic.Configuration {
+	return o.nicConfigs
+}
+
+// FilteredNICConfigs returns the NIC configurations filtered by the network
+// interfaces configuration.
+func (o *Options) FilteredNICConfigs() []*nic.Configuration {
+	// TODO(b/415074270): Implement this method to filter out invalid NICs.
+	return o.nicConfigs
+}
+
+// GetPrimaryNIC returns the primary NIC configuration. If the primary NIC does
+// not exist, it will return nil.
+func (o *Options) GetPrimaryNIC() *nic.Configuration {
+	for _, nic := range o.NICConfigs() {
+		if nic.Index == 0 {
+			return nic
+		}
+	}
+	return nil
 }

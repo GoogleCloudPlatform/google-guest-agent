@@ -71,7 +71,7 @@ func (sn *serviceWicked) IsManaging(ctx context.Context, opts *service.Options) 
 		return false, nil
 	}
 
-	iface := opts.NICConfigs[0].Interface.Name()
+	iface := opts.GetPrimaryNIC().Interface.Name()
 
 	// Check the status of configured interfaces.
 	opt := run.Options{OutputType: run.OutputStdout, Name: "wicked", Args: []string{"ifstatus", iface, "--brief"}}
@@ -100,7 +100,11 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 	var vlanInterfaces []string
 
 	// Write the config files.
-	for _, nic := range opts.NICConfigs {
+	for _, nic := range opts.FilteredNICConfigs() {
+		if !nic.ShouldManage() {
+			continue
+		}
+
 		fPath := sn.ifcfgFilePath(nic.Interface.Name())
 
 		// Write the config file for the current NIC.
@@ -294,7 +298,7 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) er
 	}
 
 	// Remove the config files.
-	for _, nic := range opts.NICConfigs {
+	for _, nic := range opts.FilteredNICConfigs() {
 		// Remove the config file for the current NIC.
 		if _, err := sn.removeInterface(ctx, sn.ifcfgFilePath(nic.Interface.Name())); err != nil {
 			return fmt.Errorf("failed to remove wicked config file: %w", err)

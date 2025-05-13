@@ -27,6 +27,10 @@ const (
 	// serviceID is the ID of the netplan service implementation.
 	serviceID = "netplan"
 
+	// debian12EthernetNamePrefix is the prefix for the debian 12 ethernet
+	// interfaces.
+	debian12EthernetNamePrefix = "a"
+
 	// netplanDropinIdentifier is the default identifier to use for the netplan
 	// drop-in file, i.e. this identifier will result in a drop-in file name like
 	// "20-google-guest-agent-ethernet.yaml".
@@ -37,19 +41,6 @@ const (
 
 	// netplanVlanSuffix is the vlan drop-in's file suffix.
 	netplanVlanSuffix = "-vlan"
-
-	// debian12DropinIdentifier is the identifier to use for the netplan drop-in
-	// file for debian 12, i.e. this identifier will result in a drop-in file name
-	// like "90-default.yaml".
-	debian12DropinIdentifier = "default"
-
-	// debian12EthenetSuffix is the ethernet drop-in's file suffix for debian 12.
-	debian12EthenetSuffix = ""
-
-	// debian12NetplanConfigDir is the netplan configuration directory for
-	// debian 12 - by writing a file with the same name but in a higher priority
-	// directory we can override the default netplan configuration.
-	debian12NetplanConfigDir = "/run/netplan"
 
 	// netplanConfigVersion defines the version we are using for netplan's drop-in
 	// files.
@@ -65,13 +56,8 @@ const (
 	// file.
 	defaultPriority = 20
 
-	// debian12Priority is the priority to use for the netplan drop-in file for
-	// debian 12 - it aligns with the default netplan configuration and allows
-	// us to override it.
-	debian12Priority = 90
-
 	// defaultNetplanConfigDir is the default netplan configuration directory.
-	defaultNetplanConfigDir = "/etc/netplan"
+	defaultNetplanConfigDir = "/run/netplan"
 
 	// noOpBackendID is the ID of the no-op backend.
 	noOpBackendID = "no-op"
@@ -116,14 +102,6 @@ type netplanVlan struct {
 	DHCPv6 *bool `yaml:"dhcp6,omitempty"`
 }
 
-// netplanRoute describes the netplan's route configuration.
-type netplanRoute struct {
-	// To is the destination of the route.
-	To string `yaml:"to"`
-	// Type is the type of the route.
-	Type string `yaml:"type,omitempty"`
-}
-
 // netplanEthernet describes the actual ethernet configuration.
 type netplanEthernet struct {
 	// Match is the interface's matching rule.
@@ -140,9 +118,6 @@ type netplanEthernet struct {
 
 	// DHCP6Overrides sets the netplan dhcp6-overrides configuration.
 	DHCP6Overrides *netplanDHCPOverrides `yaml:"dhcp6-overrides,omitempty"`
-
-	// Routes are the routes to be added to the interface.
-	Routes []netplanRoute `yaml:"routes,omitempty"`
 }
 
 // netplanDHCPOverrides sets the netplan dhcp-overrides configuration.
@@ -204,13 +179,14 @@ type serviceNetplan struct {
 
 	// ethernetDropinIdentifier is the identifier to use for the ethernet drop-in
 	// file, i.e. by default it's "google-guest-agent" resulting in a drop-in file
-	// name like "20-google-guest-agent-ethernet.yaml", now for debian 12 the
-	// identifier is "default" resulting in a drop-in file name like
-	// "90-default.yaml".
+	// name like "20-google-guest-agent-ethernet.yaml".
 	ethernetDropinIdentifier string
 
 	// ethernetSuffix is the suffix to use for the ethernet drop-in file.
 	ethernetSuffix string
+
+	// ethernetNamePrefix is the prefix to use for the ethernet interfaces.
+	ethernetNamePrefix string
 }
 
 // defaultModule returns the default module for netplan.

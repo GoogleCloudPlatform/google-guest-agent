@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -58,6 +57,11 @@ func (c *Configuration) VlanNames() []string {
 	return res
 }
 
+// ShouldManage returns true if the NIC should be managed by the network manager.
+func (c *Configuration) ShouldManage() bool {
+	return c.Index != 0 || cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC
+}
+
 // NewConfigs returns a set of NIC configurations, the returned slice
 // will contain a nicConfig for each NIC.
 func NewConfigs(desc *metadata.Descriptor, config *cfg.Sections, ignore address.IPAddressMap) ([]*Configuration, error) {
@@ -67,11 +71,6 @@ func NewConfigs(desc *metadata.Descriptor, config *cfg.Sections, ignore address.
 	// addresses will have the wsfcAddresses ignored when constructing the extra
 	// addresses mappings.
 	for index, nic := range desc.Instance().NetworkInterfaces() {
-		if !config.NetworkInterfaces.ManagePrimaryNIC && index == 0 {
-			galog.Infof("Skipping primary NIC configuration, disabled by configuration.")
-			continue
-		}
-
 		data, err := newConfig(nic, config, ignore)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create NIC config for NIC(%d) %s: %w", index, nic.MAC(), err)

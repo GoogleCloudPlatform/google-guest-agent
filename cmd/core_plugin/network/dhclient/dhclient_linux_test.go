@@ -238,7 +238,7 @@ func TestDhclientProcessExists(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					if tc.returnError {
 						// Error every time to see the command being run.
-						var msg = opts.Name
+						msg := opts.Name
 						for _, arg := range opts.Args {
 							msg += fmt.Sprintf(" %v", arg)
 						}
@@ -583,6 +583,10 @@ func TestNewInterfacePartitions(t *testing.T) {
 			wantError:       false,
 		},
 	}
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC = true
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -726,7 +730,7 @@ func TestRollback(t *testing.T) {
 
 			ps.Client = &dhclientMockPs{
 				FindRegexCallback: func(exematch string) ([]ps.Process, error) {
-					commandLine := []string{"dhclient", "eth0"}
+					commandLine := []string{"dhclient", "eth1"}
 					if tc.wantIpv6Error {
 						commandLine = append(commandLine, "-6")
 					}
@@ -738,13 +742,20 @@ func TestRollback(t *testing.T) {
 				},
 			}
 
-			nicConfig := &nic.Configuration{
-				SupportsIPv6: true,
-				Interface:    &ethernet.Interface{NameOp: func() string { return "eth0" }},
+			nicConfigs := []*nic.Configuration{
+				{
+					SupportsIPv6: true,
+					Interface:    &ethernet.Interface{NameOp: func() string { return "eth0" }},
+				},
+				{
+					SupportsIPv6: true,
+					Interface:    &ethernet.Interface{NameOp: func() string { return "eth1" }},
+					Index:        1,
+				},
 			}
 
 			ds := &dhclientService{}
-			opts := &service.Options{NICConfigs: []*nic.Configuration{nicConfig}}
+			opts := service.NewOptions(nil, nicConfigs)
 
 			err := ds.Rollback(context.Background(), opts)
 			if (err == nil) == tc.wantError {
@@ -848,7 +859,7 @@ func TestSetupIPV6Interfaces(t *testing.T) {
 			}
 
 			ds := &dhclientService{}
-			opts := &service.Options{NICConfigs: nics}
+			opts := service.NewOptions(nil, nics)
 
 			err := ds.setupIPV6Interfaces(context.Background(), opts, partitions)
 			if (err == nil) == tc.wantError {
@@ -917,6 +928,7 @@ func TestSetupEthernet(t *testing.T) {
 			nicConfig := &nic.Configuration{
 				SupportsIPv6: tc.supportIpv6,
 				Interface:    &ethernet.Interface{NameOp: func() string { return "eth0" }},
+				Index:        1,
 			}
 
 			oldPsClient := ps.Client
@@ -967,9 +979,13 @@ func TestSetupEthernet(t *testing.T) {
 			})
 
 			ds := &dhclientService{}
-			opts := &service.Options{
-				NICConfigs: []*nic.Configuration{nicConfig},
-			}
+			opts := service.NewOptions(nil, []*nic.Configuration{
+				{
+					SupportsIPv6: true,
+					Interface:    &ethernet.Interface{NameOp: func() string { return "eth0" }},
+				},
+				nicConfig,
+			})
 
 			config := &cfg.Sections{
 				NetworkInterfaces: &cfg.NetworkInterfaces{DHCPCommand: tc.configDhclientCommand},
@@ -993,7 +1009,8 @@ func TestSetup(t *testing.T) {
 		{
 			name: "fail",
 			nicConfig: &nic.Configuration{
-				Interface: &ethernet.Interface{NameOp: func() string { return "eth0" }},
+				Interface: &ethernet.Interface{NameOp: func() string { return "eth1" }},
+				Index:     1,
 			},
 			wantFindProcessError: true,
 			wantError:            true,
@@ -1010,10 +1027,15 @@ func TestSetup(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ds := &dhclientService{}
-			opts := &service.Options{}
+			opts := service.NewOptions(nil, nil)
 
 			if tc.nicConfig != nil {
-				opts.NICConfigs = []*nic.Configuration{tc.nicConfig}
+				opts = service.NewOptions(nil, []*nic.Configuration{
+					{
+						Interface: &ethernet.Interface{NameOp: func() string { return "eth0" }},
+					},
+					tc.nicConfig,
+				})
 			}
 
 			oldPsClient := ps.Client

@@ -254,10 +254,11 @@ func (lc *linuxClient) MissingRoutes(ctx context.Context, iface string, addresse
 
 	config := cfg.Retrieve()
 
+	// Ethernet Proto ID is left out to ensure we don't mark routes as missing that
+	// are already installed for the given interface.
 	opts := Options{
 		Table:  "local",
 		Type:   "local",
-		Proto:  config.IPForwarding.EthernetProtoID,
 		Device: iface,
 	}
 
@@ -303,6 +304,39 @@ func (lc *linuxClient) MissingRoutes(ctx context.Context, iface string, addresse
 			Type:          "local",
 			Proto:         config.IPForwarding.EthernetProtoID,
 		})
+	}
+
+	return res, nil
+}
+
+// ExtraRoutes returns the routes that are installed on the system, but are
+// not present in the configuration.
+func (lc *linuxClient) ExtraRoutes(ctx context.Context, iface string, wantedRoutes address.IPAddressMap) ([]Handle, error) {
+	config := cfg.Retrieve()
+
+	// Only want to delete extra routes that are set by the guest agent.
+	opts := Options{
+		Table:  "local",
+		Type:   "local",
+		Device: iface,
+		Proto:  config.IPForwarding.EthernetProtoID,
+	}
+
+	allRoutes, err := Find(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find routes: %w", err)
+	}
+
+	var res []Handle
+	for _, rt := range allRoutes {
+		if _, ok := wantedRoutes[rt.Destination.String()]; !ok {
+			res = append(res, Handle{
+				Destination:   rt.Destination,
+				InterfaceName: iface,
+				Table:         "local",
+				Type:          "local",
+			})
+		}
 	}
 
 	return res, nil

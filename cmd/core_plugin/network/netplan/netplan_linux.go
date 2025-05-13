@@ -27,7 +27,6 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/route"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
@@ -91,10 +90,7 @@ func (sn *serviceNetplan) setOSFlags(osInfo osinfo.OSInfo) {
 	// until we have that changed we are adjusting the configuration so we can
 	// override it.
 	if osInfo.OS == "debian" && osInfo.Version.Major == 12 {
-		sn.ethernetDropinIdentifier = debian12DropinIdentifier
-		sn.ethernetSuffix = debian12EthenetSuffix
-		sn.netplanConfigDir = debian12NetplanConfigDir
-		sn.priority = debian12Priority
+		sn.ethernetNamePrefix = debian12EthernetNamePrefix
 	}
 
 	if osInfo.OS == "ubuntu" && osInfo.Version.Major == 18 && osInfo.Version.Minor == 04 {
@@ -103,24 +99,46 @@ func (sn *serviceNetplan) setOSFlags(osInfo osinfo.OSInfo) {
 	}
 }
 
+// addPrefix adds the ethernet name prefix to the given name. If after is true,
+// the prefix will be added after the name, otherwise it will be added before
+// the name. If no ethernet name prefix is configured, the name is returned as is.
+//
+// This is used to ensure that the netplan backend drop-in files have a higher
+// priority than the netplan drop-in files, specifically on Debian 12, where the
+// default netplan configuration uses `all-en` as the configuration name.
+// With the prefix 'a' (example: `a-ens4`), the guest-agent-written configuration
+// will take priority due to lexicographical sorting.
+func (sn *serviceNetplan) addPrefix(name string, after bool) string {
+	if sn.ethernetNamePrefix == "" {
+		return name
+	}
+
+	if after {
+		return fmt.Sprintf("%s-%s", name, sn.ethernetNamePrefix)
+	}
+	return fmt.Sprintf("%s-%s", sn.ethernetNamePrefix, name)
+}
+
 // Setup sets up the network configuration.
 func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) error {
 	galog.Info("Setting up netplan interfaces.")
+	nicConfigs := opts.FilteredNICConfigs()
 
 	// Write the netplan drop-in file.
-	netplanChanged, err := sn.writeDropin(opts.NICConfigs)
+	netplanChanged, err := sn.writeDropin(nicConfigs)
 	if err != nil {
 		return fmt.Errorf("error writing netplan dropin: %w", err)
 	}
 
 	// Write the netplan vlan drop-in file.
-	netplanVlanChanged, err := sn.writeVlanDropin(opts.NICConfigs)
+	netplanVlanChanged, err := sn.writeVlanDropin(nicConfigs)
 	if err != nil {
 		return fmt.Errorf("error writing netplan vlan dropin: %w", err)
 	}
 
 	// Write the backend's drop-in files.
-	backendChanged, err := sn.backend.WriteDropins(opts.NICConfigs, backendDropinPrefix)
+	dropinPrefix := sn.addPrefix(backendDropinPrefix, true)
+	backendChanged, err := sn.backend.WriteDropins(nicConfigs, dropinPrefix)
 	if err != nil {
 		return err
 	}
@@ -137,30 +155,6 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 		opt := run.Options{OutputType: run.OutputNone, Name: "netplan", Args: []string{"apply"}}
 		if _, err := run.WithContext(ctx, opt); err != nil {
 			return fmt.Errorf("error applying netplan changes: %w", err)
-		}
-	}
-
-	// Setup all nics routes using the "native" implementation if the running
-	// system's netplan doesn't support local routes.
-	if !sn.dropinRoutes {
-		for _, nic := range opts.NICConfigs {
-			galog.Debugf("Attempting to add any missing route for nic: %s", nic.Interface.Name())
-
-			if nic.ExtraAddresses == nil {
-				galog.V(2).Debugf("No extra addresses to add routes for: %s", nic.Interface.Name())
-				continue
-			}
-
-			data, err := route.MissingRoutes(ctx, nic.Interface.Name(), nic.ExtraAddresses.MergedMap())
-			if err != nil {
-				return fmt.Errorf("failed to list missing routes: %w", err)
-			}
-
-			for _, addMe := range data {
-				if err := route.Add(ctx, addMe); err != nil {
-					return fmt.Errorf("failed to add route: %w", err)
-				}
-			}
 		}
 	}
 
@@ -181,6 +175,10 @@ func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, erro
 	var vlanConfigured bool
 
 	for _, nic := range nics {
+		if !nic.ShouldManage() {
+			continue
+		}
+
 		for _, vlan := range nic.VlanInterfaces {
 			trueVal := true
 
@@ -233,11 +231,14 @@ func (sn *serviceNetplan) writeDropin(nics []*nic.Configuration) (bool, error) {
 	}
 
 	// Iterate over the NICs and add them to the drop-in configuration.
-	for ii, nic := range nics {
-		galog.Debugf("Adding %s(%d) to drop-in configuration.", nic.Interface.Name(), ii)
+	for _, nic := range nics {
+		if !nic.ShouldManage() {
+			continue
+		}
+		galog.Debugf("Adding %s(%d) to drop-in configuration.", nic.Interface.Name(), nic.Index)
 
 		trueVal := true
-		useDomainsVal := ii == 0
+		useDomainsVal := nic.Index == 0
 		ne := netplanEthernet{
 			Match:          netplanMatch{Name: nic.Interface.Name()},
 			DHCPv4:         &trueVal,
@@ -249,13 +250,8 @@ func (sn *serviceNetplan) writeDropin(nics []*nic.Configuration) (bool, error) {
 			ne.DHCPv6 = &trueVal
 		}
 
-		if nic.ExtraAddresses != nil && sn.dropinRoutes {
-			for _, ipAddress := range nic.ExtraAddresses.MergedSlice() {
-				ne.Routes = append(ne.Routes, netplanRoute{To: ipAddress.String(), Type: "local"})
-			}
-		}
-
-		dropin.Network.Ethernets[nic.Interface.Name()] = ne
+		key := sn.addPrefix(nic.Interface.Name(), false)
+		dropin.Network.Ethernets[key] = ne
 	}
 
 	if err := sn.write(dropin, sn.ethernetDropinFile()); err != nil {
@@ -312,7 +308,7 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options) e
 
 	// Rollback the backend's drop-in files.
 	for _, backend := range backends {
-		if err := backend.RollbackDropins(opts.NICConfigs, backendDropinPrefix); err != nil {
+		if err := backend.RollbackDropins(opts.FilteredNICConfigs(), backendDropinPrefix); err != nil {
 			return err
 		}
 	}
@@ -329,17 +325,6 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options) e
 	if file.Exists(vlanDropin, file.TypeFile) {
 		if err := os.Remove(vlanDropin); err != nil {
 			return fmt.Errorf("error removing netplan vlan dropin: %w", err)
-		}
-	}
-
-	// Remove the routes managed by us using the "native" implementation if the
-	// running system's netplan doesn't support local routes.
-	if !sn.dropinRoutes {
-		// Remove the routes managed by us.
-		for _, nic := range opts.NICConfigs {
-			if err := route.RemoveRoutes(ctx, nic.Interface.Name()); err != nil {
-				return fmt.Errorf("failed to remove native routes managed by netplan manager: %w", err)
-			}
 		}
 	}
 

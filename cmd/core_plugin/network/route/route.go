@@ -95,6 +95,9 @@ type routeOperations interface {
 	// MissingRoutes given a map of wanted routes addresses returns the routes
 	// that are missing from the system.
 	MissingRoutes(ctx context.Context, iface string, wantedRoutes address.IPAddressMap) ([]Handle, error)
+	// ExtraRoutes returns the routes that are installed on the system, but are
+	// not present in the configuration.
+	ExtraRoutes(ctx context.Context, iface string, wantedRoutes address.IPAddressMap) ([]Handle, error)
 	// RemoveRoutes removes all the routes managed/installed by us for the given
 	// interface.
 	RemoveRoutes(ctx context.Context, iface string) error
@@ -130,4 +133,10 @@ func MissingRoutes(ctx context.Context, iface string, wantedRoutes address.IPAdd
 // interface.
 func RemoveRoutes(ctx context.Context, iface string) error {
 	return client.RemoveRoutes(ctx, iface)
+}
+
+// ExtraRoutes returns the routes that are installed on the system, but are
+// not present in the configuration.
+func ExtraRoutes(ctx context.Context, iface string, wantedRoutes address.IPAddressMap) ([]Handle, error) {
+	return client.ExtraRoutes(ctx, iface, wantedRoutes)
 }
