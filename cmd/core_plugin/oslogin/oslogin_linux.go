@@ -363,14 +363,16 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		failed = true
 	}
 
-	// Fill NSS cache.
-	if _, err := run.WithContext(ctx, run.Options{
-		Name:       "google_oslogin_nss_cache",
-		OutputType: run.OutputNone,
-	}); err != nil {
-		galog.Errorf("Failed to fill NSS cache: %v", err)
-		failed = true
-	}
+	// Fill NSS cache asynchronously.
+	// This async run is best-effort; if it fails then only an error is logged.
+	go func() {
+		if _, err := run.WithContext(ctx, run.Options{
+			Name:       "google_oslogin_nss_cache",
+			OutputType: run.OutputNone,
+		}); err != nil {
+			galog.Errorf("Failed to fill NSS cache: %v", err)
+		}
+	}()
 
 	mod.enabled.Store(!failed)
 	mod.failedConfiguration.Store(failed)
