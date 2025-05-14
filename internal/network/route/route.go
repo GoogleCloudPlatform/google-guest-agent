@@ -18,7 +18,8 @@ package route
 import (
 	"context"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 )
 
 const (
@@ -101,6 +102,8 @@ type routeOperations interface {
 	// RemoveRoutes removes all the routes managed/installed by us for the given
 	// interface.
 	RemoveRoutes(ctx context.Context, iface string) error
+	// Setup sets up the routes for the network interfaces.
+	Setup(ctx context.Context, opts *service.Options) error
 }
 
 // Add adds a route to the system.
@@ -127,6 +130,11 @@ func Find(ctx context.Context, opts Options) ([]Handle, error) {
 // that are missing from the system.
 func MissingRoutes(ctx context.Context, iface string, wantedRoutes address.IPAddressMap) ([]Handle, error) {
 	return client.MissingRoutes(ctx, iface, wantedRoutes)
+}
+
+// Setup sets up the routes for the network interfaces.
+func Setup(ctx context.Context, opts *service.Options) error {
+	return client.Setup(ctx, opts)
 }
 
 // RemoveRoutes removes all the routes managed/installed by us for the given

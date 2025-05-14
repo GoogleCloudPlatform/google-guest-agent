@@ -20,9 +20,9 @@ package wsfc
 import (
 	"strings"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 )
 
 // AddressMap returns a slice containing the WSFC addresses.
