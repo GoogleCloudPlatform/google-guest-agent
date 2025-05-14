@@ -59,30 +59,44 @@ func TestModuleSetup(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		data      any
-		wantError bool
+		name            string
+		data            any
+		clockSkewDaemon bool
+		wantError       bool
 	}{
 		{
-			name:      "empty-mds",
-			data:      desc,
-			wantError: false,
+			name:            "empty-mds",
+			data:            desc,
+			clockSkewDaemon: true,
+			wantError:       false,
 		},
 		{
-			name:      "nil-data",
-			data:      nil,
-			wantError: true,
+			name:            "nil-data",
+			data:            nil,
+			clockSkewDaemon: true,
+			wantError:       true,
 		},
 		{
-			name:      "invalid-data",
-			data:      &clockSkew{},
-			wantError: true,
+			name:            "invalid-data",
+			data:            &clockSkew{},
+			clockSkewDaemon: true,
+			wantError:       true,
+		},
+		{
+			name:            "daemon-disabled",
+			data:            desc,
+			clockSkewDaemon: false,
+			wantError:       false,
 		},
 	}
 
-	cfg.Load(nil)
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() returned error %v", err)
+	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			cfg.Retrieve().Daemons.ClockSkewDaemon = tc.clockSkewDaemon
 			mod := &clockSkew{}
 			err = mod.moduleSetup(context.Background(), tc.data)
 			if err != nil && !tc.wantError {
@@ -104,42 +118,71 @@ func TestMetadataSubscriber(t *testing.T) {
 		t.Fatalf("UnmarshalDescriptor(%q) returned error %v", mdsJSON, err)
 	}
 
+	mdsWithTokenJSON := `
+	{
+		"instance":  {
+			"virtual_clock": {
+				"drift_token": "token"
+			}
+		}
+	}`
+	descWithToken, err := metadata.UnmarshalDescriptor(mdsWithTokenJSON)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor(%q) returned error %v", mdsWithTokenJSON, err)
+	}
+
 	tests := []struct {
-		name string
-		data any
-		err  error
-		want bool
+		name      string
+		data      any
+		prevDesc  *metadata.Descriptor
+		err       error
+		wantError bool
+		want      bool
 	}{
 		{
-			name: "empty-mds",
-			data: desc,
-			want: true,
+			name:      "empty-mds",
+			data:      desc,
+			want:      true,
+			wantError: true,
 		},
 		{
-			name: "empty-mds-with-error",
-			data: desc,
-			err:  errors.New("error"),
-			want: true,
+			name:      "empty-mds-with-error",
+			data:      desc,
+			err:       errors.New("error"),
+			want:      true,
+			wantError: false,
 		},
 		{
-			name: "nil-data",
-			data: nil,
-			want: false,
+			name:      "nil-data",
+			data:      nil,
+			want:      false,
+			wantError: true,
 		},
 		{
-			name: "invalid-data",
-			data: &clockSkew{},
-			want: false,
+			name:      "invalid-data",
+			data:      &clockSkew{},
+			want:      false,
+			wantError: true,
+		},
+		{
+			name:      "same-mds",
+			data:      descWithToken,
+			prevDesc:  descWithToken,
+			want:      true,
+			wantError: false,
 		},
 	}
 
 	cfg.Load(nil)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mod := &clockSkew{}
-			res := mod.metadataSubscriber(context.Background(), "evType", nil, &events.EventData{Data: tc.data, Error: tc.err})
+			mod := &clockSkew{prevMetadata: tc.prevDesc}
+			res, err := mod.metadataSubscriber(context.Background(), "evType", nil, &events.EventData{Data: tc.data, Error: tc.err})
 			if res != tc.want {
 				t.Errorf("metadataSubscriber() returned %v, want %v", res, tc.want)
+			}
+			if (err != nil) != tc.wantError {
+				t.Errorf("metadataSubscriber() returned error %v, want error: %t", err, tc.wantError)
 			}
 		})
 	}

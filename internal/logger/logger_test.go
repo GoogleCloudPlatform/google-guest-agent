@@ -184,7 +184,10 @@ func TestInitCloudLogging(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			evData := &events.EventData{Data: tc.mds}
-			got := initCloudLogging(ctx, "eventType", tc.data, evData)
+			got, err := initCloudLogging(ctx, "eventType", tc.data, evData)
+			if (err != nil) != tc.want {
+				t.Errorf("initCloudLogging() returned error: %v, want error: %t", err, tc.want)
+			}
 			if got != tc.want {
 				t.Errorf("initCloudLogging() = %v, want %v", got, tc.want)
 			}

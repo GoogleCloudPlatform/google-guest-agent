@@ -20,8 +20,12 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metricregistry"
+	tpb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -75,6 +79,10 @@ type Manager struct {
 	// control go routines to leave(given we don't have any more job left to
 	// process).
 	queue *watcherQueue
+
+	// metrics is the metric registry for the events manager. It is used to
+	// record metrics for recording the events returned by all the handlers.
+	metrics *metricregistry.MetricRegistry
 }
 
 // watcherQueue wraps the watchers <-> callbacks communication as well as the
@@ -129,6 +137,10 @@ type EventSubscriber struct {
 	// Callback is the callback function that will be called when a new event
 	// happens.
 	Callback EventCb
+
+	// MetricName is the metric name for the event handler. If the metric
+	// name is not specified, the metric will not be recorded.
+	MetricName acmpb.GuestAgentModuleMetric_Metric
 }
 
 type eventBusData struct {
@@ -145,7 +157,7 @@ type eventBusData struct {
 //
 // The callback should return true if it wants to renew, returning false will
 // case the callback to be unregistered/unsubscribed.
-type EventCb func(ctx context.Context, evType string, data any, evData *EventData) bool
+type EventCb func(ctx context.Context, evType string, data any, evData *EventData) (bool, error)
 
 // length returns how many watchers are currently running.
 func (wq *watcherQueue) length() int {
@@ -387,6 +399,8 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	runCtx, contextCancel := context.WithCancel(ctx)
 
+	m.metrics = metricregistry.New(runCtx, time.Minute, 10, "events_manager")
+
 	// Creates a goroutine for each registered watcher's event and keep handling
 	// its execution until they give up/finishes their job by returning
 	// renew = false.
@@ -419,10 +433,30 @@ func (m *Manager) Run(ctx context.Context) error {
 				deleteMe := make([]*EventSubscriber, 0)
 				for _, curr := range subscribers {
 					galog.Debugf("Running event subscribed callback: (event: %q, subscriber: %q)", busData.evType, curr.Name)
-					renew := (curr.Callback)(ctx, busData.evType, curr.Data, busData.data)
+					metric := &acmpb.GuestAgentModuleMetric{
+						MetricName:   curr.MetricName,
+						StartTime:    tpb.Now(),
+						ModuleStatus: acmpb.GuestAgentModuleMetric_STATUS_SUCCEEDED,
+						Enabled:      true,
+					}
+
+					renew, err := (curr.Callback)(ctx, busData.evType, curr.Data, busData.data)
+					if err != nil {
+						metric.ModuleStatus = acmpb.GuestAgentModuleMetric_STATUS_FAILED
+						metric.Error = fmt.Sprintf("Event %q hander %q failed with error: %v", busData.evType, curr.Name, err)
+						galog.Warnf("Event: %q, subscriber: %q, metric: %q failed with error: %v", busData.evType, curr.Name, curr.MetricName.String(), err)
+					}
+					metric.EndTime = tpb.Now()
+					go func() {
+						if curr.MetricName != acmpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED {
+							m.metrics.Record(ctx, metric)
+						}
+					}()
+
 					if !renew {
 						deleteMe = append(deleteMe, curr)
 					}
+
 					galog.Debugf("Returning from event subscribed callback: (event: %q, subscriber: %q, should renew?: %t)", busData.evType, curr.Name, renew)
 				}
 

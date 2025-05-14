@@ -19,6 +19,7 @@ package oslogin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
@@ -244,10 +246,13 @@ func (mod *osloginModule) moduleSetup(ctx context.Context, data any) error {
 	// Do the initial first setup execution in the module initialization, it will
 	// be handled by the metadata longpoll event handler/subscriber after the
 	// first setup.
-	_ = mod.osloginSetup(ctx, desc)
+	_, err := mod.osloginSetup(ctx, desc)
+	if err != nil {
+		galog.Errorf("Failed to handle first oslogin setup: %v", err)
+	}
 
 	// Subscribe to the metadata longpoll event.
-	sub := events.EventSubscriber{Name: osloginModuleID, Callback: mod.metadataSubscriber}
+	sub := events.EventSubscriber{Name: osloginModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_OS_LOGIN_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
 
 	return nil
@@ -255,35 +260,33 @@ func (mod *osloginModule) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback for the metadata event and handles the
 // platform oslogin configuration changes.
-func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		galog.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
-		return false
+		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
-		galog.Debugf("Metadata event watcher reported error: %s, skipping.", evData.Error)
-		return true
+		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
 	return mod.osloginSetup(ctx, desc)
 }
 
 // osloginSetup is the actual oslogin's configuration entry point.
-func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descriptor) bool {
+func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descriptor) (bool, error) {
 	defer func() { mod.prevMetadata = desc }()
 
 	// If the metadata has not changed, we return early.
 	// We don't need to clean up the files here because the textconfig library
 	// rolls back its previous changes before applying new ones.
 	if !mod.metadataChanged(desc) && !mod.failedConfiguration.Load() {
-		return true
+		return true, nil
 	}
 
 	evManager := events.FetchManager()
@@ -298,15 +301,14 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		if mod.enabled.Load() {
 			if err := mod.disableOSLogin(ctx, evManager); err != nil {
 				// Failed to restart the necessary services.
-				galog.Errorf("Failed to disable OS Login: %v", err)
 				mod.failedConfiguration.Store(true)
-				return true
+				return true, fmt.Errorf("failed to disable OS Login: %w", err)
 			}
 			mod.failedConfiguration.Store(false)
 		}
 
 		mod.enabled.Store(false)
-		return true
+		return true, nil
 	}
 
 	// Enable/start the ssh trusted ca pipe event handler.
@@ -321,45 +323,45 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 	}
 
 	var failed bool
-
+	var errs error
 	// Write SSH config.
 	if err := mod.setupOpenSSH(desc); err != nil {
-		galog.Errorf("Failed to setup openssh: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to setup openssh: %w", err))
 		failed = true
 	}
 
 	// Write NSSwitch config.
 	if err := mod.setupNSSwitch(false); err != nil {
-		galog.Errorf("Failed to setup nsswitch: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to setup nsswitch: %w", err))
 		failed = true
 	}
 
 	// Write PAM config.
 	if err := mod.setupPAM(); err != nil {
-		galog.Errorf("Failed to setup pam: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to setup pam: %w", err))
 		failed = true
 	}
 
 	// Write Group config.
 	if err := mod.setupGroup(); err != nil {
-		galog.Errorf("Failed to setup group: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to setup group: %w", err))
 		failed = true
 	}
 
 	// Restart services. This is not a blocker.
 	if err := mod.restartServices(ctx); err != nil {
-		galog.Errorf("Failed to restart services: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to restart services: %w", err))
 		failed = true
 	}
 
 	// Create the necessary OSLogin directories and other files.
 	if err := mod.setupOSLoginDirs(ctx); err != nil {
-		galog.Errorf("Failed to setup OSLogin directories: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to setup OSLogin directories: %w", err))
 		failed = true
 	}
 
 	if err := mod.setupOSLoginSudoers(); err != nil {
-		galog.Errorf("Failed to create OSLogin sudoers file: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to create OSLogin sudoers file: %w", err))
 		failed = true
 	}
 
@@ -368,13 +370,13 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		Name:       "google_oslogin_nss_cache",
 		OutputType: run.OutputNone,
 	}); err != nil {
-		galog.Errorf("Failed to fill NSS cache: %v", err)
+		errs = errors.Join(errs, fmt.Errorf("Failed to fill NSS cache: %w", err))
 		failed = true
 	}
 
 	mod.enabled.Store(!failed)
 	mod.failedConfiguration.Store(failed)
-	return true
+	return true, errs
 }
 
 // setupOpenSSH configures the openssh daemon.

@@ -123,28 +123,28 @@ func coreReady(ctx context.Context, opts Config) {
 }
 
 // handlePluginEvent handles the event received from plugin watcher.
-func handlePluginEvent(ctx context.Context, evType string, opts any, evData *events.EventData) bool {
+func handlePluginEvent(ctx context.Context, evType string, opts any, evData *events.EventData) (bool, error) {
 	if evType != manager.EventID {
-		galog.Debugf("Unexpected event type: %s", evType)
-		return true
+		return true, fmt.Errorf("unexpected event type: %s", evType)
 	}
 
 	if evData.Error != nil {
+		// This is expected to happen until core plugin is initialized, just log and
+		// return true to keep the watcher running.
 		galog.Debugf("Still waiting for plugin status, got error: %v", evData.Error)
-		return true
+		return true, nil
 	}
 
 	c, ok := opts.(Config)
 	if !ok {
-		galog.Debugf("Unexpected data type: %T, opts expected to be of type %T", opts, Config{})
-		return true
+		return true, fmt.Errorf("unexpected data type: %T, opts expected to be of type %T", opts, Config{})
 	}
 
 	// Nil error means we detected the event successfully and can
 	// run components waiting on core plugin initialization.
 	coreReady(ctx, c)
 	// We received the required event, no need to continue listening.
-	return false
+	return false, nil
 }
 
 // Config contains options for Guest Agent setup.
@@ -232,7 +232,7 @@ func Run(ctx context.Context, c Config) error {
 		return fmt.Errorf("core plugin installation: %w", err)
 	}
 
-	events.FetchManager().Subscribe(manager.EventID, events.EventSubscriber{Name: "GuestAgent", Data: c, Callback: handlePluginEvent})
+	events.FetchManager().Subscribe(manager.EventID, events.EventSubscriber{Name: "GuestAgent", Data: c, Callback: handlePluginEvent, MetricName: acpb.GuestAgentModuleMetric_CORE_PLUGIN_INITIALIZATION})
 
 	// Ignore returned [watcher] as it takes care of deregistering itself.
 	_, err = manager.InitWatcher(ctx, corePluginName, successStatusCode, pluginStatusRequest)

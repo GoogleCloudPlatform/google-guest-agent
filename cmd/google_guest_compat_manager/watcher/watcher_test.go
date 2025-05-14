@@ -141,7 +141,11 @@ func TestSetupError(t *testing.T) {
 			cfgFile := filepath.Join(t.TempDir(), "core-plugin-enabled")
 			config.CorePluginEnabledConfigFile = cfgFile
 
-			if !watcher.Setup(ctx, "LongpollEvent", nil, test.event) {
+			got, err := watcher.Setup(ctx, "LongpollEvent", nil, test.event)
+			if err == nil {
+				t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned no error, want error", test.event)
+			}
+			if !got {
 				t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned false, want: true", test.event)
 			}
 
@@ -154,6 +158,27 @@ func TestSetupError(t *testing.T) {
 				t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) resulted in set corePluginsEnabled to %t, want: %t", test.event, watcher.corePluginsEnabled, test.prevEnabled)
 			}
 		})
+	}
+}
+
+func TestSetup(t *testing.T) {
+	ctx := context.Background()
+	mdsEnableData := fmt.Sprintf(instanceMdsTemplate, true)
+	mdsEnable, err := metadata.UnmarshalDescriptor(mdsEnableData)
+	if err != nil {
+		t.Fatalf("metadata.UnmarshalDescriptor(%s) failed unexpectedly: %v", mdsEnableData, err)
+	}
+
+	guestAgentBinaryPath = filepath.Join(t.TempDir(), "non-existent")
+
+	// Should be no-op if the guest agent binary does not exist.
+	watcher := Manager{}
+	got, err := watcher.Setup(ctx, "LongpollEvent", nil, &events.EventData{Data: mdsEnable})
+	if err != nil {
+		t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned error: %v, want: nil", mdsEnable, err)
+	}
+	if !got {
+		t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned false, want: true", mdsEnable)
 	}
 }
 

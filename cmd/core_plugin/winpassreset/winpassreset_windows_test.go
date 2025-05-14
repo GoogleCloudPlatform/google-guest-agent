@@ -118,6 +118,7 @@ func TestModuleSetup(t *testing.T) {
 }
 
 func TestEventCallback(t *testing.T) {
+	ctx := context.Background()
 	mdsJSON := `
 	{
 		"instance":  {
@@ -136,22 +137,26 @@ func TestEventCallback(t *testing.T) {
 		evData     *events.EventData
 		opts       winpassTestOpts
 		expectBool bool
+		wantErr    bool
 	}{
 		{
 			name:       "invalid_metadata",
 			evData:     &events.EventData{Data: "invalid-metadata", Error: nil},
 			expectBool: false,
+			wantErr:    true,
 		},
 		{
 			name:       "event_error",
 			evData:     &events.EventData{Data: desc, Error: fmt.Errorf("event error")},
 			expectBool: true,
+			wantErr:    true,
 		},
 		{
 			name:       "setup_accounts_error",
 			evData:     &events.EventData{Data: desc, Error: nil},
 			opts:       winpassTestOpts{overrideRegRead: true, regReadErr: true},
 			expectBool: true,
+			wantErr:    true,
 		},
 		{
 			name:   "success",
@@ -164,6 +169,7 @@ func TestEventCallback(t *testing.T) {
 				testRegEntries:        []string{`{"UserName": "test-user", "PasswordLength": 20}`},
 			},
 			expectBool: true,
+			wantErr:    false,
 		},
 	}
 
@@ -171,8 +177,12 @@ func TestEventCallback(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			winpassTestSetup(t, test.opts)
 
-			if got := eventCallback(context.Background(), "metadata_changed", "", test.evData); got != test.expectBool {
-				t.Errorf("eventCallback(ctx, %q, \"\", %v) = %t, want %t", "metadata_changed", test.evData, got, test.expectBool)
+			got, err := eventCallback(ctx, "metadata_changed", nil, test.evData)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("eventCallback(ctx, %q, '', %v) = %v, want error: %t", "metadata_changed", test.evData, err, test.wantErr)
+			}
+			if got != test.expectBool {
+				t.Errorf("eventCallback(ctx, %q, '', %v) = %t, want %t", "metadata_changed", test.evData, got, test.expectBool)
 			}
 		})
 	}

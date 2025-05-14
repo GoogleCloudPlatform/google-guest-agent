@@ -308,29 +308,34 @@ func TestMetadataSubscriber(t *testing.T) {
 	ctx := context.Background()
 
 	test := []struct {
-		desc string
-		data events.EventData
-		want bool
+		desc    string
+		data    events.EventData
+		want    bool
+		wantErr bool
 	}{
 		{
-			desc: "success",
-			data: events.EventData{Data: &metadata.Descriptor{}},
-			want: true,
+			desc:    "success",
+			data:    events.EventData{Data: &metadata.Descriptor{}},
+			want:    true,
+			wantErr: false,
 		},
 		{
-			desc: "reset_error",
-			data: events.EventData{Data: &metadata.Descriptor{}},
-			want: true,
+			desc:    "reset_error",
+			data:    events.EventData{Data: &metadata.Descriptor{}},
+			want:    true,
+			wantErr: true,
 		},
 		{
-			desc: "invalid_data",
-			data: events.EventData{},
-			want: false,
+			desc:    "invalid_data",
+			data:    events.EventData{},
+			want:    false,
+			wantErr: true,
 		},
 		{
-			desc: "error",
-			data: events.EventData{Error: fmt.Errorf("test error")},
-			want: true,
+			desc:    "error",
+			data:    events.EventData{Error: fmt.Errorf("test error")},
+			want:    true,
+			wantErr: true,
 		},
 	}
 
@@ -348,7 +353,11 @@ func TestMetadataSubscriber(t *testing.T) {
 				mgr.agent.stop(ctx)
 			})
 
-			if got := mgr.metadataSubscriber(ctx, tc.desc, nil, &tc.data); got != tc.want {
+			got, err := mgr.metadataSubscriber(ctx, tc.desc, nil, &tc.data)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("metadataSubscriber(ctx, %s, nil, &tc.data) error = %v, want error: %t", tc.desc, err, tc.wantErr)
+			}
+			if got != tc.want {
 				t.Errorf("metadataSubscriber(ctx, %s, nil, &tc.data) = %t, want %t", tc.desc, got, tc.want)
 			}
 

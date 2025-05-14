@@ -25,6 +25,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/wsfc"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -91,7 +92,7 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 	}
 
 	eManager := events.FetchManager()
-	sub := events.EventSubscriber{Name: networkLateModuleID, Callback: mod.metadataSubscriber}
+	sub := events.EventSubscriber{Name: networkLateModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_NETWORK_INITIALIZATION}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
 
 	return nil
@@ -99,27 +100,21 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback function to be called by the event manager
 // when a metadata longpoll event is received.
-func (mod *lateModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func (mod *lateModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		galog.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
-		return false
+		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
-		galog.Debugf("Metadata event watcher reported error: %s, skiping.", evData.Error)
-		return true
+		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
-	if err := mod.networkSetup(ctx, cfg.Retrieve(), desc); err != nil {
-		galog.Errorf("Failed to handle network setup on metadata change: %v", err)
-	}
-
-	return true
+	return true, mod.networkSetup(ctx, cfg.Retrieve(), desc)
 }
 
 // networkSetup sets up all the network interfaces on the system.

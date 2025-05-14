@@ -18,6 +18,7 @@ package metadatasshkey
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -86,29 +88,24 @@ func moduleSetup(ctx context.Context, data any) error {
 		galog.Errorf("error setting initial metadatasshkey configuration: %v", err)
 	}
 
-	sub := events.EventSubscriber{Name: "metadatasshkey", Callback: handleMetadataChange}
+	sub := events.EventSubscriber{Name: "metadatasshkey", Callback: handleMetadataChange, MetricName: acmpb.GuestAgentModuleMetric_METADATA_SSH_KEY_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
 
 	return nil
 }
 
-func handleMetadataChange(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func handleMetadataChange(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	if !ok {
-		galog.Errorf("Event's data is not a metadata descriptor: %+v.", evData.Data)
-		return false
+		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	if evData.Error != nil {
-		galog.Debugf("Metadata event watcher reported error: %s, skiping.", evData.Error)
-		return true
+		return true, fmt.Errorf("metadata event watcher reported error: %v, skiping ssh key setup", evData.Error)
 	}
 
-	for _, err := range metadataSSHKeySetup(ctx, cfg.Retrieve(), desc) {
-		galog.Errorf("error setting new metadatasshkey configuration after metadata change: %v", err)
-	}
-
-	return true
+	errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
+	return true, errors.Join(errs...)
 }
 
 // metadataSSHKeySetup performs necessary configuration to setup metadata ssh

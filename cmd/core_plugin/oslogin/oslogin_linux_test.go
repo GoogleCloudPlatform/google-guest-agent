@@ -114,26 +114,30 @@ func TestMetadataSubscriberInputValidity(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		desc any
-		err  error
-		want bool
+		name    string
+		desc    any
+		err     error
+		want    bool
+		wantErr bool
 	}{
 		{
-			name: "wrong-data",
-			desc: "wrong data",
-			want: false,
+			name:    "wrong-data",
+			desc:    "wrong data",
+			want:    false,
+			wantErr: true,
 		},
 		{
-			name: "empty-mds",
-			desc: desc,
-			want: true,
+			name:    "empty-mds",
+			desc:    desc,
+			want:    true,
+			wantErr: false,
 		},
 		{
-			name: "error-evdata",
-			desc: desc,
-			want: true,
-			err:  errors.New("error"),
+			name:    "error-evdata",
+			desc:    desc,
+			want:    true,
+			err:     errors.New("error"),
+			wantErr: true,
 		},
 	}
 
@@ -143,7 +147,10 @@ func TestMetadataSubscriberInputValidity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mod := &osloginModule{}
 			evData := &events.EventData{Data: tc.desc, Error: tc.err}
-			got := mod.metadataSubscriber(ctx, "evType", nil, evData)
+			got, err := mod.metadataSubscriber(ctx, "evType", nil, evData)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("metadataSubscriber() = %v, want error: %t", err, tc.wantErr)
+			}
 			if got != tc.want {
 				t.Errorf("metadataSubscriber() = %v, want %v", got, tc.want)
 			}
@@ -546,7 +553,10 @@ func TestEnableDisable(t *testing.T) {
 
 	ctx := context.Background()
 
-	got := module.osloginSetup(ctx, enabledDesc)
+	got, err := module.osloginSetup(ctx, enabledDesc)
+	if err != nil {
+		t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", enabledDesc, err)
+	}
 	if got != true {
 		t.Errorf("osloginSetup(ctx, %v) = %t, want %t", enabledDesc, got, true)
 	}
@@ -574,7 +584,10 @@ func TestEnableDisable(t *testing.T) {
 		t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", disabledMDSJSON, err)
 	}
 
-	got = module.osloginSetup(ctx, disabledDesc)
+	got, err = module.osloginSetup(ctx, disabledDesc)
+	if err != nil {
+		t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", disabledDesc, err)
+	}
 	if !got {
 		t.Errorf("osloginSetup(ctx, %v) = %t, want %t", disabledDesc, got, true)
 	}
@@ -1088,7 +1101,11 @@ func TestRetryFailConfiguration(t *testing.T) {
 			createTestFiles(t, module, test.fileOpts)
 			_ = setupTestRunner(t, test.runnerErr)
 
-			if ok := module.osloginSetup(context.Background(), enabledDesc); !ok {
+			ok, err := module.osloginSetup(context.Background(), enabledDesc)
+			if err == nil {
+				t.Fatalf("osloginSetup(ctx, %v) = nil, want error", enabledDesc)
+			}
+			if !ok {
 				t.Fatalf("osloginSetup(ctx, %v) = %t, want %t", enabledDesc, ok, true)
 			}
 
@@ -1107,7 +1124,11 @@ func TestRetryFailConfiguration(t *testing.T) {
 			})
 
 			// Retry should succeed.
-			if ok := module.osloginSetup(context.Background(), enabledDesc); !ok {
+			ok, err = module.osloginSetup(context.Background(), enabledDesc)
+			if err != nil {
+				t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", enabledDesc, err)
+			}
+			if !ok {
 				t.Fatalf("osloginSetup(ctx, %v) = %t, want %t", enabledDesc, ok, true)
 			}
 

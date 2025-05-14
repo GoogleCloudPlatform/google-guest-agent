@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/lru"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -73,33 +74,27 @@ func moduleSetup(ctx context.Context, data any) error {
 	}
 
 	eManager := events.FetchManager()
-	sub := events.EventSubscriber{Name: winpassModuleID, Callback: eventCallback}
+	sub := events.EventSubscriber{Name: winpassModuleID, Callback: eventCallback, MetricName: acmpb.GuestAgentModuleMetric_WINDOWS_PASSWORD_RESET}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
 	return nil
 }
 
 // eventCallback is the callback event handler for the winpass module.
-func eventCallback(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func eventCallback(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		galog.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
-		return false
+		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
-		galog.Debugf("metadata event watcher reported error: %s, skipping.", evData.Error)
-		return true
+		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
-	if err := setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys()); err != nil {
-		galog.Errorf("failed to reset password: %v", err)
-	}
-
-	return true
+	return true, setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys())
 }
 
 // setupAccounts sets up accounts in the registry and creates and updates them

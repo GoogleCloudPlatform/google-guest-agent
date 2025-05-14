@@ -183,19 +183,17 @@ func parseMIGLabels(mds *metadata.Descriptor) (map[string]string, error) {
 // Logging initialization depends on data provided by metadata server, we can
 // only initialize if after having the first descriptor being available. This
 // handler/subscriber will never be renewed.
-func initCloudLogging(ctx context.Context, eventType string, data any, event *events.EventData) bool {
+func initCloudLogging(ctx context.Context, eventType string, data any, event *events.EventData) (bool, error) {
 	// Any invalid data or event data will be dealt as self correctable error
 	// meaning we return true to indicate the event should be retried.
 	opts, ok := data.(*Options)
 	if !ok {
-		galog.Errorf("Failed to initialize cloud logging, invalid \"data\" type passed to event callback.")
-		return true
+		return true, fmt.Errorf("failed to initialize cloud logging, invalid callback data type (%T) passed", data)
 	}
 
 	mds, ok := event.Data.(*metadata.Descriptor)
 	if !ok {
-		galog.Errorf("Failed to initialize cloud logging, invalid \"event.Data\" type passed to event callback.")
-		return true
+		return true, fmt.Errorf("failed to initialize cloud logging, invalid event.Data type (%T) passed to event callback", event.Data)
 	}
 
 	extraLabels, err := parseMIGLabels(mds)
@@ -219,10 +217,9 @@ func initCloudLogging(ctx context.Context, eventType string, data any, event *ev
 	}
 
 	if err := opts.cloudLoggingBackend.InitClient(ctx, cloudOpts); err != nil {
-		galog.Errorf("failed to initialize cloud logging (%s): %v", err, programName)
-		return true
+		return true, fmt.Errorf("failed to initialize cloud logging client(%s): %w", programName, err)
 	}
 
-	galog.Infof("Cloud logging initialized (%s).", programName)
-	return false
+	galog.Infof("Cloud logging initialized (%s)", programName)
+	return false, nil
 }

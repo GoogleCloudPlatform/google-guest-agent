@@ -23,6 +23,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -63,12 +64,20 @@ func (mod *clockSkew) moduleSetup(ctx context.Context, data any) error {
 		return fmt.Errorf("clock skew module expects a metadata descriptor in the data pointer")
 	}
 
+	if !cfg.Retrieve().Daemons.ClockSkewDaemon {
+		galog.Infof("Clock skew configuration is disabled, skipping module setup.")
+		return nil
+	}
+
 	// Do the initial first setup execution in the module initialization, it will
 	// be handled by the metadata longpoll event handler/subscriber after the
 	// first setup.
-	_ = mod.clockSetup(ctx, desc)
+	_, err := mod.clockSetup(ctx, desc)
+	if err != nil {
+		galog.Errorf("Failed to run clock skew setup: %v", err)
+	}
 
-	sub := events.EventSubscriber{Name: clockSkewModuleID, Callback: module.metadataSubscriber}
+	sub := events.EventSubscriber{Name: clockSkewModuleID, Callback: module.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_CLOCK_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
 
 	return nil
@@ -76,41 +85,34 @@ func (mod *clockSkew) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback for the metadata event and handles the
 // platform clock skew's configuration changes.
-func (mod *clockSkew) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func (mod *clockSkew) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		galog.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
-		return false
+		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
 		galog.Debugf("Metadata event watcher reported error: %s, skiping.", evData.Error)
-		return true
+		return true, nil
 	}
 
 	return mod.clockSetup(ctx, desc)
 }
 
 // clockSetup is the actual clockSkew's configuration entry point.
-func (mod *clockSkew) clockSetup(ctx context.Context, desc *metadata.Descriptor) bool {
+func (mod *clockSkew) clockSetup(ctx context.Context, desc *metadata.Descriptor) (bool, error) {
 	defer func() { mod.prevMetadata = desc }()
 
-	// Ignore/return if clock skew's configuration is disabled or the metadata
-	// virtual clock's descript hasn't changed.
-	if !mod.clockSkewConfigurationEnabled() || !mod.metadataChanged(desc) {
-		return true
+	// Ignore/return metadata virtual clock's descriptor hasn't changed.
+	if !mod.metadataChanged(desc) {
+		return true, nil
 	}
 
-	// Perform platform specific clock skew configuration.
-	if err := platformImpl(ctx); err != nil {
-		galog.Errorf("Failed to run platform specific clock skew: %s", err)
-	}
-
-	return true
+	return true, platformImpl(ctx)
 }
 
 // metadataChanged returns true if the metadata has changed or if it's being
@@ -119,10 +121,4 @@ func (mod *clockSkew) metadataChanged(desc *metadata.Descriptor) bool {
 	return mod.prevMetadata == nil ||
 		mod.prevMetadata.Instance().VirtualClock().DriftToken() !=
 			desc.Instance().VirtualClock().DriftToken()
-}
-
-// clockSkewConfigurationEnabled returns true if clock skew configuration is
-// enabled.
-func (mod *clockSkew) clockSkewConfigurationEnabled() bool {
-	return cfg.Retrieve().Daemons.ClockSkewDaemon
 }

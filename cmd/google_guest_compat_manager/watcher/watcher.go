@@ -45,32 +45,26 @@ func NewManager() *Manager {
 
 // Setup sets up the configuration to enable/disable the Core Plugin and the
 // Guest Agent.
-func (w *Manager) Setup(ctx context.Context, evType string, opts any, evData *events.EventData) bool {
+func (w *Manager) Setup(ctx context.Context, evType string, opts any, evData *events.EventData) (bool, error) {
 	if evData.Error != nil {
-		galog.Warnf("Metadata event watcher reported error: %v, skipping setup.", evData.Error)
-		return true
+		return true, fmt.Errorf("metadata event watcher reported error: %w", evData.Error)
 	}
 
 	mds, ok := evData.Data.(*metadata.Descriptor)
 	if !ok {
-		galog.Errorf("Failed to setup guest compat manager, invalid event.Data type passed to event callback.")
-		return true
+		return true, fmt.Errorf("invalid event.Data type passed to event callback")
 	}
 
 	// If guest agent is not present and core plugin is we launch core plugin. In
 	// this case we don't need to enable/disable guest agent.
 	if !file.Exists(guestAgentBinaryPath, file.TypeFile) {
 		galog.Infof("Guest agent binary %q not found, running in test environment, skipping setup.", guestAgentBinaryPath)
-		return true
+		return true, nil
 	}
 
 	enabled := mds.HasCorePluginEnabled()
 
-	if err := w.enableDisableAgent(ctx, enabled); err != nil {
-		galog.Errorf("Failed to enable/disable guest agent, err: %v", err)
-	}
-
-	return true
+	return true, w.enableDisableAgent(ctx, enabled)
 }
 
 // enableDisableAgent enables or disables the guest agent based on the new

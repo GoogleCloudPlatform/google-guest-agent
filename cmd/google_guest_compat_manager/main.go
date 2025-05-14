@@ -25,6 +25,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/google_guest_compat_manager/watcher"
 
 	"github.com/GoogleCloudPlatform/galog"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
@@ -103,7 +104,7 @@ func setup(ctx context.Context) error {
 	}
 
 	watcher := watcher.NewManager()
-	subscriber := events.EventSubscriber{Name: "GuestCompatManager", Data: nil, Callback: watcher.Setup}
+	subscriber := events.EventSubscriber{Name: "GuestCompatManager", Data: nil, Callback: watcher.Setup, MetricName: acmpb.GuestAgentModuleMetric_GUEST_COMPAT_MANAGER_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, subscriber)
 
 	galog.Debug("Compat manager subscriber registered for metadata longpoll event, setting service state to running...")

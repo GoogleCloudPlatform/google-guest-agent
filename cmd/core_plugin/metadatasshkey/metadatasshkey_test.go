@@ -243,22 +243,47 @@ func TestModuleSetupInputValidity(t *testing.T) {
 }
 
 func TestHandleMetadataChangeInputValidity(t *testing.T) {
+	ctx := context.Background()
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
 	}
-	data := &events.EventData{Data: descriptorFromJSON(t, "{}")}
-	if ok := handleMetadataChange(context.Background(), "", nil, data); !ok {
-		t.Fatalf("handleMetadataChange(ctx, \"\", %+v, nil) = %t, want true", data, ok)
+
+	tests := []struct {
+		name         string
+		data         *events.EventData
+		wantContinue bool
+		wantError    bool
+	}{
+		{
+			name:         "empty_descriptor",
+			data:         &events.EventData{Data: descriptorFromJSON(t, "{}")},
+			wantContinue: true,
+			wantError:    false,
+		},
+		{
+			name:         "error_descriptor",
+			data:         &events.EventData{Data: descriptorFromJSON(t, "{}"), Error: errors.New("some error")},
+			wantContinue: true,
+			wantError:    true,
+		},
+		{
+			name:         "invalid_data",
+			data:         &events.EventData{Data: ""},
+			wantContinue: false,
+			wantError:    true,
+		},
 	}
 
-	data = &events.EventData{Data: descriptorFromJSON(t, "{}"), Error: errors.New("some error")}
-	if ok := handleMetadataChange(context.Background(), "", nil, data); !ok {
-		t.Fatalf("handleMetadataChange(ctx, \"\", %+v, nil) = %t, want true", data, ok)
-	}
-
-	data = &events.EventData{Data: ""}
-	if ok := handleMetadataChange(context.Background(), "", nil, data); ok {
-		t.Fatalf("handleMetadataChange(ctx, \"\", %+v, nil) = %t, want false", data, ok)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotContinue, err := handleMetadataChange(ctx, "", nil, tc.data)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("handleMetadataChange(ctx, '', nil, %+v) error = %v, want error: %t", tc.data, err, tc.wantError)
+			}
+			if gotContinue != tc.wantContinue {
+				t.Fatalf("handleMetadataChange(ctx, '', nil, %+v) = %t, want %t", tc.data, gotContinue, tc.wantContinue)
+			}
+		})
 	}
 }
 

@@ -179,7 +179,11 @@ func TestHandleMessage(t *testing.T) {
 			connection := &fakeConnection{throwErr: tc.throwErr}
 			ctx := context.WithValue(ctx, client.OverrideConnection, connection)
 
-			if !f.handleMessage(ctx, "test-event", nil, d) {
+			got, err := f.handleMessage(ctx, "test-event", nil, d)
+			if err != nil {
+				t.Fatalf("handleMessage(ctx, %s, nil, %+v) error = %v, want nil", "test-event", d, err)
+			}
+			if !got {
 				t.Errorf("handleMessage(ctx, %s, nil, %+v) = false, want true", "test-event", d)
 			}
 			f.worker.Wait()

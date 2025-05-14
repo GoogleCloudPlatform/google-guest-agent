@@ -70,8 +70,12 @@ func TestEventSubscriberInvalidData(t *testing.T) {
 			evData := &events.EventData{Data: tc.data}
 			ctx := context.Background()
 			evType := "evType"
-			if err := mod.metadataSubscriber(ctx, evType, nil, evData); err == true {
+			gotContinue, err := mod.metadataSubscriber(ctx, evType, nil, evData)
+			if err == nil {
 				t.Errorf("metadataSubscriber(context.Background(), %q, nil, %v) succeeded, want error", evType, evData)
+			}
+			if gotContinue {
+				t.Errorf("metadataSubscriber(context.Background(), %q, nil, %v) returned continue = true, want false", evType, evData)
 			}
 		})
 	}

@@ -82,17 +82,17 @@ type dataFetchers struct {
 
 // handleMessage handles request from ACS channel and always returns true to continue
 // listening to watcher events.
-func (f *dataFetchers) handleMessage(ctx context.Context, eventType string, data any, event *events.EventData) bool {
+func (f *dataFetchers) handleMessage(ctx context.Context, eventType string, data any, event *events.EventData) (bool, error) {
 	if event.Error != nil {
 		galog.Warnf("ACS event watcher failed, ignoring: %v", event.Error)
-		return true
+		return true, nil
 	}
 
 	var resp proto.Message
 	msg, ok := event.Data.(*acpb.MessageBody)
 	if !ok {
 		galog.Warnf("ACS watcher sent invalid data of type %T, ignoring", event.Data)
-		return true
+		return true, nil
 	}
 
 	f.worker.Add(1)
@@ -136,7 +136,7 @@ func (f *dataFetchers) handleMessage(ctx context.Context, eventType string, data
 		galog.Debugf("Successfully completed %q (request id: %q) request", messageType, reqID)
 	}()
 
-	return true
+	return true, nil
 }
 
 // agentInfo returns the AgentInfo proto message.

@@ -134,23 +134,27 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 		sameMDS   bool
 		withError bool
 		want      bool
+		wantError bool
 	}{
 		{
-			name: "invalid-mds",
-			mds:  context.Background(),
-			want: false,
+			name:      "invalid-mds",
+			mds:       context.Background(),
+			want:      false,
+			wantError: true,
 		},
 		{
 			name:      "valid-mds-with-error",
 			mds:       mds,
 			withError: true,
 			want:      true,
+			wantError: true,
 		},
 		{
 			name:      "valid-mds-changed",
 			mds:       mds,
 			withError: false,
 			want:      true,
+			wantError: true,
 		},
 		{
 			name:      "valid-no-mds-changed",
@@ -158,6 +162,7 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 			sameMDS:   true,
 			withError: false,
 			want:      true,
+			wantError: false,
 		},
 	}
 
@@ -187,7 +192,11 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 				}
 			}
 
-			if got := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata); got != tc.want {
+			got, err := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata)
+			if (err != nil) != tc.wantError {
+				t.Errorf("metadataSubscriber() returned error: %v, want error: %t", err, tc.wantError)
+			}
+			if got != tc.want {
 				t.Errorf("metadataSubscriber() = %v, want %v", got, tc.want)
 			}
 		})
@@ -206,8 +215,12 @@ func TestMetadataSubscriberSuccess(t *testing.T) {
 
 	evdata := &events.EventData{Data: mds}
 
-	mod := &lateModule{}
-	if !mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata) {
+	mod := &lateModule{prevMetadata: mds}
+	got, err := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata)
+	if err != nil {
+		t.Errorf("metadataSubscriber() returned an unexpected error: %v, want nil", err)
+	}
+	if !got {
 		t.Errorf("metadataSubscriber() = false, want true")
 	}
 }

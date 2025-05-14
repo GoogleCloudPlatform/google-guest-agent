@@ -27,6 +27,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -88,7 +89,7 @@ func (mod *diagnosticsModule) moduleSetup(ctx context.Context, data any) error {
 		galog.Errorf("Failed to handle diagnostics request on setup: %v", err)
 	}
 
-	sub := events.EventSubscriber{Name: diagnosticsModuleID, Callback: mod.metadataSubscriber}
+	sub := events.EventSubscriber{Name: diagnosticsModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_DIAGNOSTICS_INITIALIZATION}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
 
 	return nil
@@ -96,27 +97,22 @@ func (mod *diagnosticsModule) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback for the metadata event and handles the
 // diagnostics configuration changes or execution.
-func (mod *diagnosticsModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func (mod *diagnosticsModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		galog.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
-		return false
+		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
 		galog.Debugf("Metadata event watcher reported error: %s, skiping.", evData.Error)
-		return true
+		return true, nil
 	}
 
-	if err := mod.handleDiagnosticsRequest(ctx, cfg.Retrieve(), desc); err != nil {
-		galog.Errorf("Failed to handle diagnostics request: %v", err)
-	}
-
-	return true
+	return true, mod.handleDiagnosticsRequest(ctx, cfg.Retrieve(), desc)
 }
 
 // diagnosticsEntry is the structure of the diagnostics metadata entry.

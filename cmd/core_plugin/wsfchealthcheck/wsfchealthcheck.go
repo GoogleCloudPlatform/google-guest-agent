@@ -26,6 +26,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -60,7 +61,7 @@ func NewModule(context.Context) *manager.Module {
 // moduleSetup is the initialization function for wsfc module that registers
 // itself to listen MDS events.
 func (wm *wsfcManager) moduleSetup(ctx context.Context, _ any) error {
-	sub := events.EventSubscriber{Name: wsfcModuleID, Callback: wm.metadataSubscriber}
+	sub := events.EventSubscriber{Name: wsfcModuleID, Callback: wm.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_WSFC_HEALTH_CHECK_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
 	return nil
 }
@@ -165,11 +166,10 @@ func (wm *wsfcManager) reset(ctx context.Context, desc *metadata.Descriptor) err
 
 // metadataSubscriber is the callback function for MDS events, any new MDS
 // response will trigger it. Always return true to continue listening.
-func (wm *wsfcManager) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func (wm *wsfcManager) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	// There could be transient errors with MDS, just log and continue.
 	if evData.Error != nil {
-		galog.Debugf("Metadata event watcher reported error: %s, skiping.", evData.Error)
-		return true
+		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
 	desc, ok := evData.Data.(*metadata.Descriptor)
@@ -177,14 +177,10 @@ func (wm *wsfcManager) metadataSubscriber(ctx context.Context, evType string, da
 	// don't renew the subscriber.
 	if !ok {
 		galog.Errorf("Metadata event watcher reported data type %T, expected *metadata.Descriptor", evData.Data)
-		return false
+		return false, fmt.Errorf("event's data (%T) is not a metadata descriptor: %+v", evData.Data, evData.Data)
 	}
 
-	if err := wm.reset(ctx, desc); err != nil {
-		galog.Errorf("Failed to change wsfc agent state: %v", err)
-	}
-
-	return true
+	return true, wm.reset(ctx, desc)
 }
 
 // checkIPExist returns 1 if IP exists on any of the interfaces otherwise 0.

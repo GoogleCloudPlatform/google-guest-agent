@@ -186,34 +186,42 @@ func TestHandlePluginEvent(t *testing.T) {
 	}
 
 	tests := []struct {
-		desc   string
-		evType string
-		config any
-		data   *events.EventData
-		want   bool
+		desc    string
+		evType  string
+		config  any
+		data    *events.EventData
+		want    bool
+		wantErr bool
 	}{
 		{
-			desc:   "invalid_event",
-			evType: "invalid_event",
-			want:   true,
+			desc:    "invalid_event",
+			evType:  "invalid_event",
+			want:    true,
+			wantErr: true,
 		},
 		{
-			desc:   "event_error",
-			evType: "plugin-watcher,status",
-			data:   &events.EventData{Error: fmt.Errorf("test error")},
-			want:   true,
+			desc:    "event_error",
+			evType:  "plugin-watcher,status",
+			data:    &events.EventData{Error: fmt.Errorf("test error")},
+			want:    true,
+			wantErr: false,
 		},
 		{
-			desc:   "invalid_config_type",
-			evType: "plugin-watcher,status",
-			want:   true,
-			data:   &events.EventData{},
+			desc:    "invalid_config_type",
+			evType:  "plugin-watcher,status",
+			want:    true,
+			data:    &events.EventData{},
+			wantErr: true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			if got := handlePluginEvent(ctx, tc.evType, tc.config, tc.data); got != tc.want {
+			got, err := handlePluginEvent(ctx, tc.evType, tc.config, tc.data)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("handlePluginEvent(ctx, %q, nil, %+v) error = %v, want error %t", tc.evType, tc.data, err, tc.wantErr)
+			}
+			if got != tc.want {
 				t.Errorf("handlePluginEvent(ctx, %q, nil, %+v) = %t, want %t", tc.evType, tc.data, got, tc.want)
 			}
 		})

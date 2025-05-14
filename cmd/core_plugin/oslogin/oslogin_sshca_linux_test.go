@@ -40,39 +40,66 @@ func TestInputData(t *testing.T) {
 	}
 	defer pipeFile.Close()
 
+	pipeFilePath2 := filepath.Join(tmpDir, "pipe2")
+	pipeFile2, err := os.Create(pipeFilePath2)
+	if err != nil {
+		t.Fatalf("os.Create(%q) failed: %v", pipeFilePath2, err)
+	}
+	defer pipeFile2.Close()
+
 	tests := []struct {
 		name         string
 		evData       *events.EventData
 		certificates *Certificates
 		want         bool
+		wantError    bool
 	}{
 		{
 			name: "with-error",
 			evData: &events.EventData{
 				Error: errors.New("error"),
 			},
-			want: false,
+			want:      false,
+			wantError: true,
 		},
 		{
 			name: "with-invalid-data",
 			evData: &events.EventData{
 				Data: []byte("invalid-data"),
 			},
-			want: false,
+			want:      false,
+			wantError: true,
 		},
 		{
 			name: "valid-data",
 			evData: &events.EventData{
 				Data: pipewatcher.NewPipeData(pipeFile, func() {}),
 			},
-			want: true,
+			want:      true,
+			wantError: true,
 		},
 		{
 			name: "valid-data-with-cert",
 			evData: &events.EventData{
-				Data: pipewatcher.NewPipeData(pipeFile, func() {}),
+				Data: pipewatcher.NewPipeData(pipeFile2, func() {}),
 			},
-			want: true,
+			want:      true,
+			wantError: false,
+			certificates: &Certificates{
+				Certs: []TrustedCert{
+					TrustedCert{
+						PublicKey: "foobar",
+					},
+				},
+			},
+		},
+		{
+			name: "valid-data-with-cert-nopipe",
+			evData: &events.EventData{
+				Data: pipewatcher.NewPipeData(nil, func() {}),
+			},
+			want:      true,
+			wantError: true,
 			certificates: &Certificates{
 				Certs: []TrustedCert{
 					TrustedCert{
@@ -93,7 +120,11 @@ func TestInputData(t *testing.T) {
 			sub := newPipeEventHandler("subscriber-id,"+tc.name, client)
 			defer sub.Close()
 
-			if got := sub.writeFile(ctx, "evType", nil, tc.evData); got != tc.want {
+			got, err := sub.writeFile(ctx, "evType", nil, tc.evData)
+			if (err != nil) != tc.wantError {
+				t.Errorf("writeFile(ctx, 'evType', nil, %v) returned error: %v, want error: %t", tc.evData, err, tc.wantError)
+			}
+			if got != tc.want {
 				t.Errorf("writeFile(ctx, 'evType', nil, %v) = %v, want %v", tc.evData, got, tc.want)
 			}
 		})

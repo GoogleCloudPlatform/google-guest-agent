@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
@@ -59,7 +60,7 @@ func newPipeEventHandler(subscriberID string, mdsClient metadata.MDSClientInterf
 		mdsClient:    mdsClient,
 	}
 
-	subscriber := events.EventSubscriber{Name: subscriberID, Callback: res.writeFile}
+	subscriber := events.EventSubscriber{Name: subscriberID, Callback: res.writeFile, MetricName: acmpb.GuestAgentModuleMetric_OS_LOGIN_INITIALIZATION}
 	events.FetchManager().Subscribe(sshcaPipeWatcherOpts.ReadEventID, subscriber)
 
 	return res
@@ -72,18 +73,16 @@ func (pe *PipeEventHandler) Close() {
 
 // writeFile is an event handler callback and writes the actual sshca content to the pipe
 // used by openssh to grant access based on ssh ca.
-func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data any, evData *events.EventData) bool {
+func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
 	// There was some error on the pipe watcher, just ignore it.
 	if evData.Error != nil {
-		galog.Debugf("Not handling ssh trusted ca cert event, we got an error: %s", evData.Error)
-		return false
+		return false, fmt.Errorf("ssh trusted ca cert event watcher reported error: %v", evData.Error)
 	}
 
 	// Make sure we close the pipe after we've done writing to it.
 	pipeData, ok := evData.Data.(*pipewatcher.PipeData)
 	if !ok {
-		galog.Errorf("SSH CA event data is not a pipe data")
-		return false
+		return false, fmt.Errorf("ssh ca event data is not a pipe data")
 	}
 
 	defer func() {
@@ -95,8 +94,7 @@ func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data a
 
 	certs, err := osloginMDSCertificates(ctx, pe.mdsClient)
 	if err != nil {
-		galog.Errorf("Failed to get certificates from metadata server: %s", err)
-		return true
+		return true, fmt.Errorf("unable to get certificates from MDS: %w", err)
 	}
 
 	var outData []string
@@ -107,11 +105,10 @@ func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data a
 	outStr := strings.Join(outData, "\n")
 	_, err = pipeData.WriteString(outStr)
 	if err != nil {
-		galog.Errorf("Failed to write certificate to the write end of the pipe: %s", err)
-		return true
+		return true, fmt.Errorf("failed to write certificate to the write end of the pipe: %w", err)
 	}
 
-	return true
+	return true, nil
 }
 
 // osloginMDSCertificates returns the list of certificates from the metadata
