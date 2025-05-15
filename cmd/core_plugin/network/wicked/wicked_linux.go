@@ -158,11 +158,19 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 		return fmt.Errorf("failed to cleanup vlan interfaces: %w", err)
 	}
 
-	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: append([]string{"ifup"}, ifupInterfaces...)}
-	if _, err := run.WithContext(ctx, opt); err != nil {
-		return fmt.Errorf("error enabling interfaces: %v", err)
+	if err := sn.reloadInterfaces(ctx, ifupInterfaces); err != nil {
+		return fmt.Errorf("failed to reload interfaces: %w", err)
 	}
 
+	return nil
+}
+
+// reloadInterfaces reloads the provided interfaces.
+func (sn *serviceWicked) reloadInterfaces(ctx context.Context, interfaces []string) error {
+	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: append([]string{"ifreload"}, interfaces...)}
+	if _, err := run.WithContext(ctx, opt); err != nil {
+		return fmt.Errorf("error reloading interfaces: %w", err)
+	}
 	return nil
 }
 
@@ -301,7 +309,7 @@ func (sn *serviceWicked) writeEthernetConfig(nic *nic.Configuration, filePath st
 }
 
 // Rollback rolls back the network interface.
-func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) error {
+func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options, reload bool) error {
 	galog.Infof("Rolling back changes for wicked.")
 
 	// If the config directory does not exist we got nothing to rollback, skip it.
@@ -339,11 +347,12 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) er
 	}
 
 	// Reload the wicked configuration.
-	args := []string{"reload"}
-	args = append(args, reloadInterfaces...)
-	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: args}
-	if _, err := run.WithContext(ctx, opt); err != nil {
-		return fmt.Errorf("error reloading wicked configuration: %w", err)
+	if reload {
+		if reload {
+			if err := sn.reloadInterfaces(ctx, reloadInterfaces); err != nil {
+				return fmt.Errorf("failed to reload interfaces: %w", err)
+			}
+		}
 	}
 
 	return nil

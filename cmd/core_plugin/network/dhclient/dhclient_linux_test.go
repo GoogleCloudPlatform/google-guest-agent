@@ -757,7 +757,7 @@ func TestRollback(t *testing.T) {
 			ds := &dhclientService{}
 			opts := service.NewOptions(nil, nicConfigs)
 
-			err := ds.Rollback(context.Background(), opts)
+			err := ds.Rollback(context.Background(), opts, false)
 			if (err == nil) == tc.wantError {
 				t.Fatalf("Rollback(ctx, %+v) returned %v, want %v", opts, err, tc.wantError)
 			}

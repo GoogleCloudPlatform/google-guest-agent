@@ -374,7 +374,7 @@ func runConfiguredCommand(ctx context.Context, config *cfg.Sections) (bool, erro
 }
 
 // Rollback rolls back the changes created in Setup.
-func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options) error {
+func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, _ bool) error {
 	galog.Infof("Rolling back changes for dhclient.")
 
 	// Determine if we can even rollback dhclient processes.
