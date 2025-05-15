@@ -76,7 +76,11 @@ func (sn *serviceNetworkManager) IsManaging(ctx context.Context, opts *service.O
 	}
 
 	lines := strings.Split(res.Output, "\n")
-	iface := opts.GetPrimaryNIC().Interface.Name()
+	primaryNIC, err := opts.GetPrimaryNIC()
+	if err != nil {
+		return false, fmt.Errorf("failed to get primary NIC: %v", err)
+	}
+	iface := primaryNIC.Interface.Name()
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, iface) {

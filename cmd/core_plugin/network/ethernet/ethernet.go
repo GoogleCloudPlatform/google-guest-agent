@@ -50,6 +50,21 @@ func wrapAddrError(err error) error {
 	return AddrError{err: err.Error()}
 }
 
+// NotExistError is returned when an object doesn't exist.
+type NotExistError struct {
+	err string
+}
+
+// Error returns the error string.
+func (e NotExistError) Error() string {
+	return e.err
+}
+
+// wrapNotExistError creates a new NotExistError from err.
+func wrapNotExistError(err error) error {
+	return NotExistError{err: err.Error()}
+}
+
 // InterfaceOps is a wrapper for net.Interfaces.
 type InterfaceOps struct {
 	// Interfaces is the function to get the interfaces.
@@ -128,6 +143,9 @@ func Interfaces() ([]*Interface, error) {
 }
 
 // InterfaceByMAC gets the interface given the mac string.
+//
+// If the interface is not found, it returns a NotExistError. If the MAC is
+// invalid, it returns an AddrError.
 func InterfaceByMAC(mac string) (*Interface, error) {
 	hwaddr, err := net.ParseMAC(mac)
 	if err != nil {
@@ -145,7 +163,7 @@ func InterfaceByMAC(mac string) (*Interface, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("no interface found with MAC %s", mac)
+	return nil, wrapNotExistError(fmt.Errorf("no interface found with MAC %s", mac))
 }
 
 // VlanInterface contains the configuration of a VLAN.

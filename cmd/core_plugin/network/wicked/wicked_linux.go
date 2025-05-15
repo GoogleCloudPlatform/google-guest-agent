@@ -71,7 +71,11 @@ func (sn *serviceWicked) IsManaging(ctx context.Context, opts *service.Options) 
 		return false, nil
 	}
 
-	iface := opts.GetPrimaryNIC().Interface.Name()
+	primaryNIC, err := opts.GetPrimaryNIC()
+	if err != nil {
+		return false, fmt.Errorf("failed to get primary nic: %w", err)
+	}
+	iface := primaryNIC.Interface.Name()
 
 	// Check the status of configured interfaces.
 	opt := run.Options{OutputType: run.OutputStdout, Name: "wicked", Args: []string{"ifstatus", iface, "--brief"}}

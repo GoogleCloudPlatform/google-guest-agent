@@ -34,6 +34,12 @@ const mdsJSON = `
 	}
 }`
 
+const emptyJSON = `
+{
+	"instance": {
+	}
+}`
+
 func TestEarlyModule(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("Load(nil) returned an unexpected error: %v", err)
@@ -128,6 +134,12 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 		t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", mdsJSON, err)
 	}
 
+	// This is used to skip actual network setup.
+	emptyMDS, err := metadata.UnmarshalDescriptor(emptyJSON)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", emptyJSON, err)
+	}
+
 	tests := []struct {
 		name      string
 		mds       any
@@ -151,10 +163,10 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 		},
 		{
 			name:      "valid-mds-changed",
-			mds:       mds,
+			mds:       emptyMDS,
 			withError: false,
 			want:      true,
-			wantError: true,
+			wantError: false,
 		},
 		{
 			name:      "valid-no-mds-changed",
@@ -196,6 +208,7 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 			if (err != nil) != tc.wantError {
 				t.Errorf("metadataSubscriber() returned error: %v, want error: %t", err, tc.wantError)
 			}
+			t.Logf("Error: %v", err)
 			if got != tc.want {
 				t.Errorf("metadataSubscriber() = %v, want %v", got, tc.want)
 			}

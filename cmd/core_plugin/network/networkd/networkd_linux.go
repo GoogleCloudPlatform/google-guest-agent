@@ -61,7 +61,11 @@ func (sn *Module) ID() string {
 func (sn *Module) IsManaging(ctx context.Context, opts *service.Options) (bool, error) {
 	galog.Debugf("Checking if systemd-networkd is managing the network interfaces.")
 
-	iface := opts.GetPrimaryNIC().Interface.Name()
+	ifaceNIC, err := opts.GetPrimaryNIC()
+	if err != nil {
+		return false, fmt.Errorf("failed to get primary NIC: %w", err)
+	}
+	iface := ifaceNIC.Interface.Name()
 
 	// Check the version.
 	if _, err := execLookPath("networkctl"); err != nil {

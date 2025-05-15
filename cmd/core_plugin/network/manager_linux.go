@@ -63,7 +63,7 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 		return fmt.Errorf("failed get linux managers implementation list")
 	}
 
-	if len(opts.NICConfigs()) == 0 {
+	if len(opts.FilteredNICConfigs()) == 0 {
 		galog.Infof("Skipping network setup - no NICs to configure.")
 		return nil
 	}

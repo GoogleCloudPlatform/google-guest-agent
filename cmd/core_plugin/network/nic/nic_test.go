@@ -66,7 +66,7 @@ func TestNewConfig(t *testing.T) {
 		},
 		{
 			name:            "invalid-mac",
-			wantError:       true,
+			wantError:       false,
 			wantBadMacCache: true,
 			mdsJSON: `
 			{
@@ -85,7 +85,8 @@ func TestNewConfig(t *testing.T) {
 		{
 			name:          "nics-dont-exist",
 			nicsDontExist: true,
-			wantError:     true,
+			wantError:     false,
+			supportsIPv6:  true,
 			mdsJSON: `
 			{
 				"instance":  {
@@ -174,7 +175,7 @@ func TestNewConfigs(t *testing.T) {
 	}{
 		{
 			name:          "fail-nics-dont-exist",
-			wantError:     true,
+			wantError:     false,
 			nicsDontExist: true,
 			supportsIPv6:  true,
 			mdsJSON: `

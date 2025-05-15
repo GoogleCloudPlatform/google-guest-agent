@@ -52,7 +52,7 @@ func TestNICConfigs(t *testing.T) {
 	}
 }
 
-func TestGetPrimaryNIC(t *testing.T) {
+func TestFilteredNICConfigs(t *testing.T) {
 	nicConfigs := []*nic.Configuration{
 		&nic.Configuration{
 			Interface: &ethernet.Interface{
@@ -66,19 +66,112 @@ func TestGetPrimaryNIC(t *testing.T) {
 			},
 			Index: 1,
 		},
+		&nic.Configuration{
+			Interface: &ethernet.Interface{
+				NameOp: func() string { return "eth2" },
+			},
+			Index:   2,
+			Invalid: true,
+		},
 	}
 	opts := NewOptions(nil, nicConfigs)
-	primaryNic := opts.GetPrimaryNIC()
-	if primaryNic == nil {
-		t.Fatalf("GetPrimaryNIC() returned nil NIC config")
+	filteredNICConfigs := opts.FilteredNICConfigs()
+	if len(filteredNICConfigs) != 2 {
+		t.Errorf("FilteredNICConfigs() returned %d NIC configs, want 2", len(filteredNICConfigs))
 	}
-	if primaryNic.Index != 0 {
-		t.Errorf("GetPrimaryNIC() returned NIC config with index %d, want 0", primaryNic.Index)
+	for _, nicConfig := range filteredNICConfigs {
+		if nicConfig.Invalid {
+			t.Errorf("FilteredNICConfigs() returned invalid NIC config: %+v", nicConfig)
+		}
 	}
-	if primaryNic.Interface == nil {
-		t.Errorf("GetPrimaryNIC() returned NIC config with nil interface")
+}
+
+func TestGetPrimaryNIC(t *testing.T) {
+	tests := []struct {
+		name       string
+		nicConfigs []*nic.Configuration
+		wantNIC    *nic.Configuration
+		wantErr    bool
+	}{
+		{
+			name: "primary-exists",
+			nicConfigs: []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "eth0" },
+					},
+					Index: 0,
+				},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "eth1" },
+					},
+					Index: 1,
+				},
+			},
+			wantNIC: &nic.Configuration{
+				Interface: &ethernet.Interface{
+					NameOp: func() string { return "eth0" },
+				},
+				Index: 0,
+			},
+			wantErr: false,
+		},
+		{
+			name: "primary-not-exists",
+			nicConfigs: []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "eth1" },
+					},
+					Index: 1,
+				},
+			},
+			wantNIC: nil,
+			wantErr: true,
+		},
+		{
+			name: "primary-invalid",
+			nicConfigs: []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "eth0" },
+					},
+					Index:   0,
+					Invalid: true,
+				},
+			},
+			wantNIC: nil,
+			wantErr: true,
+		},
 	}
-	if primaryNic.Interface.Name() != "eth0" {
-		t.Errorf("GetPrimaryNIC() returned NIC config with interface %q, want eth0", opts.GetPrimaryNIC().Interface.Name())
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := NewOptions(nil, tc.nicConfigs)
+			primaryNic, err := opts.GetPrimaryNIC()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("GetPrimaryNIC() returned nil error, want error")
+				}
+				return
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("GetPrimaryNIC() returned error: %v, want nil", err)
+			}
+			if primaryNic == nil {
+				t.Fatalf("GetPrimaryNIC() returned nil NIC config, want non-nil")
+			}
+
+			if primaryNic.Index != 0 {
+				t.Errorf("GetPrimaryNIC() returned NIC config with index %d, want 0", primaryNic.Index)
+			}
+			if primaryNic.Interface == nil {
+				t.Errorf("GetPrimaryNIC() returned NIC config with nil interface")
+			}
+			if primaryNic.Interface.Name() != "eth0" {
+				t.Errorf("GetPrimaryNIC() returned NIC config with interface %q, want eth0", primaryNic.Interface.Name())
+			}
+		})
 	}
 }

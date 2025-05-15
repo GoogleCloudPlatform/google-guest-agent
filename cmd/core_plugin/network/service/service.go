@@ -17,6 +17,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 )
@@ -66,17 +67,28 @@ func (o *Options) NICConfigs() []*nic.Configuration {
 // FilteredNICConfigs returns the NIC configurations filtered by the network
 // interfaces configuration.
 func (o *Options) FilteredNICConfigs() []*nic.Configuration {
-	// TODO(b/415074270): Implement this method to filter out invalid NICs.
-	return o.nicConfigs
+	var filteredNICs []*nic.Configuration
+	for _, nic := range o.nicConfigs {
+		if !nic.Invalid {
+			filteredNICs = append(filteredNICs, nic)
+		}
+	}
+	return filteredNICs
 }
 
 // GetPrimaryNIC returns the primary NIC configuration. If the primary NIC does
-// not exist, it will return nil.
-func (o *Options) GetPrimaryNIC() *nic.Configuration {
+// not exist or is invalid, it will return an error.
+func (o *Options) GetPrimaryNIC() (*nic.Configuration, error) {
 	for _, nic := range o.NICConfigs() {
 		if nic.Index == 0 {
-			return nic
+			if nic.Invalid {
+				return nic, fmt.Errorf("primary NIC %s is invalid", nic.MacAddr)
+			}
+			if nic.Interface == nil {
+				return nic, fmt.Errorf("primary NIC %s has no interface", nic.MacAddr)
+			}
+			return nic, nil
 		}
 	}
-	return nil
+	return nil, fmt.Errorf("no primary NIC found in NIC configs: %v", o.nicConfigs)
 }

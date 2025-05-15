@@ -49,6 +49,14 @@ func managerSetup(_ context.Context, nics []*nic.Configuration) error {
 
 // nicSetup performs the setup of a single NIC.
 func nicSetup(nicConfig *nic.Configuration) error {
+	if nicConfig.ExtraAddresses == nil {
+		return nil
+	}
+	if nicConfig.Interface == nil {
+		galog.Debugf("Skipping NIC setup for NIC %d: interface is nil", nicConfig.Index)
+		return nil
+	}
+
 	extra := nicConfig.ExtraAddresses
 
 	// These are the IP addresses that we want to be present on the NIC. We'll

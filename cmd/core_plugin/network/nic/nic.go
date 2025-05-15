@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -36,6 +37,8 @@ var (
 type Configuration struct {
 	// Index is the index of the NIC.
 	Index uint32
+	// Invalid is true if the NIC is valid.
+	Invalid bool
 	// SupportsIPv6 is true if the NIC supports IPv6.
 	SupportsIPv6 bool
 	// MacAddr is the MAC address of the NIC.
@@ -113,17 +116,16 @@ func newConfig(nic *metadata.NetworkInterface, config *cfg.Sections, ignore addr
 
 	iface, err := ethernet.InterfaceByMAC(res.MacAddr)
 	if err != nil {
-		if !errors.As(err, &ethernet.AddrError{}) {
+		if !errors.As(err, &ethernet.AddrError{}) && !errors.As(err, &ethernet.NotExistError{}) {
 			return nil, fmt.Errorf("failed to get interface for NIC %s: %w", res.MacAddr, err)
 		}
 
 		// Avoid flooding the log with errors for bad MAC addresses.
 		if _, cached := seenBadMacAddrs.Get(res.MacAddr); !cached {
 			seenBadMacAddrs.Put(res.MacAddr, true)
-			return nil, fmt.Errorf("failed to get interface for NIC %s: %w", res.MacAddr, err)
+			res.Invalid = true
+			galog.Warnf("failed to get interface for NIC %s: %v", res.MacAddr, err)
 		}
-
-		return nil, fmt.Errorf("failed to get interface for NIC %s: %w", res.MacAddr, err)
 	}
 	res.Interface = iface
 

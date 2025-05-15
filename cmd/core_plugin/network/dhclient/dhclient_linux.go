@@ -274,7 +274,11 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 func (ds *dhclientService) setupIPV6Interfaces(ctx context.Context, opts *service.Options, partitions *interfacePartitions) error {
 	// Wait for tentative IPs to resolve as part of SLAAC for primary network
 	// interface.
-	primaryInterface := opts.GetPrimaryNIC().Interface.Name()
+	primaryNIC, err := opts.GetPrimaryNIC()
+	if err != nil {
+		return fmt.Errorf("failed to get primary NIC: %w", err)
+	}
+	primaryInterface := primaryNIC.Interface.Name()
 	tentative := []string{"-6", "-o", "a", "s", "dev", primaryInterface, "scope", "link", "tentative"}
 
 	// Run the ip command in a retry loop to wait for the tentative IP to resolve.
