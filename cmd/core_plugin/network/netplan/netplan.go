@@ -146,7 +146,7 @@ type netplanBackend interface {
 	WriteDropins([]*nic.Configuration, string) (bool, error)
 
 	// RollbackDropins rolls back the drop-in files previously created by us.
-	RollbackDropins([]*nic.Configuration, string) error
+	RollbackDropins([]*nic.Configuration, string, bool) error
 
 	// Reload reloads the backend's configuration.
 	Reload(context.Context) error
