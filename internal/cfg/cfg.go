@@ -117,8 +117,8 @@ setup = true
 cert_authentication = true
 
 [MDS]
-mtls_bootstrapping_enabled = true
-cacertificates_update_enabled = true
+disable-https-mds-setup = true
+enable-https-mds-native-cert-store = false
 
 [Snapshots]
 enabled = false
@@ -368,12 +368,13 @@ type OSLogin struct {
 
 // MDS contains the configurations for MDS section.
 type MDS struct {
-	// MTLSBootstrappingEnabled enables/disables the mTLS credential refresher.
-	MTLSBootstrappingEnabled bool `ini:"mtls_bootstrapping_enabled,omitempty"`
-	// UpdateCACertificatesEnabled enables/disables any updates to the CA
-	// certificates. These updates are done using tools like
-	// update-ca-certificates or similar.
-	UpdateCACertificatesEnabled bool `ini:"cacertificates_update_enabled,omitempty"`
+	// DisableHTTPSMdsSetup enables/disables the mTLS credential refresher.
+	DisableHTTPSMdsSetup bool `ini:"disable-https-mds-setup,omitempty"`
+	// HTTPSMDSEnableNativeStore enables/disables the use of OSs native store.
+	// Native store is Certificate Store on Windows which hosts both Client
+	// Credential and Root certificate where as its trust store that hosts root
+	// certs like `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` on Linux.
+	HTTPSMDSEnableNativeStore bool `ini:"enable-https-mds-native-cert-store,omitempty"`
 }
 
 // NetworkInterfaces contains the configurations of NetworkInterfaces section.

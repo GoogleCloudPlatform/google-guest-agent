@@ -122,56 +122,60 @@ type project struct {
 // attributes describes the project's attributes keys. This is the internal
 // representation used to parse the json formatted output of metadata server.
 type attributes struct {
-	CreatedBy             string
-	Hostname              string
-	BlockProjectKeys      bool
-	EnableCorePlugin      *bool
-	EnableOSLogin         *bool
-	EnableWindowsSSH      *bool
-	TwoFactor             *bool
-	SecurityKey           *bool
-	RequireCerts          *bool
-	SSHKeys               []string
-	WindowsKeys           windowsKeys
-	Diagnostics           string
-	DisableAddressManager *bool
-	DisableAccountManager *bool
-	EnableDiagnostics     *bool
-	EnableWSFC            *bool
-	WSFCAddresses         string
-	WSFCAgentPort         string
-	DisableTelemetry      bool
+	CreatedBy                 string
+	Hostname                  string
+	BlockProjectKeys          bool
+	HTTPSMDSEnableNativeStore *bool
+	DisableHTTPSMdsSetup      *bool
+	EnableCorePlugin          *bool
+	EnableOSLogin             *bool
+	EnableWindowsSSH          *bool
+	TwoFactor                 *bool
+	SecurityKey               *bool
+	RequireCerts              *bool
+	SSHKeys                   []string
+	WindowsKeys               windowsKeys
+	Diagnostics               string
+	DisableAddressManager     *bool
+	DisableAccountManager     *bool
+	EnableDiagnostics         *bool
+	EnableWSFC                *bool
+	WSFCAddresses             string
+	WSFCAgentPort             string
+	DisableTelemetry          bool
 }
 
 // UnmarshalJSON unmarshals b into Attribute.
 func (a *attributes) UnmarshalJSON(b []byte) error {
-	var mkbool = func(value bool) *bool {
+	mkbool := func(value bool) *bool {
 		res := new(bool)
 		*res = value
 		return res
 	}
 	// Unmarshal to literal JSON types before doing anything else.
 	type inner struct {
-		CreatedBy             string      `json:"created-by"`
-		BlockProjectKeys      string      `json:"block-project-ssh-keys"`
-		Hostname              string      `json:"hostname"`
-		Diagnostics           string      `json:"diagnostics"`
-		DisableAccountManager string      `json:"disable-account-manager"`
-		DisableAddressManager string      `json:"disable-address-manager"`
-		EnableCorePlugin      string      `json:"enable-guest-agent-core-plugin"`
-		EnableDiagnostics     string      `json:"enable-diagnostics"`
-		EnableOSLogin         string      `json:"enable-oslogin"`
-		EnableWindowsSSH      string      `json:"enable-windows-ssh"`
-		EnableWSFC            string      `json:"enable-wsfc"`
-		OldSSHKeys            string      `json:"sshKeys"`
-		SSHKeys               string      `json:"ssh-keys"`
-		TwoFactor             string      `json:"enable-oslogin-2fa"`
-		SecurityKey           string      `json:"enable-oslogin-sk"`
-		RequireCerts          string      `json:"enable-oslogin-certificates"`
-		WindowsKeys           windowsKeys `json:"windows-keys"`
-		WSFCAddresses         string      `json:"wsfc-addrs"`
-		WSFCAgentPort         string      `json:"wsfc-agent-port"`
-		DisableTelemetry      string      `json:"disable-guest-telemetry"`
+		CreatedBy                 string      `json:"created-by"`
+		BlockProjectKeys          string      `json:"block-project-ssh-keys"`
+		Hostname                  string      `json:"hostname"`
+		Diagnostics               string      `json:"diagnostics"`
+		DisableAccountManager     string      `json:"disable-account-manager"`
+		HTTPSMDSEnableNativeStore string      `json:"enable-https-mds-native-cert-store"`
+		DisableHTTPSMdsSetup      string      `json:"disable-https-mds-setup"`
+		DisableAddressManager     string      `json:"disable-address-manager"`
+		EnableCorePlugin          string      `json:"enable-guest-agent-core-plugin"`
+		EnableDiagnostics         string      `json:"enable-diagnostics"`
+		EnableOSLogin             string      `json:"enable-oslogin"`
+		EnableWindowsSSH          string      `json:"enable-windows-ssh"`
+		EnableWSFC                string      `json:"enable-wsfc"`
+		OldSSHKeys                string      `json:"sshKeys"`
+		SSHKeys                   string      `json:"ssh-keys"`
+		TwoFactor                 string      `json:"enable-oslogin-2fa"`
+		SecurityKey               string      `json:"enable-oslogin-sk"`
+		RequireCerts              string      `json:"enable-oslogin-certificates"`
+		WindowsKeys               windowsKeys `json:"windows-keys"`
+		WSFCAddresses             string      `json:"wsfc-addrs"`
+		WSFCAgentPort             string      `json:"wsfc-agent-port"`
+		DisableTelemetry          string      `json:"disable-guest-telemetry"`
 	}
 	var temp inner
 	if err := json.Unmarshal(b, &temp); err != nil {
@@ -183,6 +187,14 @@ func (a *attributes) UnmarshalJSON(b []byte) error {
 	a.WSFCAgentPort = temp.WSFCAgentPort
 	a.WindowsKeys = temp.WindowsKeys
 	a.CreatedBy = temp.CreatedBy
+
+	if value, err := strconv.ParseBool(temp.DisableHTTPSMdsSetup); err == nil {
+		a.DisableHTTPSMdsSetup = mkbool(value)
+	}
+
+	if value, err := strconv.ParseBool(temp.HTTPSMDSEnableNativeStore); err == nil {
+		a.HTTPSMDSEnableNativeStore = mkbool(value)
+	}
 
 	if value, err := strconv.ParseBool(temp.BlockProjectKeys); err == nil {
 		a.BlockProjectKeys = value

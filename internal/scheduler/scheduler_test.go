@@ -283,7 +283,7 @@ func TestScheduleJob(t *testing.T) {
 	}
 	// Make sure the job was unscheduled.
 	time.Sleep(job.interval)
-	if Instance().isScheduled(job.ID()) {
+	if Instance().IsScheduled(job.ID()) {
 		t.Errorf("Scheduler failed to unschedule job, found an entry in scheduled jobs")
 	}
 }

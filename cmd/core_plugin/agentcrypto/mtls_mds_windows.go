@@ -29,7 +29,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"golang.org/x/sys/windows"
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
@@ -74,7 +73,7 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, cacert []byte, outputFil
 		return err
 	}
 
-	if !cfg.Retrieve().MDS.UpdateCACertificatesEnabled {
+	if !j.useNativeStore {
 		galog.Debug("Skipping system store update as it is disabled in the configuration")
 		return nil
 	}
