@@ -78,7 +78,7 @@ func (sn *serviceWicked) IsManaging(ctx context.Context, opts *service.Options) 
 	iface := primaryNIC.Interface.Name()
 
 	// Check the status of configured interfaces.
-	opt := run.Options{OutputType: run.OutputStdout, Name: "wicked", Args: []string{"ifstatus", iface, "--brief"}}
+	opt := run.Options{OutputType: run.OutputStdout, Name: "wicked", Args: []string{"ifstatus", "--brief", iface}}
 	res, err := run.WithContext(ctx, opt)
 	if err != nil {
 		return false, fmt.Errorf("failed to check status of wicked configuration: %s", res.Output)
@@ -110,6 +110,15 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 		}
 
 		fPath := sn.ifcfgFilePath(nic.Interface.Name())
+
+		// Backup the existing config file if it exists.
+		if file.Exists(fPath, file.TypeFile) {
+			// Use copy instead of moving, so if any other part of the network setup
+			// fails, we'll still have the original config.
+			if err := file.CopyFile(ctx, fPath, fPath+".bak", file.Options{Perm: 0644}); err != nil {
+				return fmt.Errorf("failed to backup wicked config file: %w", err)
+			}
+		}
 
 		// Write the config file for the current NIC.
 		if err := sn.writeEthernetConfig(nic, fPath); err != nil {
@@ -241,7 +250,7 @@ func (sn *serviceWicked) cleanupVlanInterfaces(ctx context.Context, keepMe []str
 			continue
 		}
 
-		removed, err := sn.removeInterface(ctx, filePath)
+		removed, err := sn.removeInterface(ctx, filePath, false)
 		if err != nil {
 			return fmt.Errorf("failed to remove vlan interface: %+v", err)
 		}
@@ -302,10 +311,15 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) er
 	}
 
 	// Remove the config files.
+	var reloadInterfaces []string
 	for _, nic := range opts.FilteredNICConfigs() {
 		// Remove the config file for the current NIC.
-		if _, err := sn.removeInterface(ctx, sn.ifcfgFilePath(nic.Interface.Name())); err != nil {
+		removed, err := sn.removeInterface(ctx, sn.ifcfgFilePath(nic.Interface.Name()), nic.Index == 0)
+		if err != nil {
 			return fmt.Errorf("failed to remove wicked config file: %w", err)
+		}
+		if removed {
+			reloadInterfaces = append(reloadInterfaces, nic.Interface.Name())
 		}
 	}
 
@@ -314,11 +328,29 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) er
 		return fmt.Errorf("failed to cleanup vlan interfaces: %w", err)
 	}
 
+	if len(reloadInterfaces) == 0 {
+		return nil
+	}
+
+	// Check if wicked is installed.
+	if _, err := exec.LookPath("wicked"); err != nil {
+		galog.Debugf("Cannot find wicked binary, skipping reload: %v", err)
+		return nil
+	}
+
+	// Reload the wicked configuration.
+	args := []string{"reload"}
+	args = append(args, reloadInterfaces...)
+	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: args}
+	if _, err := run.WithContext(ctx, opt); err != nil {
+		return fmt.Errorf("error reloading wicked configuration: %w", err)
+	}
+
 	return nil
 }
 
 // removeInterface removes the wicked config file for the given interface.
-func (sn *serviceWicked) removeInterface(ctx context.Context, filePath string) (bool, error) {
+func (sn *serviceWicked) removeInterface(ctx context.Context, filePath string, isPrimary bool) (bool, error) {
 	galog.Debugf("Attempting to remove wicked config file: %q", filePath)
 
 	shouldRemove, err := managedByGuestAgent(filePath)
@@ -331,9 +363,23 @@ func (sn *serviceWicked) removeInterface(ctx context.Context, filePath string) (
 		return false, nil
 	}
 
-	// Delete the ifcfg file.
-	if err = os.Remove(filePath); err != nil {
-		return false, fmt.Errorf("error deleting config file: %s, %v", filePath, err)
+	// Check if the backup file exists. If it does, restore it.
+	backupPath := filePath + ".bak"
+	if file.Exists(backupPath, file.TypeFile) {
+		// This should replace the existing file, so there's no need to remove it.
+		if err := file.CopyFile(ctx, backupPath, filePath, file.Options{Perm: 0644}); err != nil {
+			return false, fmt.Errorf("error restoring backup config file %q: %v", backupPath, err)
+		}
+		return true, nil
+	}
+
+	// Delete the ifcfg file if it's not primary. We don't want to remove the
+	// primary NIC's config file because doing so will cause the VM to lose
+	// network connectivity once reloaded.
+	if !isPrimary {
+		if err = os.Remove(filePath); err != nil {
+			return false, fmt.Errorf("error deleting config file: %s, %v", filePath, err)
+		}
 	}
 
 	return true, nil

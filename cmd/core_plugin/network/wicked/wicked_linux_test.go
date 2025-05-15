@@ -120,7 +120,7 @@ func TestIsManaging(t *testing.T) {
 						return &run.Result{Output: "active"}, nil
 					}
 
-					if opts.Name == "wicked" && args == "ifstatus iface --brief" {
+					if opts.Name == "wicked" && args == "ifstatus --brief iface" {
 						return &run.Result{}, errors.New("unknown error")
 					}
 
@@ -148,7 +148,7 @@ func TestIsManaging(t *testing.T) {
 						return &run.Result{Output: "active"}, nil
 					}
 
-					if opts.Name == "wicked" && args == "ifstatus iface --brief" {
+					if opts.Name == "wicked" && args == "ifstatus --brief iface" {
 						return &run.Result{}, nil
 					}
 
@@ -176,7 +176,7 @@ func TestIsManaging(t *testing.T) {
 						return &run.Result{Output: "active"}, nil
 					}
 
-					if opts.Name == "wicked" && args == "ifstatus iface --brief" {
+					if opts.Name == "wicked" && args == "ifstatus --brief iface" {
 						return &run.Result{Output: "foo bar"}, nil
 					}
 
@@ -204,7 +204,7 @@ func TestIsManaging(t *testing.T) {
 						return &run.Result{Output: "active"}, nil
 					}
 
-					if opts.Name == "wicked" && args == "ifstatus iface --brief" {
+					if opts.Name == "wicked" && args == "ifstatus --brief iface" {
 						return &run.Result{Output: "iface up"}, nil
 					}
 
@@ -232,7 +232,7 @@ func TestIsManaging(t *testing.T) {
 						return &run.Result{Output: "active"}, nil
 					}
 
-					if opts.Name == "wicked" && args == "ifstatus iface --brief" {
+					if opts.Name == "wicked" && args == "ifstatus --brief iface" {
 						return &run.Result{Output: "iface setup-in-progress"}, nil
 					}
 
@@ -286,6 +286,7 @@ func TestSetup(t *testing.T) {
 		configs         string
 		runMock         *runMock
 		createConfigDir bool
+		checkBackupFile bool
 		wantErr         bool
 	}{
 		{
@@ -315,6 +316,26 @@ func TestSetup(t *testing.T) {
 				},
 			},
 			createConfigDir: true,
+			wantErr:         false,
+		},
+		{
+			name:    "success-manage-primary-nic",
+			configs: "[NetworkInterfaces]\nmanage_primary_nic = true",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 0,
+				},
+			}),
+			runMock: &runMock{
+				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+					return &run.Result{}, nil
+				},
+			},
+			createConfigDir: true,
+			checkBackupFile: true,
 			wantErr:         false,
 		},
 		{
@@ -540,10 +561,21 @@ func TestSetup(t *testing.T) {
 					t.Fatalf("failed to create mock network config directory: %v", err)
 				}
 			}
+			if tc.checkBackupFile {
+				if err := os.WriteFile(filepath.Join(svc.configDir, "ifcfg-iface"), []byte("test"), 0644); err != nil {
+					t.Fatalf("failed to create mock network config file: %v", err)
+				}
+			}
 
 			err := svc.Setup(context.Background(), tc.opts)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want error: %v", err, tc.wantErr)
+			}
+
+			if tc.checkBackupFile {
+				if _, err := os.Stat(filepath.Join(svc.configDir, "ifcfg-iface.bak")); err != nil {
+					t.Errorf("Setup() did not create backup file, got error: %v, want nil", err)
+				}
 			}
 		})
 	}
