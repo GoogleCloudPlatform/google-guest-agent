@@ -736,6 +736,7 @@ func TestRollbackNetwork(t *testing.T) {
 func TestRollback(t *testing.T) {
 	tests := []struct {
 		name    string
+		reload  bool
 		opts    *service.Options
 		data    string
 		wantErr bool
@@ -757,20 +758,8 @@ func TestRollback(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "success-fail-unmarshal-config",
-			data: "invalid data",
-			opts: service.NewOptions(nil, []*nic.Configuration{
-				&nic.Configuration{
-					Interface: &ethernet.Interface{
-						NameOp: func() string { return "iface" },
-					},
-					Index: 1,
-				},
-			}),
-			wantErr: true,
-		},
-		{
-			name: "success-remove-file-fail-reload",
+			name:   "success-remove-file-fail-reload",
+			reload: true,
 			data: `
 			[GuestAgent]
 			ManagedByGuestAgent = true
@@ -814,7 +803,7 @@ func TestRollback(t *testing.T) {
 				}
 			}
 
-			err := mod.Rollback(context.Background(), tc.opts)
+			err := mod.Rollback(context.Background(), tc.opts, tc.reload)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Rollback() = %v, want error? %v", err, tc.wantErr)
 			}

@@ -469,7 +469,7 @@ func (sn *Module) deprecatedNetworkFile(iface string) string {
 }
 
 // Rollback rolls back the changes created in Setup.
-func (sn *Module) Rollback(ctx context.Context, opts *service.Options) error {
+func (sn *Module) Rollback(ctx context.Context, opts *service.Options, reload bool) error {
 	galog.Infof("Rolling back changes for systemd-networkd.")
 
 	ethernetRequiresReload := false
@@ -503,8 +503,10 @@ func (sn *Module) Rollback(ctx context.Context, opts *service.Options) error {
 	}
 
 	// Attempt to reload systemd-networkd configurations.
-	if err := sn.Reload(ctx); err != nil {
-		return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
+	if reload {
+		if err := sn.Reload(ctx); err != nil {
+			return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
+		}
 	}
 
 	return nil
@@ -549,6 +551,7 @@ func (sc *networkdConfig) write(fPath string) error {
 func rollbackConfiguration(configFile string) (bool, error) {
 	galog.Debugf("Rolling back systemd-networkd configuration(%s).", configFile)
 
+	// Check if the file exists.
 	if !file.Exists(configFile, file.TypeFile) {
 		galog.Debugf("No systemd-networkd configuration found: %s.", configFile)
 		return false, nil

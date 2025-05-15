@@ -178,12 +178,9 @@ func rollback(ctx context.Context, managers []*service.Handle, skipID string, op
 
 	var rolledBack []string
 	for _, manager := range managers {
-		if manager.ID == skipID {
-			continue
-		}
-
-		// Rollback network configurations for the manager.
-		if err := manager.Rollback(ctx, opts); err != nil {
+		// Rollback network configurations for the manager. Avoid reloading the
+		// active manager as we'll need to reload it anyway after the setup.
+		if err := manager.Rollback(ctx, opts, manager.ID != skipID); err != nil {
 			return rolledBack, fmt.Errorf("failed to rollback network configuration(%q): %w", manager.ID, err)
 		}
 
