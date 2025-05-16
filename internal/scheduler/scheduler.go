@@ -109,8 +109,8 @@ func (s *Scheduler) enableMetricRecording(ctx context.Context) {
 	s.metrics = metricregistry.New(ctx, 1*time.Minute, 10, "scheduled-job-manager")
 }
 
-// isScheduled returns true if job is already scheduled.
-func (s *Scheduler) isScheduled(jobID string) bool {
+// IsScheduled returns true if job is already scheduled.
+func (s *Scheduler) IsScheduled(jobID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.jobs[jobID]
@@ -153,7 +153,7 @@ func (s *Scheduler) ScheduleJob(ctx context.Context, job Job) error {
 	// enabled.
 	s.enableMetricRecording(ctx)
 
-	if s.isScheduled(job.ID()) {
+	if s.IsScheduled(job.ID()) {
 		galog.Infof("Skipping schedule job request for %q, its already scheduled", job.ID())
 		return nil
 	}
@@ -211,7 +211,7 @@ func (s *Scheduler) runOnSchedule(ctx context.Context, j *jobConfig) {
 // UnscheduleJob removes the job from schedule.
 func (s *Scheduler) UnscheduleJob(jobID string) {
 	galog.Infof("Unscheduling job %q", jobID)
-	if !s.isScheduled(jobID) {
+	if !s.IsScheduled(jobID) {
 		return
 	}
 	s.mu.Lock()

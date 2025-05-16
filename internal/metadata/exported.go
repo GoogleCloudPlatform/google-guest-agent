@@ -458,6 +458,16 @@ func (attr *Attributes) EnableCorePlugin() *bool {
 	return attr.internal.EnableCorePlugin
 }
 
+// DisableHTTPSMdsSetup returns the attributes disable http-smds setup.
+func (attr *Attributes) DisableHTTPSMdsSetup() *bool {
+	return attr.internal.DisableHTTPSMdsSetup
+}
+
+// HTTPSMDSEnableNativeStore returns the attributes enable native store.
+func (attr *Attributes) HTTPSMDSEnableNativeStore() *bool {
+	return attr.internal.HTTPSMDSEnableNativeStore
+}
+
 // EnableWSFC returns the attributes enable wsfc.
 func (attr *Attributes) EnableWSFC() *bool {
 	return attr.internal.EnableWSFC

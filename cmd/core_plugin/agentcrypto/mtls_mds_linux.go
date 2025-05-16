@@ -25,7 +25,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
@@ -64,7 +63,7 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFi
 		return err
 	}
 
-	if !cfg.Retrieve().MDS.UpdateCACertificatesEnabled {
+	if !j.useNativeStore {
 		galog.Debug("Skipping system store update as it is disabled in the configuration")
 		return nil
 	}
