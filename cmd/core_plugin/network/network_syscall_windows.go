@@ -23,8 +23,8 @@ import (
 	"unsafe"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/route"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 	"golang.org/x/sys/windows"
 )
 

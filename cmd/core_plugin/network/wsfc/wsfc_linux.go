@@ -18,9 +18,9 @@ package wsfc
 
 import (
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 )
 
 // AddressMap returns nil on linux.

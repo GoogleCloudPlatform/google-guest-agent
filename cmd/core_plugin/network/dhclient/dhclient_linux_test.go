@@ -26,11 +26,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )

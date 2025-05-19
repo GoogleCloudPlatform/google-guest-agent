@@ -24,11 +24,11 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/dhclient"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/netplan"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nm"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/route"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/wicked"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 )
 
 var (
@@ -86,66 +86,11 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 		return fmt.Errorf("failed to setup network configuration(%q): %w", active.ID, err)
 	}
 
-	// Attempt to setup the routes for the active manager.
-	if err := setupRoutes(ctx, opts); err != nil {
+	// Attempt to setup the routes.
+	if err := route.Setup(ctx, opts); err != nil {
 		return fmt.Errorf("failed to setup routes: %w", err)
 	}
 
-	return nil
-}
-
-// setupRoutes sets up the routes for the network interfaces. If the active
-// manager doesn't have a special case for routes, it will use the native
-// implementation.
-func setupRoutes(ctx context.Context, opts *service.Options) error {
-	galog.Debugf("Running fallback route setup.")
-
-	// Fallback route setup uses ip commands.
-	for _, nic := range opts.FilteredNICConfigs() {
-		if nic.Interface == nil {
-			galog.Debugf("Skipping route setup for interface index %d: interface is nil", nic.Index)
-			continue
-		}
-		if nic.ExtraAddresses == nil {
-			galog.Debugf("Skipping route setup for interface %q: no extra addresses", nic.Interface.Name())
-			continue
-		}
-
-		// Find extra routes to delete.
-		extraAddrs := nic.ExtraAddresses.MergedMap()
-		extraRoutes, err := route.ExtraRoutes(ctx, nic.Interface.Name(), extraAddrs)
-		if err != nil {
-			return fmt.Errorf("failed to get extra routes for interface %q: %w", nic.Interface.Name(), err)
-		}
-		galog.Infof("Deleting extra routes %v for interface %q", extraRoutes, nic.Interface.Name())
-		for _, r := range extraRoutes {
-			if err = route.Delete(ctx, r); err != nil {
-				// Continue to delete the rest of the routes, and only log the error.
-				galog.Errorf("Failed to delete route %q for interface %q: %v", r.Destination.String(), nic.Interface.Name(), err)
-			}
-		}
-
-		// Find missing routes for the given interface.
-		missingRoutes, err := route.MissingRoutes(ctx, nic.Interface.Name(), nic.ExtraAddresses.MergedMap())
-		if err != nil {
-			return fmt.Errorf("failed to get missing routes for interface %q: %w", nic.Interface.Name(), err)
-		}
-
-		if len(missingRoutes) == 0 {
-			galog.Debugf("No missing routes for interface %q", nic.Interface.Name())
-			continue
-		}
-		galog.Infof("Adding routes %v for interface %q", missingRoutes, nic.Interface.Name())
-
-		// Add the missing routes.
-		for _, r := range missingRoutes {
-			if err = route.Add(ctx, r); err != nil {
-				// Continue to add the rest of the routes, and only log the error.
-				galog.Errorf("Failed to add route %q for interface %q: %v", r.Destination.String(), nic.Interface.Name(), err)
-			}
-		}
-	}
-	galog.Debugf("Finished fallback route setup.")
 	return nil
 }
 

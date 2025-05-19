@@ -21,11 +21,11 @@ import (
 	"fmt"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/lru"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
 )
 
 var (

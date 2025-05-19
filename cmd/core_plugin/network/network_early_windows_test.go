@@ -20,8 +20,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/route"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 )
 
 func TestEarlyWindows(t *testing.T) {

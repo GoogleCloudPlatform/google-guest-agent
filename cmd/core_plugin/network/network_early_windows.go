@@ -22,8 +22,8 @@ import (
 	"slices"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/address"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/route"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 )
 
 // platformEarlyInit is a hook for platform-specific early initialization.
