@@ -155,7 +155,7 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 		return fmt.Errorf("failed to cleanup vlan interfaces: %w", err)
 	}
 
-	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: append([]string{"ifup"}, ifupInterfaces...)}
+	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: append([]string{"ifreload"}, ifupInterfaces...)}
 	if _, err := run.WithContext(ctx, opt); err != nil {
 		return fmt.Errorf("error enabling interfaces: %v", err)
 	}
@@ -336,7 +336,7 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) er
 	}
 
 	// Reload the wicked configuration.
-	args := []string{"reload"}
+	args := []string{"ifreload"}
 	args = append(args, reloadInterfaces...)
 	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: args}
 	if _, err := run.WithContext(ctx, opt); err != nil {
