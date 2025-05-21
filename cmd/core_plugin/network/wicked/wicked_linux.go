@@ -111,13 +111,10 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 
 		fPath := sn.ifcfgFilePath(nic.Interface.Name())
 
-		// Backup the existing config file if it exists.
+		// Don't write a new config file if one already exists.
 		if file.Exists(fPath, file.TypeFile) {
-			// Use copy instead of moving, so if any other part of the network setup
-			// fails, we'll still have the original config.
-			if err := file.CopyFile(ctx, fPath, fPath+".bak", file.Options{Perm: 0644}); err != nil {
-				return fmt.Errorf("failed to backup wicked config file: %w", err)
-			}
+			galog.Infof("Wicked config file for %s already exists (%s), skipping.", nic.Interface.Name(), fPath)
+			continue
 		}
 
 		// Write the config file for the current NIC.
@@ -361,16 +358,6 @@ func (sn *serviceWicked) removeInterface(ctx context.Context, filePath string, i
 	// File is not managed by us, skip it.
 	if !shouldRemove {
 		return false, nil
-	}
-
-	// Check if the backup file exists. If it does, restore it.
-	backupPath := filePath + ".bak"
-	if file.Exists(backupPath, file.TypeFile) {
-		// This should replace the existing file, so there's no need to remove it.
-		if err := file.CopyFile(ctx, backupPath, filePath, file.Options{Perm: 0644}); err != nil {
-			return false, fmt.Errorf("error restoring backup config file %q: %v", backupPath, err)
-		}
-		return true, nil
 	}
 
 	// Delete the ifcfg file if it's not primary. We don't want to remove the

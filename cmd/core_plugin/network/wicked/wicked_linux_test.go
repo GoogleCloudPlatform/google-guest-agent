@@ -286,7 +286,6 @@ func TestSetup(t *testing.T) {
 		configs         string
 		runMock         *runMock
 		createConfigDir bool
-		checkBackupFile bool
 		wantErr         bool
 	}{
 		{
@@ -335,7 +334,6 @@ func TestSetup(t *testing.T) {
 				},
 			},
 			createConfigDir: true,
-			checkBackupFile: true,
 			wantErr:         false,
 		},
 		{
@@ -561,21 +559,10 @@ func TestSetup(t *testing.T) {
 					t.Fatalf("failed to create mock network config directory: %v", err)
 				}
 			}
-			if tc.checkBackupFile {
-				if err := os.WriteFile(filepath.Join(svc.configDir, "ifcfg-iface"), []byte("test"), 0644); err != nil {
-					t.Fatalf("failed to create mock network config file: %v", err)
-				}
-			}
 
 			err := svc.Setup(context.Background(), tc.opts)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want error: %v", err, tc.wantErr)
-			}
-
-			if tc.checkBackupFile {
-				if _, err := os.Stat(filepath.Join(svc.configDir, "ifcfg-iface.bak")); err != nil {
-					t.Errorf("Setup() did not create backup file, got error: %v, want nil", err)
-				}
 			}
 		})
 	}
