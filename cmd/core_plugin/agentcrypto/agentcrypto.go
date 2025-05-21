@@ -18,9 +18,15 @@ package agentcrypto
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 )
 
@@ -31,17 +37,23 @@ const (
 
 // NewModule returns agentcrypto early initialization module.
 func NewModule(_ context.Context) *manager.Module {
+	handler := &moduleHandler{metadata: metadata.New()}
 	return &manager.Module{
 		ID:          moduleID,
-		BlockSetup:  moduleSetup,
+		BlockSetup:  handler.setup,
 		Description: "MDS/MTLS bootstrapping and certificate rotation",
 	}
 }
 
-// moduleSetup is the early initialization function for agentcrypto module.
-func moduleSetup(ctx context.Context, _ any) error {
-	config := cfg.Retrieve()
-	job := New()
+// moduleHandler is the handler for agentcrypto module.
+type moduleHandler struct {
+	metadata       metadata.MDSClientInterface
+	failedPrevious atomic.Bool
+}
+
+// setup is the early initialization function for agentcrypto module.
+func (m *moduleHandler) setup(ctx context.Context, _ any) error {
+	mds, err := m.metadata.Get(ctx)
 
 	// Schedules jobs that need to be started before notifying systemd Agent
 	// process has started.
@@ -50,11 +62,109 @@ func moduleSetup(ctx context.Context, _ any) error {
 	// at startup to ensure that the credentials are available for use. By
 	// generating the credentials before notifying the systemd, we ensure that
 	// they are generated for any process that depends on the Guest Agent.
-	// Additionally, job.ShouldEnable() will determine if the system's
-	// preconditions are met for.
-	if config.MDS.MTLSBootstrappingEnabled && job.ShouldEnable(ctx) {
-		scheduler.ScheduleJobs(ctx, []scheduler.Job{job}, true)
+	// Additionally, eventCallback will determine if the system's preconditions
+	// are met for.
+	_, err = m.eventCallback(ctx, metadata.LongpollEvent, mds, &events.EventData{Data: mds, Error: err})
+	if err != nil {
+		galog.Errorf("Failed to initialize %s module: %v", moduleID, err)
 	}
 
+	events.FetchManager().Subscribe(metadata.LongpollEvent, events.EventSubscriber{Name: moduleID, Callback: m.eventCallback, MetricName: acmpb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION})
 	return nil
+}
+
+func (m *moduleHandler) eventCallback(ctx context.Context, evType string, _ any, evData *events.EventData) (bool, error) {
+	galog.Debugf("Running %q callback handler for event: %q", moduleID, evType)
+
+	if evData.Error != nil {
+		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
+	}
+
+	mds, ok := evData.Data.(*metadata.Descriptor)
+	if !ok {
+		return true, fmt.Errorf("event's data (%T) is not a metadata descriptor: %+v", evData.Data, evData.Data)
+	}
+
+	sched := scheduler.Instance()
+	alreadyScheduled := sched.IsScheduled(MTLSSchedulerID)
+	shouldSchedule := m.enableJob(ctx, mds)
+
+	if !shouldSchedule && alreadyScheduled {
+		sched.UnscheduleJob(MTLSSchedulerID)
+		return true, nil
+	}
+
+	if shouldSchedule && !alreadyScheduled {
+		job := New(useNativeStore(mds))
+		if err := sched.ScheduleJob(ctx, job); err != nil {
+			return true, fmt.Errorf("failed to schedule job %q: %v", MTLSSchedulerID, err)
+		}
+	}
+
+	return true, nil
+}
+
+// useNativeStore returns true if the native store usage is enabled for mTLS MDS
+// based on the instance, project and config file attributes.
+func useNativeStore(mds *metadata.Descriptor) bool {
+	var useNative bool
+
+	if cfg.Retrieve().MDS != nil {
+		useNative = cfg.Retrieve().MDS.HTTPSMDSEnableNativeStore
+		galog.Debugf("Found instance config file attribute for use native store set to: %t", useNative)
+	}
+
+	if mds.Project().Attributes().HTTPSMDSEnableNativeStore() != nil {
+		useNative = *mds.Project().Attributes().HTTPSMDSEnableNativeStore()
+		galog.Debugf("Found project level attribute for use native store set to: %t", useNative)
+	}
+
+	if mds.Instance().Attributes().HTTPSMDSEnableNativeStore() != nil {
+		useNative = *mds.Instance().Attributes().HTTPSMDSEnableNativeStore()
+		galog.Debugf("Found instance level attribute for use native store set to: %t", useNative)
+	}
+
+	return useNative
+}
+
+// enableJob returns true if the credential refresher job should be enabled
+// based on the instance, project and config file attributes and if the client
+// credentials endpoint is reachable.
+func (m *moduleHandler) enableJob(ctx context.Context, mds *metadata.Descriptor) bool {
+	var enable bool
+	if cfg.Retrieve().MDS != nil {
+		enable = !cfg.Retrieve().MDS.DisableHTTPSMdsSetup
+		galog.Debugf("Found instance config file attribute for enable credential refresher set to: %t", enable)
+	}
+
+	if mds.Project().Attributes().DisableHTTPSMdsSetup() != nil {
+		enable = !*mds.Project().Attributes().DisableHTTPSMdsSetup()
+		galog.Debugf("Found project level attribute for enable credential refresher set to: %t", enable)
+	}
+
+	if mds.Instance().Attributes().DisableHTTPSMdsSetup() != nil {
+		enable = !*mds.Instance().Attributes().DisableHTTPSMdsSetup()
+		galog.Debugf("Found instance level attribute for enable credential refresher set to: %t", enable)
+	}
+
+	if !enable {
+		// No need to make MDS call in case job is disabled by the user.
+		return false
+	}
+
+	_, err := m.metadata.GetKey(ctx, clientCertsKey, nil)
+	if err != nil {
+		// This error is logged only once to prevent raising unnecessary alerts.
+		// Repeated logging could be mistaken for a recurring issue, even if mTLS
+		// MDS is indeed not supported.
+		if !m.failedPrevious.Load() {
+			galog.Warnf("Skipping scheduling credential generation job, unable to reach client credentials endpoint(%s): %v\nNote that this does not impact any functionality and you might see this message if HTTPS endpoint isn't supported by the Metadata Server on your VM. Refer to https://cloud.google.com/compute/docs/metadata/overview#https-mds for more details.", clientCertsKey, err)
+			m.failedPrevious.Store(true)
+		}
+		enable = false
+	} else {
+		m.failedPrevious.Store(false)
+	}
+
+	return enable
 }

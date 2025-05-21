@@ -33,15 +33,16 @@ func TestScheduleJob(t *testing.T) {
 	}
 
 	s := scheduler.Instance()
-	job := New()
-	job.forceShouldEnable = true
+	job := New(false)
 
 	if job.MetricName() != acppb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION {
 		t.Errorf("MetricName() = %s, want %s", job.MetricName().String(), acppb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION.String())
 	}
 
 	ctx := context.Background()
-	s.ScheduleJob(ctx, job)
+	if err := s.ScheduleJob(ctx, job); err != nil {
+		t.Fatalf("ScheduleJob(ctx, %+v) failed unexpectedly with error: %v", job, err)
+	}
 	defer s.UnscheduleJob(job.ID())
 
 	checkInit := func() error {
@@ -53,6 +54,6 @@ func TestScheduleJob(t *testing.T) {
 
 	policy := retry.Policy{MaxAttempts: checkInitMaxAttempts, BackoffFactor: 1, Jitter: time.Second}
 	if err := retry.Run(ctx, policy, checkInit); err != nil {
-		t.Fatal("Job bootstrap failed")
+		t.Fatalf("Job bootstrap failed with error: %v", err)
 	}
 }

@@ -43,7 +43,7 @@ const (
 	googleRootCACertEFIVarName = "InstanceRootCACertificate"
 	// clientCertsKey is the metadata server key at which client identity
 	// certificate is exposed.
-	clientCertsKey = "instance/credentials/certs"
+	clientCertsKey = "instance/credentials/mds-client-certificate"
 	// MTLSSchedulerID is the identifier used by job scheduler.
 	MTLSSchedulerID = "MTLS_MDS_Credential_Boostrapper"
 	// MTLSScheduleInterval is interval at which credential bootstrapper runs.
@@ -58,9 +58,6 @@ var (
 // credentials.
 type CredsJob struct {
 	client metadata.MDSClientInterface
-	// forceShouldEnable is used to force the ShouldEnable to return true, useful
-	// for testing purposes.
-	forceShouldEnable bool
 	// bootStrapped is used to track if the credentials have been bootstrapped -
 	// or even if the process/job has been run at least once.
 	bootStrapped atomic.Bool
@@ -71,12 +68,15 @@ type CredsJob struct {
 	// regardless of instance reboots allows to fix any issues encountered with
 	// root certificate without having to restart compute instance.
 	rootCertsInstalled atomic.Bool
+	// useNativeStore tracks if native store should be used for current run or not.
+	useNativeStore bool
 }
 
 // New initializer new job.
-func New() *CredsJob {
+func New(useNativeStore bool) *CredsJob {
 	return &CredsJob{
-		client: metadata.New(),
+		client:         metadata.New(),
+		useNativeStore: useNativeStore,
 	}
 }
 
@@ -240,18 +240,8 @@ func (j *CredsJob) Interval() (time.Duration, bool) {
 	return MTLSScheduleInterval, true
 }
 
-// ShouldEnable returns true if MDS endpoint for fetching credentials is
-// available on the VM.
-// Used for identifying if we want schedule bootstrapping and enable MDS mTLS
-// credential rotation.
+// ShouldEnable always returns true. Module handler is responsible for
+// enabling/disabling the job.
 func (j *CredsJob) ShouldEnable(ctx context.Context) bool {
-	if j.forceShouldEnable {
-		return true
-	}
-	_, err := j.client.GetKey(ctx, clientCertsKey, nil)
-	if err != nil {
-		galog.Warnf("Skipping scheduling credential generation job, failed to reach client credentials endpoint(%s) with error: %v", clientCertsKey, err)
-		return false
-	}
 	return true
 }
