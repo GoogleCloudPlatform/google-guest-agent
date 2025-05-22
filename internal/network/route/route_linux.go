@@ -383,7 +383,7 @@ func (lc *linuxClient) RemoveRoutes(ctx context.Context, iface string) error {
 }
 
 // SetupRoutes sets up the routes for the network interfaces. This uses ip route
-// commands to setup the routes.
+// commands to delete extra routes and add missing routes.
 func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
 	nicConfigs := opts.FilteredNICConfigs()
 	if len(nicConfigs) == 0 {
@@ -437,6 +437,6 @@ func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
 			}
 		}
 	}
-	galog.Debugf("Finished route setup.")
+	galog.Debugf("Finished ip route setup.")
 	return nil
 }

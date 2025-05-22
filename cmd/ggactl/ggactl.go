@@ -25,6 +25,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/plugincleanup"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/routes"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/spf13/cobra"
@@ -46,6 +47,7 @@ func newRootCommand() *cobra.Command {
 	}
 
 	root.AddCommand(plugincleanup.New())
+	root.AddCommand(routes.New())
 
 	return root
 }

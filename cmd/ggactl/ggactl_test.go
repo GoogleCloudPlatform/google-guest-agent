@@ -37,8 +37,8 @@ func TestNewRootCommand(t *testing.T) {
 		t.Errorf("newRootCommand.Name = %s, want ggactl_plugin_cleanup", cmd.Name())
 	}
 
-	if len(cmd.Commands()) != 1 {
-		t.Errorf("newRootCommand.Commands() = %d, want 1", len(cmd.Commands()))
+	if len(cmd.Commands()) != 2 {
+		t.Errorf("newRootCommand.Commands() = %d, want 2", len(cmd.Commands()))
 	}
 
 	tests := []struct {
