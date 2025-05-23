@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -123,7 +123,7 @@ func writeSSHKeys(ctx context.Context, instanceSetup *cfg.InstanceSetup) error {
 
 	// Generate new keys and upload to guest attributes.
 	for keytype := range keytypes {
-		keyfile := path.Join(hostKeyDir, fmt.Sprintf("%s_%s_%s", hostKeyFilePrefix, keytype, hostKeyFileSuffix))
+		keyfile := filepath.Join(hostKeyDir, fmt.Sprintf("%s%s%s", hostKeyFilePrefix, keytype, hostKeyFileSuffix))
 		pubKeyFile := keyfile + ".pub"
 
 		tmpKeyFile := keyfile + ".temp"
@@ -167,6 +167,8 @@ func writeSSHKeys(ctx context.Context, instanceSetup *cfg.InstanceSetup) error {
 			galog.Warnf("Generated key(%q) is malformed, not uploading", keytype)
 			continue
 		}
+
+		galog.Infof("Successfully generated %s type public key at %q", keytype, pubKeyFile)
 
 		if err := client.WriteGuestAttributes(ctx, "hostkeys/"+vals[0], vals[1]); err != nil {
 			galog.Errorf("Failed to upload %s key to guest attributes: %v", keytype, err)

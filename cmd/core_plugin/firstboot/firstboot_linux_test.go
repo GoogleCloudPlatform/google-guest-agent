@@ -18,11 +18,13 @@ package firstboot
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 func TestSetupExistingFileSuccess(t *testing.T) {
@@ -227,6 +229,22 @@ func TestGenerateSSHKeysSuccess(t *testing.T) {
 			// Test refresh use case.
 			if err := writeSSHKeys(context.Background(), config.InstanceSetup); err != nil {
 				t.Errorf("writeSSHKeys(%v) = %v, want nil", config.InstanceSetup, err)
+			}
+
+			files, err := os.ReadDir(hostKeysDir)
+			if err != nil {
+				t.Fatalf("ReadDir(%q) = %v, want nil", hostKeysDir, err)
+			}
+			var foundFiles []string
+			for _, file := range files {
+				foundFiles = append(foundFiles, file.Name())
+			}
+
+			for _, keyType := range []string{"rsa", "ecdsa"} {
+				keyFile := filepath.Join(hostKeysDir, fmt.Sprintf("ssh_host_%s_key.pub", keyType))
+				if !file.Exists(keyFile, file.TypeFile) {
+					t.Errorf("File(%q) does not exist after writeSSHKeys, found %v files in %q", keyFile, foundFiles, hostKeysDir)
+				}
 			}
 		})
 	}
