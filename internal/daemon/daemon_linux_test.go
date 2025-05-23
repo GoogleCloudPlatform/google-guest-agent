@@ -198,7 +198,7 @@ func TestCheckUnitExists(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			testRunner := setupTestRunner(t, test.wantErr, "")
 			found, err := CheckUnitExists(context.Background(), "test")
-			if err != nil {
+			if (err != nil) != test.wantErr {
 				t.Fatalf("CheckUnitExists(ctx, \"test\") = %v, want nil", err)
 			}
 
