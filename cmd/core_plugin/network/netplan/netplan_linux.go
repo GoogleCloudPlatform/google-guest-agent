@@ -52,10 +52,29 @@ func NewService() *service.Handle {
 	}
 }
 
+// isUbuntu1804 checks if agent is running on Ubuntu 18.04. This is a helper
+// method to support some exceptions we have for 18.04.
+func isUbuntu1804() bool {
+	info := osinfo.Read()
+	if info.OS == "ubuntu" && info.VersionID == "18.04" {
+		return true
+	}
+	return false
+}
+
 // IsManaging returns true if the netplan service is managing the network
 // configuration.
 func (sn *serviceNetplan) IsManaging(ctx context.Context, opts *service.Options) (bool, error) {
 	sn.defaultConfig()
+
+	// Ubuntu 18.04, while having `netplan` installed, ships a outdated and
+	// unsupported version of `networkctl`. This older version lacks essential
+	// commands like `networkctl reload`, causing compatibility issues. Fallback
+	// to dhclient on Ubuntu 18.04, even when netplan is present, to ensure
+	// proper network configuration.
+	if isUbuntu1804() {
+		return false, nil
+	}
 
 	// Check if the netplan CLI exists.
 	if _, err := execLookPath("netplan"); err != nil {

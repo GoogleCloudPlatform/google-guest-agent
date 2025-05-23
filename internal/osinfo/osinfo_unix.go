@@ -37,7 +37,7 @@ var (
 func parseOSRelease(osRelease string) (OSInfo, error) {
 	var ret OSInfo
 	for _, line := range strings.Split(osRelease, "\n") {
-		var id = line
+		id := line
 		if id = strings.TrimPrefix(line, "ID="); id != line {
 			id = strings.Trim(id, `"`)
 			ret.OS = parseID(id)
@@ -61,7 +61,7 @@ func parseOSRelease(osRelease string) (OSInfo, error) {
 
 func parseSystemRelease(systemRelease string) (OSInfo, error) {
 	var ret OSInfo
-	var key = " release "
+	key := " release "
 	idx := strings.Index(systemRelease, key)
 	if idx == -1 {
 		return ret, errors.New("SystemRelease does not match expected format")
