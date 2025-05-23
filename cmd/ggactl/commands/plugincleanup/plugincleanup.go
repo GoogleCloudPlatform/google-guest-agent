@@ -20,13 +20,10 @@ import (
 	"fmt"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"github.com/spf13/cobra"
 )
-
-// TestOverrideKey is a context key to override cleanup behavior in tests.
-var TestOverrideKey any = "test_override"
 
 // New returns a new plugin cleanup command.
 func New() *cobra.Command {
@@ -44,7 +41,7 @@ func New() *cobra.Command {
 }
 
 func removeAllPlugins(ctx context.Context) error {
-	instanceID, err := fetchInstanceID(ctx)
+	instanceID, err := commands.FetchInstanceID(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch instance ID: %w", err)
 	}
@@ -60,11 +57,4 @@ func removeAllPlugins(ctx context.Context) error {
 
 	galog.Infof("Successfully removed all dynamic plugins")
 	return nil
-}
-
-func fetchInstanceID(ctx context.Context) (string, error) {
-	if ctx.Value(TestOverrideKey) != nil {
-		return "test", nil
-	}
-	return metadata.New().GetKey(ctx, "/instance/id", nil)
 }

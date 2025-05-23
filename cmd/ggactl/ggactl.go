@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/coreplugin"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/plugincleanup"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/routes"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -46,6 +47,7 @@ func newRootCommand() *cobra.Command {
 		Long:  "Guest Agent CLI for removing all dynamic plugins.",
 	}
 
+	root.AddCommand(coreplugin.New())
 	root.AddCommand(plugincleanup.New())
 	root.AddCommand(routes.New())
 

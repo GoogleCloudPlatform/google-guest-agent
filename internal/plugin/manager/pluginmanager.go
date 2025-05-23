@@ -52,6 +52,8 @@ const (
 	// maxMetricDatapoints is the maximum number of datapoints to be stored in the
 	// metric list in memory.
 	maxMetricDatapoints = 60
+	// CorePluginName is the name of the guest agent core plugin.
+	CorePluginName = "GuestAgentCorePlugin"
 )
 
 // pluginManager is the instance of plugin manager.
@@ -195,7 +197,7 @@ func InitAdHocPluginManager(ctx context.Context, instanceID string) (*PluginMana
 func (m *PluginManager) StopPlugin(ctx context.Context, name string) error {
 	galog.Infof("Stopping plugin %q", name)
 
-	plugin, err := m.fetch(name)
+	plugin, err := m.Fetch(name)
 	if err != nil {
 		galog.Infof("Plugin %q state not found [err: %v], skipping stop request", name, err)
 		return nil
@@ -430,8 +432,8 @@ func (m *PluginManager) list() []*Plugin {
 	return plugins
 }
 
-// fetch returns the plugin instance with the given name.
-func (m *PluginManager) fetch(name string) (*Plugin, error) {
+// Fetch returns the plugin instance with the given name.
+func (m *PluginManager) Fetch(name string) (*Plugin, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	p, ok := m.plugins[name]
@@ -575,7 +577,7 @@ func (m *PluginManager) installPlugin(ctx context.Context, req *acpb.ConfigurePl
 	}
 
 	sendEvent(ctx, plugin, acpb.PluginEventMessage_PLUGIN_CONFIG_INSTALL, "Received request to install a plugin.")
-	currPlugin, err := m.fetch(req.GetPlugin().GetName())
+	currPlugin, err := m.Fetch(req.GetPlugin().GetName())
 	if err == nil && currPlugin.Revision == req.GetPlugin().GetRevisionId() {
 		sendEvent(ctx, currPlugin, acpb.PluginEventMessage_PLUGIN_INSTALL_FAILED, "Plugin is already installed or being processed.")
 		return fmt.Errorf("plugin %q is already installed or being processed", currPlugin.FullName())
@@ -641,7 +643,7 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 		return fmt.Errorf("failed to create new plugin instance: %w", err)
 	}
 
-	currPlugin, err := m.fetch(req.GetPlugin().GetName())
+	currPlugin, err := m.Fetch(req.GetPlugin().GetName())
 	if err != nil {
 		return fmt.Errorf("fetching current instance for %q: %w", req.GetPlugin().GetName(), err)
 	}
@@ -705,7 +707,7 @@ func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin) erro
 func (m *PluginManager) removePlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
 	galog.Infof("Removing plugin %q, revision %s", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
 
-	p, err := m.fetch(req.GetPlugin().GetName())
+	p, err := m.Fetch(req.GetPlugin().GetName())
 	if err != nil {
 		sendEvent(ctx, &Plugin{Name: req.GetPlugin().GetName(), Revision: req.GetPlugin().GetRevisionId()}, acpb.PluginEventMessage_PLUGIN_REMOVE_FAILED, "Plugin not found.")
 		return fmt.Errorf("plugin %q not found", req.GetPlugin().GetName())

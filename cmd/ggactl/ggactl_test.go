@@ -19,14 +19,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/plugincleanup"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/testhelper"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 )
 
 func TestNewRootCommand(t *testing.T) {
-	ctx := context.WithValue(context.Background(), plugincleanup.TestOverrideKey, true)
+	ctx := context.WithValue(context.Background(), commands.TestOverrideKey, true)
 	cmd := newRootCommand()
 
 	if err := cfg.Load(nil); err != nil {
@@ -37,7 +37,7 @@ func TestNewRootCommand(t *testing.T) {
 		t.Errorf("newRootCommand.Name = %s, want ggactl_plugin_cleanup", cmd.Name())
 	}
 
-	if len(cmd.Commands()) != 2 {
+	if len(cmd.Commands()) != 3 {
 		t.Errorf("newRootCommand.Commands() = %d, want 2", len(cmd.Commands()))
 	}
 

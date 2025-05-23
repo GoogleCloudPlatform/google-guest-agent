@@ -67,7 +67,7 @@ func (w *Watcher) Events() []string {
 func (w *Watcher) Run(ctx context.Context, event string) (bool, any, error) {
 	galog.Debugf("Running watcher for plugin: %q, request: %q, status: %d", w.name, w.request, w.statusCode)
 
-	p, err := Instance().fetch(w.name)
+	p, err := Instance().Fetch(w.name)
 	if err != nil {
 		return false, nil, fmt.Errorf("unable to fetch plugin %q: %w", w.name, err)
 	}

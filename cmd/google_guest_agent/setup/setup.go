@@ -33,8 +33,6 @@ import (
 )
 
 const (
-	// corePluginName is the name of the core plugin.
-	corePluginName = "GuestAgentCorePlugin"
 	// pluginStatusRequest defines the specific status we want to check. In this case
 	// we're checking if core plugin has completed its early initialization.
 	pluginStatusRequest = "early-initialization"
@@ -78,7 +76,7 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 	// it will reconnect on [InitPluginManager]. Verify and return if running.
 	// Requesting install again would be a no-op but will generate unnecessary
 	// [PLUGIN_INSTALL_FAILED] event as plugin will be already present.
-	err := verifyPluginRunning(ctx, pm, corePluginName, c.Version)
+	err := verifyPluginRunning(ctx, pm, manager.CorePluginName, c.Version)
 	if err == nil {
 		galog.Debugf("Core plugin found in running state, skipping installation")
 		return nil
@@ -91,7 +89,7 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
 				Action: acpb.ConfigurePluginStates_INSTALL,
 				Plugin: &acpb.ConfigurePluginStates_Plugin{
-					Name:       corePluginName,
+					Name:       manager.CorePluginName,
 					RevisionId: c.Version,
 					EntryPoint: c.CorePluginPath,
 				},
@@ -112,12 +110,12 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 
 	// As above request is completed this check should pass/fail right away
 	// no need to retry or wait.
-	return verifyPluginRunning(ctx, pm, corePluginName, c.Version)
+	return verifyPluginRunning(ctx, pm, manager.CorePluginName, c.Version)
 }
 
 // coreReady executes components that are dependent/waiting on core plugin to be ready.
 func coreReady(ctx context.Context, opts Config) {
-	galog.Debugf("Received %s ready event, setting service state to running", corePluginName)
+	galog.Debugf("Received %s ready event, setting service state to running", manager.CorePluginName)
 	service.SetState(ctx, service.StateRunning)
 	galog.Infof("Google Guest Agent (version: %q) Initialized...", opts.Version)
 }
@@ -235,9 +233,9 @@ func Run(ctx context.Context, c Config) error {
 	events.FetchManager().Subscribe(manager.EventID, events.EventSubscriber{Name: "GuestAgent", Data: c, Callback: handlePluginEvent, MetricName: acpb.GuestAgentModuleMetric_CORE_PLUGIN_INITIALIZATION})
 
 	// Ignore returned [watcher] as it takes care of deregistering itself.
-	_, err = manager.InitWatcher(ctx, corePluginName, successStatusCode, pluginStatusRequest)
+	_, err = manager.InitWatcher(ctx, manager.CorePluginName, successStatusCode, pluginStatusRequest)
 	if err != nil {
-		return fmt.Errorf("init %s watcher: %w", corePluginName, err)
+		return fmt.Errorf("init %s watcher: %w", manager.CorePluginName, err)
 	}
 
 	return nil

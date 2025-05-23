@@ -111,7 +111,7 @@ func TestInstall(t *testing.T) {
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
 				Action: acpb.ConfigurePluginStates_INSTALL,
 				Plugin: &acpb.ConfigurePluginStates_Plugin{
-					Name:       corePluginName,
+					Name:       manager.CorePluginName,
 					RevisionId: c.Version,
 					EntryPoint: c.CorePluginPath,
 				},
@@ -155,7 +155,7 @@ func TestInstall(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			plugins := make(map[string]plugin)
 			if !tc.wantErr {
-				plugins[corePluginName] = plugin{name: corePluginName, revision: c.Version, status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}
+				plugins[manager.CorePluginName] = plugin{name: manager.CorePluginName, revision: c.Version, status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}
 			}
 			testManager := &testPluginManager{setOnInstall: plugins}
 			if tc.shouldSkip {

@@ -16,75 +16,51 @@ package coreplugin
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands/testhelper"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
-func TestCorePluginSendCommand(t *testing.T) {
-	ctx := context.Background()
-	resp := command.Response{Status: 200, StatusMessage: "Success"}
-	respBytes, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("json.Marshal(%+v) failed, %v", resp, err)
+func TestRestartCorePlugin(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
 	}
-
-	handler := &testhelper.CommandHandler{Cmd: "echo", SendResp: respBytes}
-	testhelper.SetupCommandMonitor(ctx, t, command.ListenerCorePlugin, handler)
-
+	ctx := context.WithValue(context.Background(), commands.TestOverrideKey, true)
 	cmd := New()
 	cmd.SetContext(ctx)
 
-	req := `{"Command":"echo", "Data":"test"}`
-
 	tests := []struct {
-		desc     string
-		args     []string
-		wantReq  string
-		wantResp string
-		wantErr  bool
+		name    string
+		args    []string
+		wantErr string
 	}{
 		{
-			desc:    "no_subcommand",
-			wantErr: true,
+			name:    "no_subcommand_error",
+			wantErr: "no subcommand",
 		},
 		{
-			desc:     "valid_send_subcommand",
-			args:     []string{"send", req},
-			wantReq:  req,
-			wantResp: string(respBytes),
+			name:    "invalid_args",
+			args:    []string{"restart", "invalid_arg"},
+			wantErr: "unknown command",
 		},
 		{
-			desc:    "no_subcommand_args",
-			args:    []string{"send"},
-			wantErr: true,
-		},
-		{
-			desc:    "more_than_1_subcommand_args",
-			args:    []string{"send", req, req},
-			wantErr: true,
+			name:    "no_plugin_found",
+			args:    []string{"restart"},
+			wantErr: "unable to restart core plugin",
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.desc, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			out, err := testhelper.ExecuteCommand(ctx, cmd, test.args)
-			if test.wantErr != (err != nil) {
-				t.Errorf("testhelper.ExecuteCommand(ctx, %s, %v) = error %v, want error: %t", cmd.Name(), test.args, err, test.wantErr)
+			if err == nil {
+				t.Fatalf("ExecuteCommand(%s, %v) succeeded unexpectedly, want error: %s", cmd.Name(), test.args, test.wantErr)
 			}
-
-			if test.wantErr {
-				return
-			}
-
-			if handler.SeenReq != test.wantReq {
-				t.Errorf("handler.SeenReq = %s, want = %s", handler.SeenReq, test.wantReq)
-			}
-			if strings.TrimSpace(out) != test.wantResp {
-				t.Errorf("handler.SentResponse = %s, want = %s", out, test.wantResp)
+			if !strings.Contains(out, test.wantErr) {
+				t.Errorf("ExecuteCommand(%s, %v) = %q, want error containing %q", cmd.Name(), test.args, out, test.wantErr)
 			}
 		})
 	}

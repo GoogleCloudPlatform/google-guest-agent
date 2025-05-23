@@ -17,14 +17,19 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/spf13/cobra"
 )
+
+// TestOverrideKey is a context key to override cleanup behavior in tests.
+var TestOverrideKey any = "test_override"
 
 // sendlistener returns the command listener for send command.
 func sendlistener(sendCmd *cobra.Command) (command.KnownListeners, error) {
@@ -86,4 +91,12 @@ func SendCmdRunner(cmd *cobra.Command, args []string) error {
 	// duplication with `galog`.
 	cmd.Println(string(resp))
 	return nil
+}
+
+// FetchInstanceID returns the instance ID of the instance.
+func FetchInstanceID(ctx context.Context) (string, error) {
+	if ctx.Value(TestOverrideKey) != nil {
+		return "test", nil
+	}
+	return metadata.New().GetKey(ctx, "/instance/id", nil)
 }
