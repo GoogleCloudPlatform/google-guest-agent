@@ -276,9 +276,12 @@ func TestHandleMetadataChangeInputValidity(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotContinue, err := handleMetadataChange(ctx, "", nil, tc.data)
+			gotContinue, gotNoop, err := handleMetadataChange(ctx, "", nil, tc.data)
 			if (err != nil) != tc.wantError {
 				t.Fatalf("handleMetadataChange(ctx, '', nil, %+v) error = %v, want error: %t", tc.data, err, tc.wantError)
+			}
+			if !gotNoop {
+				t.Errorf("handleMetadataChange(ctx, '', nil, %+v) returned noop = %t, want true", tc.data, gotNoop)
 			}
 			if gotContinue != tc.wantContinue {
 				t.Fatalf("handleMetadataChange(ctx, '', nil, %+v) = %t, want %t", tc.data, gotContinue, tc.wantContinue)

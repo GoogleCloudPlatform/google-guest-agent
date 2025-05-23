@@ -157,7 +157,10 @@ type eventBusData struct {
 //
 // The callback should return true if it wants to renew, returning false will
 // case the callback to be unregistered/unsubscribed.
-type EventCb func(ctx context.Context, evType string, data any, evData *EventData) (bool, error)
+// The callback should return true if the event is a noop, false otherwise. This
+// is used to record metrics for the event handlers. No-op execution will skip
+// metric recording to avoid noise.
+type EventCb func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error)
 
 // length returns how many watchers are currently running.
 func (wq *watcherQueue) length() int {
@@ -440,7 +443,7 @@ func (m *Manager) Run(ctx context.Context) error {
 						Enabled:      true,
 					}
 
-					renew, err := (curr.Callback)(ctx, busData.evType, curr.Data, busData.data)
+					renew, noop, err := (curr.Callback)(ctx, busData.evType, curr.Data, busData.data)
 					if err != nil {
 						metric.ModuleStatus = acmpb.GuestAgentModuleMetric_STATUS_FAILED
 						metric.Error = fmt.Sprintf("Event %q hander %q failed with error: %v", busData.evType, curr.Name, err)
@@ -448,7 +451,11 @@ func (m *Manager) Run(ctx context.Context) error {
 					}
 					metric.EndTime = tpb.Now()
 					go func() {
-						if curr.MetricName != acmpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED {
+						// If the operation is not a noop, we should record the metric.
+						// Metric ingestion in case of no-op execution would be too noisy.
+						// For instance, event like MDS long poll would trigger every 60-70s
+						// even if the operation is a no-op.
+						if !noop && curr.MetricName != acmpb.GuestAgentModuleMetric_MODULE_UNSPECIFIED {
 							m.metrics.Record(ctx, metric)
 						}
 					}()

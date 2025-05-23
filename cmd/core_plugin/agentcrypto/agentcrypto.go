@@ -64,7 +64,7 @@ func (m *moduleHandler) setup(ctx context.Context, _ any) error {
 	// they are generated for any process that depends on the Guest Agent.
 	// Additionally, eventCallback will determine if the system's preconditions
 	// are met for.
-	_, err = m.eventCallback(ctx, metadata.LongpollEvent, mds, &events.EventData{Data: mds, Error: err})
+	_, _, err = m.eventCallback(ctx, metadata.LongpollEvent, mds, &events.EventData{Data: mds, Error: err})
 	if err != nil {
 		galog.Errorf("Failed to initialize %s module: %v", moduleID, err)
 	}
@@ -73,16 +73,16 @@ func (m *moduleHandler) setup(ctx context.Context, _ any) error {
 	return nil
 }
 
-func (m *moduleHandler) eventCallback(ctx context.Context, evType string, _ any, evData *events.EventData) (bool, error) {
+func (m *moduleHandler) eventCallback(ctx context.Context, evType string, _ any, evData *events.EventData) (bool, bool, error) {
 	galog.Debugf("Running %q callback handler for event: %q", moduleID, evType)
 
 	if evData.Error != nil {
-		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
+		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
 	mds, ok := evData.Data.(*metadata.Descriptor)
 	if !ok {
-		return true, fmt.Errorf("event's data (%T) is not a metadata descriptor: %+v", evData.Data, evData.Data)
+		return true, true, fmt.Errorf("event's data (%T) is not a metadata descriptor: %+v", evData.Data, evData.Data)
 	}
 
 	sched := scheduler.Instance()
@@ -91,17 +91,18 @@ func (m *moduleHandler) eventCallback(ctx context.Context, evType string, _ any,
 
 	if !shouldSchedule && alreadyScheduled {
 		sched.UnscheduleJob(MTLSSchedulerID)
-		return true, nil
+		return true, false, nil
 	}
 
 	if shouldSchedule && !alreadyScheduled {
 		job := New(useNativeStore(mds))
 		if err := sched.ScheduleJob(ctx, job); err != nil {
-			return true, fmt.Errorf("failed to schedule job %q: %v", MTLSSchedulerID, err)
+			return true, false, fmt.Errorf("failed to schedule job %q: %v", MTLSSchedulerID, err)
 		}
+		return true, false, nil
 	}
 
-	return true, nil
+	return true, true, nil
 }
 
 // useNativeStore returns true if the native store usage is enabled for mTLS MDS

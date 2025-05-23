@@ -70,9 +70,12 @@ func TestEventSubscriberInvalidData(t *testing.T) {
 			evData := &events.EventData{Data: tc.data}
 			ctx := context.Background()
 			evType := "evType"
-			gotContinue, err := mod.metadataSubscriber(ctx, evType, nil, evData)
+			gotContinue, gotNoop, err := mod.metadataSubscriber(ctx, evType, nil, evData)
 			if err == nil {
 				t.Errorf("metadataSubscriber(context.Background(), %q, nil, %v) succeeded, want error", evType, evData)
+			}
+			if !gotNoop {
+				t.Errorf("metadataSubscriber(context.Background(), %q, nil, %v) returned noop = false, want true", evType, evData)
 			}
 			if gotContinue {
 				t.Errorf("metadataSubscriber(context.Background(), %q, nil, %v) returned continue = true, want false", evType, evData)
@@ -286,7 +289,7 @@ func TestHandleRequest(t *testing.T) {
 			config := &cfg.Sections{}
 			mod := &diagnosticsModule{}
 
-			err = mod.handleDiagnosticsRequest(context.Background(), config, desc)
+			noop, err := mod.handleDiagnosticsRequest(context.Background(), config, desc)
 			if err != nil && tc.expectedError != nil {
 				// Error may not be wrapped.
 				xerr := errors.Unwrap(err)
@@ -297,25 +300,31 @@ func TestHandleRequest(t *testing.T) {
 					t.Errorf("handleDiagnosticsRequest(context.Background(), %v, %v) failed: %v", config, desc, err)
 				}
 			}
+			if noop {
+				t.Errorf("handleDiagnosticsRequest(context.Background(), %v, %v) returned noop = true, want false", config, desc)
+			}
 		})
 	}
 }
 
 func TestRunningControlFlag(t *testing.T) {
 	tests := []struct {
-		name string
-		flag bool
-		want bool
+		name     string
+		flag     bool
+		want     bool
+		wantNoop bool
 	}{
 		{
-			name: "running",
-			flag: true,
-			want: true,
+			name:     "running",
+			flag:     true,
+			want:     true,
+			wantNoop: true,
 		},
 		{
-			name: "not_running",
-			flag: false,
-			want: true,
+			name:     "not_running",
+			flag:     false,
+			want:     true,
+			wantNoop: false,
 		},
 	}
 
@@ -340,13 +349,17 @@ func TestRunningControlFlag(t *testing.T) {
 			mod.isDiagnosticsRunning.Store(tc.flag)
 
 			config := &cfg.Sections{}
-			err := mod.handleDiagnosticsRequest(context.Background(), config, desc)
+			noop, err := mod.handleDiagnosticsRequest(context.Background(), config, desc)
 			if err != nil {
 				t.Fatalf("handleDiagnosticsRequest(context.Background(), %v, %v) failed: %v", config, desc, err)
 			}
 
 			if got := mod.isDiagnosticsRunning.Load(); got != tc.want {
 				t.Errorf("handleDiagnosticsRequest(context.Background(), %v, %v) = %v, want %v", config, desc, got, tc.want)
+			}
+
+			if noop != tc.wantNoop {
+				t.Errorf("handleDiagnosticsRequest(context.Background(), %v, %v) returned noop = %t, want %t", config, desc, noop, tc.wantNoop)
 			}
 		})
 	}

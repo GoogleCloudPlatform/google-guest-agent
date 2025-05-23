@@ -227,6 +227,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 		want                         []error
 		wantSSHDState                string
 		wantSupplementalGroups       map[string]*accounts.Group
+		wantNoop                     bool
 	}{
 		{
 			name:                         "set_configuration_successfully",
@@ -290,6 +291,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 			want:                         nil,
 			wantSSHDState:                "Stopped",
 			wantSupplementalGroups:       map[string]*accounts.Group{},
+			wantNoop:                     true,
 		},
 	}
 
@@ -343,9 +345,12 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 				})
 			}
 
-			got := metadataSSHKeySetup(ctx, tc.config, tc.desc)
+			noop, got := metadataSSHKeySetup(ctx, tc.config, tc.desc)
 			if diff := cmp.Diff(tc.want, got, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("metadataSSHKeySetup(ctx, %v, %v) returned an unexpected diff (-want +got):\n%s", tc.config, tc.desc, diff)
+			}
+			if noop != tc.wantNoop {
+				t.Errorf("metadataSSHKeySetup(ctx, %v, %v) = noop %v, want %v", tc.config, tc.desc, noop, tc.wantNoop)
 			}
 			if diff := cmp.Diff(tc.wantSupplementalGroups, supplementalGroups); diff != "" {
 				t.Errorf("supplementalGroups has unexpected diff (-want +got):\n%s", diff)

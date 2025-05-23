@@ -246,7 +246,7 @@ func (mod *osloginModule) moduleSetup(ctx context.Context, data any) error {
 	// Do the initial first setup execution in the module initialization, it will
 	// be handled by the metadata longpoll event handler/subscriber after the
 	// first setup.
-	_, err := mod.osloginSetup(ctx, desc)
+	_, _, err := mod.osloginSetup(ctx, desc)
 	if err != nil {
 		galog.Errorf("Failed to handle first oslogin setup: %v", err)
 	}
@@ -260,33 +260,33 @@ func (mod *osloginModule) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback for the metadata event and handles the
 // platform oslogin configuration changes.
-func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
+		return false, true, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
-		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
+		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
 	return mod.osloginSetup(ctx, desc)
 }
 
 // osloginSetup is the actual oslogin's configuration entry point.
-func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descriptor) (bool, error) {
+func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descriptor) (bool, bool, error) {
 	defer func() { mod.prevMetadata = desc }()
 
 	// If the metadata has not changed, we return early.
 	// We don't need to clean up the files here because the textconfig library
 	// rolls back its previous changes before applying new ones.
 	if !mod.metadataChanged(desc) && !mod.failedConfiguration.Load() {
-		return true, nil
+		return true, true, nil
 	}
 
 	evManager := events.FetchManager()
@@ -296,19 +296,19 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 	if !desc.OSLoginEnabled() {
 		defer func() { mod.enabled.Store(false) }()
 
+		if !mod.enabled.Load() {
+			return true, true, nil
+		}
 		// If the module is disabled now but was previously enabled do the
 		// run the disabling path.
-		if mod.enabled.Load() {
-			if err := mod.disableOSLogin(ctx, evManager); err != nil {
-				// Failed to restart the necessary services.
-				mod.failedConfiguration.Store(true)
-				return true, fmt.Errorf("failed to disable OS Login: %w", err)
-			}
-			mod.failedConfiguration.Store(false)
+		if err := mod.disableOSLogin(ctx, evManager); err != nil {
+			// Failed to restart the necessary services.
+			mod.failedConfiguration.Store(true)
+			return true, false, fmt.Errorf("failed to disable OS Login: %w", err)
 		}
 
-		mod.enabled.Store(false)
-		return true, nil
+		mod.failedConfiguration.Store(false)
+		return true, false, nil
 	}
 
 	// Enable/start the ssh trusted ca pipe event handler.
@@ -376,7 +376,7 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 
 	mod.enabled.Store(!failed)
 	mod.failedConfiguration.Store(failed)
-	return true, errs
+	return true, false, errs
 }
 
 // setupOpenSSH configures the openssh daemon.

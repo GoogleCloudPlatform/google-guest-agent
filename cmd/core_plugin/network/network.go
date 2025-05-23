@@ -87,7 +87,7 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 
 	// Do the initial setup of the network interfaces. It will be handled by the
 	// metadata longpoll event handler/subscriber after the first setup.
-	if err := mod.networkSetup(ctx, config, desc); err != nil {
+	if _, err := mod.networkSetup(ctx, config, desc); err != nil {
 		galog.Errorf("Failed to handle first network setup: %v", err)
 	}
 
@@ -100,25 +100,26 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback function to be called by the event manager
 // when a metadata longpoll event is received.
-func (mod *lateModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func (mod *lateModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
+		return false, true, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
-		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
+		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
-	return true, mod.networkSetup(ctx, cfg.Retrieve(), desc)
+	noop, err := mod.networkSetup(ctx, cfg.Retrieve(), desc)
+	return true, noop, err
 }
 
 // networkSetup sets up all the network interfaces on the system.
-func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, mds *metadata.Descriptor) error {
+func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, mds *metadata.Descriptor) (bool, error) {
 	failedSetup := false
 
 	defer func() {
@@ -129,7 +130,7 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 	// If the metadata has not changed then we return early to avoid unnecessary
 	// work.
 	if !mod.metadataChanged(mds, config) && !mod.failedConfiguration {
-		return nil
+		return true, nil
 	}
 
 	var ignoreAddressMap address.IPAddressMap
@@ -143,16 +144,16 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 
 	nicConfigs, err := nic.NewConfigs(mds, config, ignoreAddressMap)
 	if err != nil {
-		return fmt.Errorf("failed to create nic configs: %v", err)
+		return false, fmt.Errorf("failed to create nic configs: %v", err)
 	}
 
 	// Forward the network configuration to the platform's network manager.
 	if err := managerSetup(ctx, nicConfigs); err != nil {
 		failedSetup = true
-		return fmt.Errorf("failed to setup network interfaces: %v", err)
+		return false, fmt.Errorf("failed to setup network interfaces: %v", err)
 	}
 
-	return nil
+	return false, nil
 }
 
 // metadataChanged returns true if the metadata has changed or if it's being

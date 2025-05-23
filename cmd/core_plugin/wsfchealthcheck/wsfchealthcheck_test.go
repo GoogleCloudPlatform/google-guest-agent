@@ -308,34 +308,54 @@ func TestMetadataSubscriber(t *testing.T) {
 	ctx := context.Background()
 
 	test := []struct {
-		desc    string
-		data    events.EventData
-		want    bool
-		wantErr bool
+		desc            string
+		data            events.EventData
+		want            bool
+		wantErr         bool
+		wantNoop        bool
+		prevDesc        *metadata.Descriptor
+		wantPrevDescNil bool
 	}{
 		{
-			desc:    "success",
-			data:    events.EventData{Data: &metadata.Descriptor{}},
-			want:    true,
-			wantErr: false,
+			desc:            "success",
+			data:            events.EventData{Data: &metadata.Descriptor{}},
+			want:            true,
+			wantErr:         false,
+			wantNoop:        false,
+			wantPrevDescNil: false,
 		},
 		{
-			desc:    "reset_error",
-			data:    events.EventData{Data: &metadata.Descriptor{}},
-			want:    true,
-			wantErr: true,
+			desc:            "reset_error",
+			data:            events.EventData{Data: &metadata.Descriptor{}},
+			want:            true,
+			wantErr:         true,
+			wantNoop:        false,
+			wantPrevDescNil: true,
 		},
 		{
-			desc:    "invalid_data",
-			data:    events.EventData{},
-			want:    false,
-			wantErr: true,
+			desc:            "invalid_data",
+			data:            events.EventData{},
+			want:            false,
+			wantErr:         true,
+			wantNoop:        true,
+			wantPrevDescNil: true,
 		},
 		{
-			desc:    "error",
-			data:    events.EventData{Error: fmt.Errorf("test error")},
-			want:    true,
-			wantErr: true,
+			desc:            "error",
+			data:            events.EventData{Error: fmt.Errorf("test error")},
+			want:            true,
+			wantErr:         true,
+			wantNoop:        true,
+			wantPrevDescNil: true,
+		},
+		{
+			desc:            "noop",
+			data:            events.EventData{Data: &metadata.Descriptor{}},
+			want:            true,
+			wantErr:         false,
+			wantNoop:        true,
+			prevDesc:        &metadata.Descriptor{},
+			wantPrevDescNil: false,
 		},
 	}
 
@@ -349,16 +369,24 @@ func TestMetadataSubscriber(t *testing.T) {
 			}
 
 			mgr := newWsfcManager(opts)
+			mgr.prevDescriptor = tc.prevDesc
 			t.Cleanup(func() {
 				mgr.agent.stop(ctx)
 			})
 
-			got, err := mgr.metadataSubscriber(ctx, tc.desc, nil, &tc.data)
+			got, noop, err := mgr.metadataSubscriber(ctx, tc.desc, nil, &tc.data)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("metadataSubscriber(ctx, %s, nil, &tc.data) error = %v, want error: %t", tc.desc, err, tc.wantErr)
 			}
+			if noop != tc.wantNoop {
+				t.Errorf("metadataSubscriber(ctx, %s, nil, &tc.data) = %t, want noop: %t", tc.desc, noop, tc.wantNoop)
+			}
 			if got != tc.want {
 				t.Errorf("metadataSubscriber(ctx, %s, nil, &tc.data) = %t, want %t", tc.desc, got, tc.want)
+			}
+
+			if tc.wantPrevDescNil != (mgr.prevDescriptor == nil) {
+				t.Errorf("metadataSubscriber(ctx, %s, nil, &tc.data) prevDescriptor = %v, want nil: %t", tc.desc, mgr.prevDescriptor, tc.wantPrevDescNil)
 			}
 
 			if tc.desc != "success" {
@@ -372,6 +400,70 @@ func TestMetadataSubscriber(t *testing.T) {
 				t.Errorf("mgr.metadataSubscriber started agent on address = %q, want %q", mgr.agent.address(), sock)
 			}
 
+		})
+	}
+}
+
+func TestHasDescriptorChanged(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	tests := []struct {
+		desc     string
+		newDesc  string
+		prevDesc string
+		want     bool
+	}{
+		{
+			desc:    "nil_prev_desc",
+			newDesc: `{"instance": {"attributes": {"enable-wsfc": "true"}}}`,
+			want:    true,
+		},
+		{
+			desc:     "same_desc",
+			newDesc:  `{"instance": {"attributes": {"enable-wsfc": "true", "wsfc-agent-port": "some-port"}}}`,
+			prevDesc: `{"instance": {"attributes": {"enable-wsfc": "true", "wsfc-agent-port": "some-port"}}}`,
+			want:     false,
+		},
+		{
+			desc:     "different_desc_addr",
+			newDesc:  `{"instance": {"attributes": {"enable-wsfc": "true", "wsfc-agent-port": "some-port"}}}`,
+			prevDesc: `{"instance": {"attributes": {"enable-wsfc": "true", "wsfc-agent-port": "some-port-2"}}}`,
+			want:     true,
+		},
+		{
+			desc:     "different_desc_wsfc_enabled",
+			newDesc:  `{"instance": {"attributes": {"enable-wsfc": "true", "wsfc-agent-port": "some-ip"}}}`,
+			prevDesc: `{"instance": {"attributes": {"enable-wsfc": "false"}}}`,
+			want:     true,
+		},
+		{
+			desc:     "different_desc_wsfc_disabled",
+			newDesc:  `{"instance": {"attributes": {"enable-wsfc": "false"}}}`,
+			prevDesc: `{"instance": {"attributes": {"enable-wsfc": "true"}}}`,
+			want:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			var prevDesc *metadata.Descriptor
+			if tc.prevDesc != "" {
+				var err error
+				prevDesc, err = metadata.UnmarshalDescriptor(tc.prevDesc)
+				if err != nil {
+					t.Fatalf("UnmarshalDescriptor(%v) failed unexpectedly with error: %v", tc.prevDesc, err)
+				}
+			}
+			newDesc, err := metadata.UnmarshalDescriptor(tc.newDesc)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%v) failed unexpectedly with error: %v", tc.newDesc, err)
+			}
+			mgr := &wsfcManager{prevDescriptor: prevDesc}
+			if got := mgr.hasDescriptorChanged(newDesc); got != tc.want {
+				t.Errorf("hasDescriptorChanged(%v) = %t, want %t", tc.newDesc, got, tc.want)
+			}
 		})
 	}
 }

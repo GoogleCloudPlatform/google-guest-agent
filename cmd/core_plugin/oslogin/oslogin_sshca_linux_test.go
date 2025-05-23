@@ -53,6 +53,7 @@ func TestInputData(t *testing.T) {
 		certificates *Certificates
 		want         bool
 		wantError    bool
+		wantNoop     bool
 	}{
 		{
 			name: "with-error",
@@ -61,6 +62,7 @@ func TestInputData(t *testing.T) {
 			},
 			want:      false,
 			wantError: true,
+			wantNoop:  true,
 		},
 		{
 			name: "with-invalid-data",
@@ -69,6 +71,7 @@ func TestInputData(t *testing.T) {
 			},
 			want:      false,
 			wantError: true,
+			wantNoop:  true,
 		},
 		{
 			name: "valid-data",
@@ -77,6 +80,7 @@ func TestInputData(t *testing.T) {
 			},
 			want:      true,
 			wantError: true,
+			wantNoop:  false,
 		},
 		{
 			name: "valid-data-with-cert",
@@ -85,6 +89,7 @@ func TestInputData(t *testing.T) {
 			},
 			want:      true,
 			wantError: false,
+			wantNoop:  false,
 			certificates: &Certificates{
 				Certs: []TrustedCert{
 					TrustedCert{
@@ -100,6 +105,7 @@ func TestInputData(t *testing.T) {
 			},
 			want:      true,
 			wantError: true,
+			wantNoop:  false,
 			certificates: &Certificates{
 				Certs: []TrustedCert{
 					TrustedCert{
@@ -120,9 +126,12 @@ func TestInputData(t *testing.T) {
 			sub := newPipeEventHandler("subscriber-id,"+tc.name, client)
 			defer sub.Close()
 
-			got, err := sub.writeFile(ctx, "evType", nil, tc.evData)
+			got, noop, err := sub.writeFile(ctx, "evType", nil, tc.evData)
 			if (err != nil) != tc.wantError {
 				t.Errorf("writeFile(ctx, 'evType', nil, %v) returned error: %v, want error: %t", tc.evData, err, tc.wantError)
+			}
+			if noop != tc.wantNoop {
+				t.Errorf("writeFile(ctx, 'evType', nil, %v) returned noop: %t, want noop: %t", tc.evData, noop, tc.wantNoop)
 			}
 			if got != tc.want {
 				t.Errorf("writeFile(ctx, 'evType', nil, %v) = %v, want %v", tc.evData, got, tc.want)

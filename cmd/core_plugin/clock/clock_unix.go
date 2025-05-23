@@ -72,7 +72,7 @@ func (mod *clockSkew) moduleSetup(ctx context.Context, data any) error {
 	// Do the initial first setup execution in the module initialization, it will
 	// be handled by the metadata longpoll event handler/subscriber after the
 	// first setup.
-	_, err := mod.clockSetup(ctx, desc)
+	_, _, err := mod.clockSetup(ctx, desc)
 	if err != nil {
 		galog.Errorf("Failed to run clock skew setup: %v", err)
 	}
@@ -85,34 +85,34 @@ func (mod *clockSkew) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback for the metadata event and handles the
 // platform clock skew's configuration changes.
-func (mod *clockSkew) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func (mod *clockSkew) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
+		return false, true, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
 		galog.Debugf("Metadata event watcher reported error: %s, skiping.", evData.Error)
-		return true, nil
+		return true, true, nil
 	}
 
 	return mod.clockSetup(ctx, desc)
 }
 
 // clockSetup is the actual clockSkew's configuration entry point.
-func (mod *clockSkew) clockSetup(ctx context.Context, desc *metadata.Descriptor) (bool, error) {
+func (mod *clockSkew) clockSetup(ctx context.Context, desc *metadata.Descriptor) (bool, bool, error) {
 	defer func() { mod.prevMetadata = desc }()
 
 	// Ignore/return metadata virtual clock's descriptor hasn't changed.
 	if !mod.metadataChanged(desc) {
-		return true, nil
+		return true, true, nil
 	}
 
-	return true, platformImpl(ctx)
+	return true, false, platformImpl(ctx)
 }
 
 // metadataChanged returns true if the metadata has changed or if it's being

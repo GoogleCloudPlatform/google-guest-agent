@@ -80,34 +80,40 @@ func TestSetupError(t *testing.T) {
 		disableErr         error
 		enableErr          error
 		startErr           error
+		wantNoop           bool
 	}{
 		{
 			name:               "event_data_error",
 			event:              &events.EventData{Error: fmt.Errorf("test error")},
 			wantCfgFileEnabled: false,
+			wantNoop:           true,
 		},
 		{
 			name:               "invalid_event_data",
 			event:              &events.EventData{Data: "invalid"},
 			wantCfgFileEnabled: false,
+			wantNoop:           true,
 		},
 		{
 			name:               "enable_core_plugin_disable_error",
 			event:              &events.EventData{Data: mdsEnable},
 			disableErr:         fmt.Errorf("test error"),
 			wantCfgFileEnabled: false,
+			wantNoop:           false,
 		},
 		{
 			name:               "enable_core_plugin_stop_error",
 			event:              &events.EventData{Data: mdsEnable},
 			stopErr:            fmt.Errorf("test error"),
 			wantCfgFileEnabled: false,
+			wantNoop:           false,
 		},
 		{
 			name:               "enable_core_plugin_restart_error",
 			event:              &events.EventData{Data: mdsEnable},
 			restartErr:         fmt.Errorf("test error"),
 			wantCfgFileEnabled: true,
+			wantNoop:           false,
 		},
 		{
 			name:               "disable_core_plugin_stop_error",
@@ -115,6 +121,7 @@ func TestSetupError(t *testing.T) {
 			stopErr:            fmt.Errorf("test error"),
 			wantCfgFileEnabled: false,
 			prevEnabled:        true,
+			wantNoop:           false,
 		},
 		{
 			name:               "disable_core_plugin_enable_error",
@@ -122,6 +129,7 @@ func TestSetupError(t *testing.T) {
 			enableErr:          fmt.Errorf("test error"),
 			wantCfgFileEnabled: false,
 			prevEnabled:        true,
+			wantNoop:           false,
 		},
 		{
 			name:               "disable_core_plugin_start_error",
@@ -129,6 +137,7 @@ func TestSetupError(t *testing.T) {
 			startErr:           fmt.Errorf("test error"),
 			wantCfgFileEnabled: false,
 			prevEnabled:        true,
+			wantNoop:           false,
 		},
 	}
 
@@ -141,9 +150,12 @@ func TestSetupError(t *testing.T) {
 			cfgFile := filepath.Join(t.TempDir(), "core-plugin-enabled")
 			config.CorePluginEnabledConfigFile = cfgFile
 
-			got, err := watcher.Setup(ctx, "LongpollEvent", nil, test.event)
+			got, noop, err := watcher.Setup(ctx, "LongpollEvent", nil, test.event)
 			if err == nil {
 				t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned no error, want error", test.event)
+			}
+			if noop != test.wantNoop {
+				t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned noop: %t, want: %t", test.event, noop, test.wantNoop)
 			}
 			if !got {
 				t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned false, want: true", test.event)
@@ -173,9 +185,12 @@ func TestSetup(t *testing.T) {
 
 	// Should be no-op if the guest agent binary does not exist.
 	watcher := Manager{}
-	got, err := watcher.Setup(ctx, "LongpollEvent", nil, &events.EventData{Data: mdsEnable})
+	got, noop, err := watcher.Setup(ctx, "LongpollEvent", nil, &events.EventData{Data: mdsEnable})
 	if err != nil {
 		t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned error: %v, want: nil", mdsEnable, err)
+	}
+	if !noop {
+		t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned noop: %t, want: false", mdsEnable, noop)
 	}
 	if !got {
 		t.Errorf("Setup(ctx, LongpollEvent, nil, %+v) returned false, want: true", mdsEnable)
@@ -278,6 +293,7 @@ func TestEnableDisableAgent(t *testing.T) {
 		wantServices          []string
 		wantCorePluginEnabled bool
 		prevCorePluginEnabled bool
+		wantNoop              bool
 	}{
 		{
 			name:                  "enable_core_plugin",
@@ -285,11 +301,13 @@ func TestEnableDisableAgent(t *testing.T) {
 			wantServices:          wantEnableServices,
 			wantCorePluginEnabled: true,
 			prevCorePluginEnabled: false,
+			wantNoop:              false,
 		},
 		{
 			name:                  "no_change_core_plugin_enabled",
 			wantCorePluginEnabled: true,
 			prevCorePluginEnabled: true,
+			wantNoop:              true,
 		},
 		{
 			name:                  "disable_core_plugin",
@@ -297,11 +315,13 @@ func TestEnableDisableAgent(t *testing.T) {
 			wantServices:          wantDisableServices,
 			wantCorePluginEnabled: false,
 			prevCorePluginEnabled: true,
+			wantNoop:              false,
 		},
 		{
 			name:                  "no_change_core_plugin_disabled",
 			wantCorePluginEnabled: false,
 			prevCorePluginEnabled: false,
+			wantNoop:              true,
 		},
 	}
 
@@ -312,8 +332,12 @@ func TestEnableDisableAgent(t *testing.T) {
 		testRunner := fakeDaemonClient{}
 		setTestDaemonClient(t, &testRunner)
 
-		if err := watcher.enableDisableAgent(ctx, test.wantCorePluginEnabled); err != nil {
+		gotNoop, err := watcher.enableDisableAgent(ctx, test.wantCorePluginEnabled)
+		if err != nil {
 			t.Errorf("enableDisableAgent(ctx, %t) returned error for %q: %v, want: nil", test.wantCorePluginEnabled, test.name, err)
+		}
+		if gotNoop != test.wantNoop {
+			t.Errorf("enableDisableAgent(ctx, %t) returned noop: %t, want: %t", test.wantCorePluginEnabled, gotNoop, test.wantNoop)
 		}
 
 		if diff := cmp.Diff(test.wantCmds, testRunner.commandRun); diff != "" {

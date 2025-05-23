@@ -31,8 +31,8 @@ import (
 )
 
 func TestIsSubscribed(t *testing.T) {
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
-		return true, nil
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
+		return true, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 	evType := "test-event"
 
@@ -85,8 +85,8 @@ func TestUnsubscribeSubscription(t *testing.T) {
 	event := "test-watcher,test-event"
 	subscriber1 := "test-subscriber1"
 	subscriber2 := "test-subscriber2"
-	cb := func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
-		return false, nil
+	cb := func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
+		return false, true, nil
 	}
 
 	subscribers := []string{subscriber1, subscriber2}
@@ -177,14 +177,14 @@ func TestRun(t *testing.T) {
 
 	counter := 0
 	counter2 := 0
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		counter++
-		return true, nil
+		return true, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
-	sub2 := EventSubscriber{"test-subscriber2", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub2 := EventSubscriber{"test-subscriber2", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		counter2++
-		return true, fmt.Errorf("test error")
+		return true, false, fmt.Errorf("test error")
 	}, acpb.GuestAgentModuleMetric_NETWORK_INITIALIZATION}
 
 	eventManager.Subscribe("test-watcher,test-event", sub)
@@ -269,12 +269,12 @@ func TestUnsubscribe(t *testing.T) {
 	}
 
 	counter := 0
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		if counter == unsubscribeAt {
-			return false, nil
+			return false, false, nil
 		}
 		counter++
-		return true, nil
+		return true, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe("test-watcher,test-event", sub)
@@ -307,9 +307,9 @@ func TestCancelBeforeCallbacks(t *testing.T) {
 		t.Fatalf("eventManager.AddWatcher(ctx, %+v) failed unexpectedly with error: %v", watcher, err)
 	}
 
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		t.Errorf("Expected to have canceled before calling callback")
-		return true, nil
+		return true, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe("test-watcher,test-event", sub)
@@ -362,8 +362,8 @@ func TestCancelAfterCallbacks(t *testing.T) {
 		t.Fatalf("eventManager.AddWatcher(ctx, %+v) failed unexpectedly with error: %v", watcher, err)
 	}
 
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
-		return true, nil
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
+		return true, true, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe("test-watcher,test-event", sub)
@@ -464,13 +464,13 @@ func TestCancelCallbacksAndWatchers(t *testing.T) {
 				t.Fatalf("eventManager.AddWatcher(ctx, %+v) failed unexpectedly with error: %v", watcher, err)
 			}
 
-			sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+			sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 				time.Sleep(1 * time.Millisecond)
 				if cancelSubscriberAfter == 0 {
-					return false, nil
+					return false, false, nil
 				}
 				cancelSubscriberAfter--
-				return true, nil
+				return true, false, nil
 			}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 			eventManager.Subscribe("test-watcher,test-event", sub)
@@ -503,17 +503,17 @@ func TestMultipleEvents(t *testing.T) {
 	}
 
 	var hitFirstEvent bool
-	sub1 := EventSubscriber{"test-subscriber1", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub1 := EventSubscriber{"test-subscriber1", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		hitFirstEvent = true
-		return false, nil
+		return false, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe(firstEvent, sub1)
 
 	var hitSecondEvent bool
-	sub2 := EventSubscriber{"test-subscriber2", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub2 := EventSubscriber{"test-subscriber2", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		hitSecondEvent = true
-		return false, nil
+		return false, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe(secondEvent, sub2)
@@ -566,21 +566,21 @@ func TestAddWatcherAfterRun(t *testing.T) {
 		t.Fatalf("eventManager.AddWatcher(ctx, watcher1) failed unexpectedly with error: %v", err)
 	}
 
-	sub1 := EventSubscriber{"test-subscriber1", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub1 := EventSubscriber{"test-subscriber1", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		if err := eventManager.AddWatcher(ctx, secondWatcher); err != nil {
 			t.Fatalf("eventManager.AddWatcher(ctx, %+v) failed unexpectedly with error: %v", secondWatcher, err)
 		}
 		firstWatcher.shouldRenew.Store(false)
-		return false, nil
+		return false, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe(firstWatcher.eventID(), sub1)
 
 	var hitSecondEvent bool
 
-	sub2 := EventSubscriber{"test-subscriber2", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub2 := EventSubscriber{"test-subscriber2", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		hitSecondEvent = true
-		return false, nil
+		return false, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe(secondWatcher.eventID(), sub2)
@@ -713,9 +713,9 @@ func TestRemoveWatcherBeforeCallbacks(t *testing.T) {
 		t.Fatalf("eventManager.AddWatcher(ctx, %+v) failed unexpectedly with error: %v", watcher, err)
 	}
 
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		t.Errorf("Expected to have canceled before calling callback")
-		return false, nil
+		return false, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe("test-watcher,test-event", sub)
@@ -750,9 +750,9 @@ func TestRemoveWatcherFromCallback(t *testing.T) {
 		t.Fatalf("eventManager.AddWatcher(ctx, %+v) failed unexpectedly with error: %v", watcher, err)
 	}
 
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		eventManager.RemoveWatcher(ctx, watcher)
-		return true, nil
+		return true, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe(watcher.eventID(), sub)
@@ -803,12 +803,12 @@ func TestCrossWatcherRemovalFromCallback(t *testing.T) {
 
 	removed := false
 
-	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, error) {
+	sub := EventSubscriber{"test-subscriber", nil, func(ctx context.Context, evType string, data any, evData *EventData) (bool, bool, error) {
 		if !removed {
 			eventManager.RemoveWatcher(ctx, firstWatcher)
 			eventManager.RemoveWatcher(ctx, secondWatcher)
 			removed = true
-			return true, nil
+			return true, false, nil
 		}
 
 		queueLen := eventManager.queue.length()
@@ -818,7 +818,7 @@ func TestCrossWatcherRemovalFromCallback(t *testing.T) {
 
 		eventManager.RemoveWatcher(ctx, thirdWatcher)
 
-		return false, nil
+		return false, false, nil
 	}, acpb.GuestAgentModuleMetric_PLAT_SCRIPT_INITIALIZATION}
 
 	eventManager.Subscribe(thirdWatcher.eventID(), sub)

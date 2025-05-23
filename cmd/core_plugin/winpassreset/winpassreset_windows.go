@@ -80,21 +80,21 @@ func moduleSetup(ctx context.Context, data any) error {
 }
 
 // eventCallback is the callback event handler for the winpass module.
-func eventCallback(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func eventCallback(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
+		return false, true, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
-		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
+		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
-	return true, setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys())
+	return true, false, setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys())
 }
 
 // setupAccounts sets up accounts in the registry and creates and updates them

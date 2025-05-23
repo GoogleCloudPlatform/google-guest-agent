@@ -138,18 +138,21 @@ func TestEventCallback(t *testing.T) {
 		opts       winpassTestOpts
 		expectBool bool
 		wantErr    bool
+		wantNoop   bool
 	}{
 		{
 			name:       "invalid_metadata",
 			evData:     &events.EventData{Data: "invalid-metadata", Error: nil},
 			expectBool: false,
 			wantErr:    true,
+			wantNoop:   true,
 		},
 		{
 			name:       "event_error",
 			evData:     &events.EventData{Data: desc, Error: fmt.Errorf("event error")},
 			expectBool: true,
 			wantErr:    true,
+			wantNoop:   true,
 		},
 		{
 			name:       "setup_accounts_error",
@@ -157,6 +160,7 @@ func TestEventCallback(t *testing.T) {
 			opts:       winpassTestOpts{overrideRegRead: true, regReadErr: true},
 			expectBool: true,
 			wantErr:    true,
+			wantNoop:   false,
 		},
 		{
 			name:   "success",
@@ -170,6 +174,7 @@ func TestEventCallback(t *testing.T) {
 			},
 			expectBool: true,
 			wantErr:    false,
+			wantNoop:   false,
 		},
 	}
 
@@ -177,9 +182,12 @@ func TestEventCallback(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			winpassTestSetup(t, test.opts)
 
-			got, err := eventCallback(ctx, "metadata_changed", nil, test.evData)
+			got, noop, err := eventCallback(ctx, "metadata_changed", nil, test.evData)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("eventCallback(ctx, %q, '', %v) = %v, want error: %t", "metadata_changed", test.evData, err, test.wantErr)
+			}
+			if noop != test.wantNoop {
+				t.Errorf("eventCallback(ctx, %q, '', %v) = %t, want noop: %t", "metadata_changed", test.evData, noop, test.wantNoop)
 			}
 			if got != test.expectBool {
 				t.Errorf("eventCallback(ctx, %q, '', %v) = %t, want %t", "metadata_changed", test.evData, got, test.expectBool)

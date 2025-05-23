@@ -79,6 +79,9 @@ func (wm *wsfcManager) teardown(ctx context.Context) {
 type wsfcManager struct {
 	// agent is the health check agent implementation reference.
 	agent healthCheck
+	// prevDescriptor is the previous metadata descriptor that was passed to the
+	// agent.
+	prevDescriptor *metadata.Descriptor
 }
 
 // isWsfcEnabled returns true if its set in instance config file or instance
@@ -144,7 +147,7 @@ func (wm *wsfcManager) reset(ctx context.Context, desc *metadata.Descriptor) err
 	// running agent.
 	if !newState || newAddr != wm.agent.address() {
 		if err := wm.agent.stop(ctx); err != nil {
-			return fmt.Errorf("failed to stop agent: %w", err)
+			return fmt.Errorf("failed to stop wsfc agent: %w", err)
 		}
 	}
 
@@ -166,10 +169,10 @@ func (wm *wsfcManager) reset(ctx context.Context, desc *metadata.Descriptor) err
 
 // metadataSubscriber is the callback function for MDS events, any new MDS
 // response will trigger it. Always return true to continue listening.
-func (wm *wsfcManager) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func (wm *wsfcManager) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	// There could be transient errors with MDS, just log and continue.
 	if evData.Error != nil {
-		return true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
+		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
 	desc, ok := evData.Data.(*metadata.Descriptor)
@@ -177,10 +180,36 @@ func (wm *wsfcManager) metadataSubscriber(ctx context.Context, evType string, da
 	// don't renew the subscriber.
 	if !ok {
 		galog.Errorf("Metadata event watcher reported data type %T, expected *metadata.Descriptor", evData.Data)
-		return false, fmt.Errorf("event's data (%T) is not a metadata descriptor: %+v", evData.Data, evData.Data)
+		return false, true, fmt.Errorf("event's data (%T) is not a metadata descriptor: %+v", evData.Data, evData.Data)
 	}
 
-	return true, wm.reset(ctx, desc)
+	if !wm.hasDescriptorChanged(desc) {
+		return true, true, nil
+	}
+
+	if err := wm.reset(ctx, desc); err != nil {
+		return true, false, fmt.Errorf("failed to reset wsfc agent: %w", err)
+	}
+
+	// Update the previous metadata descriptor to the current one on success so
+	// it retries on failure.
+	wm.prevDescriptor = desc
+	return true, false, nil
+}
+
+// hasDescriptorChanged returns true if the metadata descriptor has changed.
+func (wm *wsfcManager) hasDescriptorChanged(desc *metadata.Descriptor) bool {
+	if wm.prevDescriptor == nil {
+		return true
+	}
+	if isWsfcEnabled(desc) != isWsfcEnabled(wm.prevDescriptor) {
+		return true
+	}
+	if listenerAddr(desc) != listenerAddr(wm.prevDescriptor) {
+		return true
+	}
+
+	return false
 }
 
 // checkIPExist returns 1 if IP exists on any of the interfaces otherwise 0.

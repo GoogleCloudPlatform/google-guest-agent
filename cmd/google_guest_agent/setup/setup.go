@@ -123,28 +123,28 @@ func coreReady(ctx context.Context, opts Config) {
 }
 
 // handlePluginEvent handles the event received from plugin watcher.
-func handlePluginEvent(ctx context.Context, evType string, opts any, evData *events.EventData) (bool, error) {
+func handlePluginEvent(ctx context.Context, evType string, opts any, evData *events.EventData) (bool, bool, error) {
 	if evType != manager.EventID {
-		return true, fmt.Errorf("unexpected event type: %s", evType)
+		return true, true, fmt.Errorf("unexpected event type: %s", evType)
 	}
 
 	if evData.Error != nil {
 		// This is expected to happen until core plugin is initialized, just log and
 		// return true to keep the watcher running.
 		galog.Debugf("Still waiting for plugin status, got error: %v", evData.Error)
-		return true, nil
+		return true, true, nil
 	}
 
 	c, ok := opts.(Config)
 	if !ok {
-		return true, fmt.Errorf("unexpected data type: %T, opts expected to be of type %T", opts, Config{})
+		return true, false, fmt.Errorf("unexpected data type: %T, opts expected to be of type %T", opts, Config{})
 	}
 
 	// Nil error means we detected the event successfully and can
 	// run components waiting on core plugin initialization.
 	coreReady(ctx, c)
 	// We received the required event, no need to continue listening.
-	return false, nil
+	return false, false, nil
 }
 
 // Config contains options for Guest Agent setup.

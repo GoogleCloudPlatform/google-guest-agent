@@ -150,23 +150,26 @@ func TestInitCloudLogging(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		data any
-		mds  any
-		want bool
+		name     string
+		data     any
+		mds      any
+		want     bool
+		wantNoop bool
 	}{
 		{
-			name: "invalid-event-data-type",
-			data: "invalid-data-we-dont-want-string",
-			want: true,
+			name:     "invalid-event-data-type",
+			data:     "invalid-data-we-dont-want-string",
+			want:     true,
+			wantNoop: true,
 		},
 		{
 			name: "invalid-mds",
 			data: &Options{
 				cloudLoggingBackend: be,
 			},
-			mds:  "invalid-mds-data-type-we-dont-want-string",
-			want: true,
+			mds:      "invalid-mds-data-type-we-dont-want-string",
+			want:     true,
+			wantNoop: true,
 		},
 		{
 			name: "success",
@@ -176,17 +179,21 @@ func TestInitCloudLogging(t *testing.T) {
 				cloudLoggingWithoutAuthentication: true,
 				cloudLoggingBackend:               be,
 			},
-			mds:  mds,
-			want: false,
+			wantNoop: false,
+			mds:      mds,
+			want:     false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			evData := &events.EventData{Data: tc.mds}
-			got, err := initCloudLogging(ctx, "eventType", tc.data, evData)
+			got, gotNoop, err := initCloudLogging(ctx, "eventType", tc.data, evData)
 			if (err != nil) != tc.want {
 				t.Errorf("initCloudLogging() returned error: %v, want error: %t", err, tc.want)
+			}
+			if gotNoop != tc.wantNoop {
+				t.Errorf("initCloudLogging() returned noop: %t, want noop: %t", gotNoop, tc.wantNoop)
 			}
 			if got != tc.want {
 				t.Errorf("initCloudLogging() = %v, want %v", got, tc.want)

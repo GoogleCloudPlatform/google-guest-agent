@@ -84,7 +84,8 @@ func moduleSetup(ctx context.Context, data any) error {
 		return fmt.Errorf("expected metadata descriptor data in moduleSetup call")
 	}
 
-	for _, err := range metadataSSHKeySetup(ctx, cfg.Retrieve(), desc) {
+	_, errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
+	for _, err := range errs {
 		galog.Errorf("error setting initial metadatasshkey configuration: %v", err)
 	}
 
@@ -94,35 +95,35 @@ func moduleSetup(ctx context.Context, data any) error {
 	return nil
 }
 
-func handleMetadataChange(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func handleMetadataChange(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	if !ok {
-		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
+		return false, true, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	if evData.Error != nil {
-		return true, fmt.Errorf("metadata event watcher reported error: %v, skiping ssh key setup", evData.Error)
+		return true, true, fmt.Errorf("metadata event watcher reported error: %v, skiping ssh key setup", evData.Error)
 	}
 
-	errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
-	return true, errors.Join(errs...)
+	noop, errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
+	return true, noop, errors.Join(errs...)
 }
 
 // metadataSSHKeySetup performs necessary configuration to setup metadata ssh
 // key system requirements, create/remove users, and write ssh keys as
 // necessary.
-func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metadata.Descriptor) []error {
+func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metadata.Descriptor) (bool, []error) {
 	metadataSSHKeyMu.Lock()
 	defer metadataSSHKeyMu.Unlock()
 	if !metadataChanged(config, desc, lastUserKeyMap, lastEnabled) {
 		galog.V(2).Debugf("Metadata ssh key has no difference from enablement or keys on disk, nothing to do.")
-		return nil
+		return true, nil
 	}
 	enabled := enableMetadataSSHKey(config, desc)
 	lastEnabled = enabled
 	if !enabled {
 		galog.V(2).Infof("Accounts management is disabled or oslogin is enabled, disabling metadata ssh key.")
-		return deprovisionUnusedUsers(ctx, config, make(userKeyMap))
+		return false, deprovisionUnusedUsers(ctx, config, make(userKeyMap))
 	}
 	var errs []error
 	if !onetimePlatformSetupFinished.Load() {
@@ -131,7 +132,7 @@ func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metada
 		}
 	}
 	errs = append(errs, addSystemUsers(ctx, config, desc)...)
-	return errs
+	return false, errs
 }
 
 // addSystemUsers will create users on the local system and add keys from

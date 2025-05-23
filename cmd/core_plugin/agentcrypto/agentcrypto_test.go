@@ -473,11 +473,13 @@ func TestCallbackHandlerError(t *testing.T) {
 
 	for _, tc := range tests {
 		m := &moduleHandler{}
-		got, err := m.eventCallback(ctx, "test_event", nil, tc.evData)
+		got, noop, err := m.eventCallback(ctx, "test_event", nil, tc.evData)
 		if err == nil {
 			t.Errorf("callbackHandler(test_event, nil, %v) returned error: [%v], want error: %t", tc.evData, err, true)
 		}
-
+		if !noop {
+			t.Errorf("callbackHandler(test_event, nil, %v) returned noop: %t, want noop: %t", tc.evData, noop, false)
+		}
 		if !got {
 			t.Errorf("callbackHandler(test_event, nil, %v) = continue: %t, want: %t", tc.evData, got, true)
 		}
@@ -488,7 +490,6 @@ func TestCallbackHandler(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
 	}
-
 	ctx := context.Background()
 
 	tests := []struct {
@@ -511,9 +512,12 @@ func TestCallbackHandler(t *testing.T) {
 	// Run tests in sequence for validating the job scheduling.
 	for _, tc := range tests {
 		m := &moduleHandler{metadata: &MDSClient{}}
-		got, err := m.eventCallback(ctx, "test_event", nil, tc.ev)
+		got, noop, err := m.eventCallback(ctx, "test_event", nil, tc.ev)
 		if err != nil {
 			t.Errorf("callbackHandler(test_event, nil, %v) returned error: [%v], want error: %t", tc.ev, err, false)
+		}
+		if noop {
+			t.Errorf("callbackHandler(test_event, nil, %v) returned noop: %t, want noop: %t", tc.ev, noop, false)
 		}
 		if !got {
 			t.Errorf("callbackHandler(test_event, nil, %v) = continue: %t, want: %t", tc.ev, got, false)

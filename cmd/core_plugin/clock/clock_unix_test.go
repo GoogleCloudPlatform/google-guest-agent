@@ -137,6 +137,7 @@ func TestMetadataSubscriber(t *testing.T) {
 		prevDesc  *metadata.Descriptor
 		err       error
 		wantError bool
+		wantNoop  bool
 		want      bool
 	}{
 		{
@@ -144,6 +145,7 @@ func TestMetadataSubscriber(t *testing.T) {
 			data:      desc,
 			want:      true,
 			wantError: true,
+			wantNoop:  false,
 		},
 		{
 			name:      "empty-mds-with-error",
@@ -151,17 +153,20 @@ func TestMetadataSubscriber(t *testing.T) {
 			err:       errors.New("error"),
 			want:      true,
 			wantError: false,
+			wantNoop:  true,
 		},
 		{
 			name:      "nil-data",
 			data:      nil,
 			want:      false,
+			wantNoop:  true,
 			wantError: true,
 		},
 		{
 			name:      "invalid-data",
 			data:      &clockSkew{},
 			want:      false,
+			wantNoop:  true,
 			wantError: true,
 		},
 		{
@@ -170,6 +175,7 @@ func TestMetadataSubscriber(t *testing.T) {
 			prevDesc:  descWithToken,
 			want:      true,
 			wantError: false,
+			wantNoop:  true,
 		},
 	}
 
@@ -177,9 +183,12 @@ func TestMetadataSubscriber(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mod := &clockSkew{prevMetadata: tc.prevDesc}
-			res, err := mod.metadataSubscriber(context.Background(), "evType", nil, &events.EventData{Data: tc.data, Error: tc.err})
+			res, noop, err := mod.metadataSubscriber(context.Background(), "evType", nil, &events.EventData{Data: tc.data, Error: tc.err})
 			if res != tc.want {
 				t.Errorf("metadataSubscriber() returned %v, want %v", res, tc.want)
+			}
+			if noop != tc.wantNoop {
+				t.Errorf("metadataSubscriber() returned noop %t, want false", noop)
 			}
 			if (err != nil) != tc.wantError {
 				t.Errorf("metadataSubscriber() returned error %v, want error: %t", err, tc.wantError)

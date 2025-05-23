@@ -85,7 +85,7 @@ func (mod *diagnosticsModule) moduleSetup(ctx context.Context, data any) error {
 	// Do the initial first setup execution in the module initialization, it will
 	// be handled by the metadata longpoll event handler/subscriber after the
 	// first setup.
-	if err := mod.handleDiagnosticsRequest(ctx, cfg.Retrieve(), desc); err != nil {
+	if _, err := mod.handleDiagnosticsRequest(ctx, cfg.Retrieve(), desc); err != nil {
 		galog.Errorf("Failed to handle diagnostics request on setup: %v", err)
 	}
 
@@ -97,22 +97,23 @@ func (mod *diagnosticsModule) moduleSetup(ctx context.Context, data any) error {
 
 // metadataSubscriber is the callback for the metadata event and handles the
 // diagnostics configuration changes or execution.
-func (mod *diagnosticsModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func (mod *diagnosticsModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
 	if !ok {
-		return false, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
+		return false, true, fmt.Errorf("event's data is not a metadata descriptor: %+v", evData.Data)
 	}
 
 	// If the event manager is passing/reporting an error we log it and keep
 	// renewing the handler.
 	if evData.Error != nil {
 		galog.Debugf("Metadata event watcher reported error: %s, skiping.", evData.Error)
-		return true, nil
+		return true, true, nil
 	}
 
-	return true, mod.handleDiagnosticsRequest(ctx, cfg.Retrieve(), desc)
+	noop, err := mod.handleDiagnosticsRequest(ctx, cfg.Retrieve(), desc)
+	return true, noop, err
 }
 
 // diagnosticsEntry is the structure of the diagnostics metadata entry.
@@ -126,19 +127,19 @@ type diagnosticsEntry struct {
 }
 
 // handleDiagnosticsRequest is the actual diagnostics configuration entry point.
-func (mod *diagnosticsModule) handleDiagnosticsRequest(ctx context.Context, config *cfg.Sections, desc *metadata.Descriptor) error {
+func (mod *diagnosticsModule) handleDiagnosticsRequest(ctx context.Context, config *cfg.Sections, desc *metadata.Descriptor) (bool, error) {
 	defer func() { mod.prevMetadata = desc }()
 
 	// If there is an existing job running, reject the request.
 	if mod.isDiagnosticsRunning.Load() {
 		galog.Infof("Diagnostics: reject the request, as an existing process is collecting logs from the system")
-		return nil
+		return true, nil
 	}
 
 	// Ignore/return if diagnostics configuration is disabled or the
 	// metadata flags haven't changed.
 	if !mod.diagnosticsEnabled(desc, config) || !mod.metadataChanged(desc) {
-		return nil
+		return true, nil
 	}
 
 	galog.Infof("Diagnostics: logs export requested.")
@@ -146,30 +147,30 @@ func (mod *diagnosticsModule) handleDiagnosticsRequest(ctx context.Context, conf
 	// Fetch from the registry the list of the existing/seen request entries.
 	regEntries, err := reg.ReadMultiString(diagnosticsRegKey, diagnosticsRegKey)
 	if err != nil && !errors.Is(err, registry.ErrNotExist) {
-		return fmt.Errorf("failed to read diagnostics registry key: %v", err)
+		return false, fmt.Errorf("failed to read diagnostics registry key: %v", err)
 	}
 
 	// Check if we've dealt with this entry already.
 	metadataNewEntry := desc.Instance().Attributes().Diagnostics()
 	if slices.Contains(regEntries, metadataNewEntry) {
 		galog.Debugf("Diagnostics: request already seen %q, ignoring.", metadataNewEntry)
-		return nil
+		return false, nil
 	}
 
 	// Unmarshall the new entry to extract the request details.
 	var entry diagnosticsEntry
 	if err := json.Unmarshal([]byte(metadataNewEntry), &entry); err != nil {
-		return fmt.Errorf("failed to unmarshal diagnostics entry: %w", err)
+		return false, fmt.Errorf("failed to unmarshal diagnostics entry: %w", err)
 	}
 
 	expired, err := ssh.CheckExpired(entry.ExpireOn)
 	if err != nil {
-		return fmt.Errorf("failed to check diagnostics request expiration(%v): %w", entry, err)
+		return false, fmt.Errorf("failed to check diagnostics request expiration(%v): %w", entry, err)
 	}
 
 	// Has the request already expired or is it malformed (no signed URL)?
 	if entry.SignedURL == "" || expired {
-		return fmt.Errorf("diagnostics: request %v is malformed or expired, ignoring", metadataNewEntry)
+		return false, fmt.Errorf("diagnostics: request %v is malformed or expired, ignoring", metadataNewEntry)
 	}
 
 	cmd := []string{diagnosticsCmd, "-signedUrl", entry.SignedURL}
@@ -198,10 +199,10 @@ func (mod *diagnosticsModule) handleDiagnosticsRequest(ctx context.Context, conf
 
 	regEntries = append(regEntries, metadataNewEntry)
 	if err := reg.WriteMultiString(reg.GCEKeyBase, diagnosticsRegKey, regEntries); err != nil {
-		return fmt.Errorf("failed to write diagnostics registry key: %v", err)
+		return false, fmt.Errorf("failed to write diagnostics registry key: %v", err)
 	}
 
-	return nil
+	return false, nil
 }
 
 // metadataChanged returns true if the diagnostics metadata flags have changed.

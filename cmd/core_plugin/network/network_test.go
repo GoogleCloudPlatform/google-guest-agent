@@ -147,12 +147,14 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 		withError bool
 		want      bool
 		wantError bool
+		wantNoop  bool
 	}{
 		{
 			name:      "invalid-mds",
 			mds:       context.Background(),
 			want:      false,
 			wantError: true,
+			wantNoop:  true,
 		},
 		{
 			name:      "valid-mds-with-error",
@@ -160,6 +162,7 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 			withError: true,
 			want:      true,
 			wantError: true,
+			wantNoop:  true,
 		},
 		{
 			name:      "valid-mds-changed",
@@ -167,6 +170,7 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 			withError: false,
 			want:      true,
 			wantError: false,
+			wantNoop:  false,
 		},
 		{
 			name:      "valid-no-mds-changed",
@@ -175,6 +179,7 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 			withError: false,
 			want:      true,
 			wantError: false,
+			wantNoop:  true,
 		},
 	}
 
@@ -204,11 +209,13 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 				}
 			}
 
-			got, err := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata)
+			got, noop, err := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata)
 			if (err != nil) != tc.wantError {
 				t.Errorf("metadataSubscriber() returned error: %v, want error: %t", err, tc.wantError)
 			}
-			t.Logf("Error: %v", err)
+			if noop != tc.wantNoop {
+				t.Errorf("metadataSubscriber() returned noop = %t, want %t", noop, tc.wantNoop)
+			}
 			if got != tc.want {
 				t.Errorf("metadataSubscriber() = %v, want %v", got, tc.want)
 			}
@@ -229,9 +236,12 @@ func TestMetadataSubscriberSuccess(t *testing.T) {
 	evdata := &events.EventData{Data: mds}
 
 	mod := &lateModule{prevMetadata: mds}
-	got, err := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata)
+	got, noop, err := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata)
 	if err != nil {
 		t.Errorf("metadataSubscriber() returned an unexpected error: %v, want nil", err)
+	}
+	if !noop {
+		t.Errorf("metadataSubscriber() returned noop = %t, want true", noop)
 	}
 	if !got {
 		t.Errorf("metadataSubscriber() = false, want true")

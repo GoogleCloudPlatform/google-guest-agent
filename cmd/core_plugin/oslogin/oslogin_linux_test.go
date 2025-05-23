@@ -30,6 +30,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
@@ -147,9 +148,12 @@ func TestMetadataSubscriberInputValidity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mod := &osloginModule{}
 			evData := &events.EventData{Data: tc.desc, Error: tc.err}
-			got, err := mod.metadataSubscriber(ctx, "evType", nil, evData)
+			got, noop, err := mod.metadataSubscriber(ctx, "evType", nil, evData)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("metadataSubscriber() = %v, want error: %t", err, tc.wantErr)
+			}
+			if !noop {
+				t.Errorf("metadataSubscriber() = %v, want: %t", noop, true)
 			}
 			if got != tc.want {
 				t.Errorf("metadataSubscriber() = %v, want %v", got, tc.want)
@@ -522,6 +526,39 @@ func TestMetadataChanged(t *testing.T) {
 	}
 }
 
+func TestOSLoginSetupError(t *testing.T) {
+	mod := &osloginModule{}
+	mod.enabled.Store(true)
+	mod.pipeEventHandler = &PipeEventHandler{}
+	mod.pipeEventWatcher = &pipewatcher.Handle{}
+	disableMDSJSON := `
+	{
+		"instance":  {
+			"attributes": {
+				"enable-oslogin": "false"
+			}
+		}
+	}`
+	disableDesc, err := metadata.UnmarshalDescriptor(disableMDSJSON)
+	if err != nil {
+		t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", disableMDSJSON, err)
+	}
+
+	got, noop, err := mod.osloginSetup(context.Background(), disableDesc)
+	if err == nil {
+		t.Errorf("osloginSetup(ctx, %v) = %v, want error", disableDesc, got)
+	}
+	if noop {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want noop to be false", disableDesc, noop)
+	}
+	if !got {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want %t", disableDesc, got, true)
+	}
+	if !mod.failedConfiguration.Load() {
+		t.Errorf("mod.failedConfiguration.Load() = %t, want %t", mod.failedConfiguration.Load(), true)
+	}
+}
+
 func TestEnableDisable(t *testing.T) {
 	// Initialize cfg.
 	if err := cfg.Load(nil); err != nil {
@@ -553,9 +590,12 @@ func TestEnableDisable(t *testing.T) {
 
 	ctx := context.Background()
 
-	got, err := module.osloginSetup(ctx, enabledDesc)
+	got, noop, err := module.osloginSetup(ctx, enabledDesc)
 	if err != nil {
 		t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", enabledDesc, err)
+	}
+	if noop {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want noop to be false", enabledDesc, noop)
 	}
 	if got != true {
 		t.Errorf("osloginSetup(ctx, %v) = %t, want %t", enabledDesc, got, true)
@@ -584,9 +624,12 @@ func TestEnableDisable(t *testing.T) {
 		t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", disabledMDSJSON, err)
 	}
 
-	got, err = module.osloginSetup(ctx, disabledDesc)
+	got, noop, err = module.osloginSetup(ctx, disabledDesc)
 	if err != nil {
 		t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", disabledDesc, err)
+	}
+	if noop {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want noop to be false", disabledDesc, noop)
 	}
 	if !got {
 		t.Errorf("osloginSetup(ctx, %v) = %t, want %t", disabledDesc, got, true)
@@ -1101,9 +1144,12 @@ func TestRetryFailConfiguration(t *testing.T) {
 			createTestFiles(t, module, test.fileOpts)
 			_ = setupTestRunner(t, test.runnerErr)
 
-			ok, err := module.osloginSetup(context.Background(), enabledDesc)
+			ok, noop, err := module.osloginSetup(context.Background(), enabledDesc)
 			if err == nil {
 				t.Fatalf("osloginSetup(ctx, %v) = nil, want error", enabledDesc)
+			}
+			if noop {
+				t.Fatalf("osloginSetup(ctx, %v) = %t, want false", enabledDesc, noop)
 			}
 			if !ok {
 				t.Fatalf("osloginSetup(ctx, %v) = %t, want %t", enabledDesc, ok, true)
@@ -1124,9 +1170,12 @@ func TestRetryFailConfiguration(t *testing.T) {
 			})
 
 			// Retry should succeed.
-			ok, err = module.osloginSetup(context.Background(), enabledDesc)
+			ok, noop, err = module.osloginSetup(context.Background(), enabledDesc)
 			if err != nil {
 				t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", enabledDesc, err)
+			}
+			if noop {
+				t.Fatalf("osloginSetup(ctx, %v) = %t, want false", enabledDesc, noop)
 			}
 			if !ok {
 				t.Fatalf("osloginSetup(ctx, %v) = %t, want %t", enabledDesc, ok, true)

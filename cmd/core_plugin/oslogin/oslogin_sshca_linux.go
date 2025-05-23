@@ -73,16 +73,16 @@ func (pe *PipeEventHandler) Close() {
 
 // writeFile is an event handler callback and writes the actual sshca content to the pipe
 // used by openssh to grant access based on ssh ca.
-func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data any, evData *events.EventData) (bool, error) {
+func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	// There was some error on the pipe watcher, just ignore it.
 	if evData.Error != nil {
-		return false, fmt.Errorf("ssh trusted ca cert event watcher reported error: %v", evData.Error)
+		return false, true, fmt.Errorf("ssh trusted ca cert event watcher reported error: %v", evData.Error)
 	}
 
 	// Make sure we close the pipe after we've done writing to it.
 	pipeData, ok := evData.Data.(*pipewatcher.PipeData)
 	if !ok {
-		return false, fmt.Errorf("ssh ca event data is not a pipe data")
+		return false, true, fmt.Errorf("ssh ca event data is not a pipe data")
 	}
 
 	defer func() {
@@ -94,7 +94,7 @@ func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data a
 
 	certs, err := osloginMDSCertificates(ctx, pe.mdsClient)
 	if err != nil {
-		return true, fmt.Errorf("unable to get certificates from MDS: %w", err)
+		return true, false, fmt.Errorf("unable to get certificates from MDS: %w", err)
 	}
 
 	var outData []string
@@ -105,10 +105,10 @@ func (pe *PipeEventHandler) writeFile(ctx context.Context, evType string, data a
 	outStr := strings.Join(outData, "\n")
 	_, err = pipeData.WriteString(outStr)
 	if err != nil {
-		return true, fmt.Errorf("failed to write certificate to the write end of the pipe: %w", err)
+		return true, false, fmt.Errorf("failed to write certificate to the write end of the pipe: %w", err)
 	}
 
-	return true, nil
+	return true, false, nil
 }
 
 // osloginMDSCertificates returns the list of certificates from the metadata

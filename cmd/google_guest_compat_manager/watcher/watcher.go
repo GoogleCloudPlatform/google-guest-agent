@@ -45,43 +45,43 @@ func NewManager() *Manager {
 
 // Setup sets up the configuration to enable/disable the Core Plugin and the
 // Guest Agent.
-func (w *Manager) Setup(ctx context.Context, evType string, opts any, evData *events.EventData) (bool, error) {
+func (w *Manager) Setup(ctx context.Context, evType string, opts any, evData *events.EventData) (bool, bool, error) {
 	if evData.Error != nil {
-		return true, fmt.Errorf("metadata event watcher reported error: %w", evData.Error)
+		return true, true, fmt.Errorf("metadata event watcher reported error: %w", evData.Error)
 	}
 
 	mds, ok := evData.Data.(*metadata.Descriptor)
 	if !ok {
-		return true, fmt.Errorf("invalid event.Data type passed to event callback")
+		return true, true, fmt.Errorf("invalid event.Data type passed to event callback")
 	}
 
 	// If guest agent is not present and core plugin is we launch core plugin. In
 	// this case we don't need to enable/disable guest agent.
 	if !file.Exists(guestAgentBinaryPath, file.TypeFile) {
 		galog.Infof("Guest agent binary %q not found, running in test environment, skipping setup.", guestAgentBinaryPath)
-		return true, nil
+		return true, true, nil
 	}
 
 	enabled := mds.HasCorePluginEnabled()
-
-	return true, w.enableDisableAgent(ctx, enabled)
+	noop, err := w.enableDisableAgent(ctx, enabled)
+	return true, noop, err
 }
 
 // enableDisableAgent enables or disables the guest agent based on the new
 // enabled state and restarts the relevant services.
-func (w *Manager) enableDisableAgent(ctx context.Context, newEnabled bool) error {
+func (w *Manager) enableDisableAgent(ctx context.Context, newEnabled bool) (bool, error) {
 	if w.corePluginsEnabled == newEnabled {
 		galog.Debugf("Core plugin enabled state (%t) is unchanged, skipping guest agent enable/disable.", newEnabled)
-		return nil
+		return true, nil
 	}
 
 	if newEnabled {
 		if err := w.enableCorePlugin(ctx); err != nil {
-			return fmt.Errorf("failed to enable core plugin: %w", err)
+			return false, fmt.Errorf("failed to enable core plugin: %w", err)
 		}
 	} else {
 		if err := w.disableCorePlugin(ctx); err != nil {
-			return fmt.Errorf("failed to disable core plugin: %w", err)
+			return false, fmt.Errorf("failed to disable core plugin: %w", err)
 		}
 	}
 
@@ -89,7 +89,7 @@ func (w *Manager) enableDisableAgent(ctx context.Context, newEnabled bool) error
 	// This will allow us to retry the enable/disable operation in case of any
 	// failure.
 	w.corePluginsEnabled = newEnabled
-	return nil
+	return false, nil
 }
 
 // enableCorePlugin enables the core plugin & restarts Guest Agent Manager.

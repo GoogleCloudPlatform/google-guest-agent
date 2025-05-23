@@ -555,6 +555,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 		want                         []error
 		wantSudoersConfig            string
 		wantSupplementalGroups       map[string]*accounts.Group
+		wantNoop                     bool
 	}{
 		{
 			name:                         "set_configuration_successfully",
@@ -570,6 +571,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 			wantSupplementalGroups: map[string]*accounts.Group{
 				currentGroup.Name: &accounts.Group{Name: currentGroup.Name},
 			},
+			wantNoop: false,
 		},
 		{
 			name: "fail_to_create_groups",
@@ -594,6 +596,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 				"new_admin_group": &accounts.Group{Name: "new_admin_group"},
 				"newgroup":        &accounts.Group{Name: "newgroup"},
 			},
+			wantNoop: false,
 		},
 		{
 			name: "noop_platform_setup_finished",
@@ -613,6 +616,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 			want:                         nil,
 			wantSudoersConfig:            "don't over-write me",
 			wantSupplementalGroups:       map[string]*accounts.Group{},
+			wantNoop:                     false,
 		},
 		{
 			name: "noop_metadatasshkey_disabled",
@@ -632,6 +636,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 			want:                         nil,
 			wantSudoersConfig:            "don't over-write me",
 			wantSupplementalGroups:       map[string]*accounts.Group{},
+			wantNoop:                     false,
 		},
 		{
 			name: "noop_no_diff",
@@ -651,6 +656,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 			want:                         nil,
 			wantSudoersConfig:            "don't over-write me",
 			wantSupplementalGroups:       map[string]*accounts.Group{},
+			wantNoop:                     true,
 		},
 	}
 
@@ -672,9 +678,12 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 				}
 			}
 
-			got := metadataSSHKeySetup(ctx, tc.config, tc.desc)
+			noop, got := metadataSSHKeySetup(ctx, tc.config, tc.desc)
 			if diff := cmp.Diff(tc.want, got, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("metadataSSHKeySetup(ctx, %v, %v) returned an unexpected diff (-want +got):\n%s", tc.config, tc.desc, diff)
+			}
+			if noop != tc.wantNoop {
+				t.Errorf("metadataSSHKeySetup(ctx, %v, %v) returned noop = %t, want %t", tc.config, tc.desc, noop, tc.wantNoop)
 			}
 			gotSudoersConfig, err := os.ReadFile(testGoogleSudoers)
 			if err != nil && !os.IsNotExist(err) {
