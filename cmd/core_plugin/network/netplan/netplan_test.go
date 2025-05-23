@@ -68,10 +68,6 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("defaultConfig() set backendReload to %v, want true", mod.backendReload)
 	}
 
-	if mod.dropinRoutes != true {
-		t.Errorf("defaultConfig() set dropinRoutes to %v, want true", mod.dropinRoutes)
-	}
-
 	if mod.priority != defaultPriority {
 		t.Errorf("defaultConfig() set priority to %v, want %v", mod.priority, defaultPriority)
 	}
