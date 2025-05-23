@@ -409,16 +409,21 @@ func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
 		if err != nil {
 			return fmt.Errorf("failed to get extra routes for interface %q: %w", nic.Interface.Name(), err)
 		}
-		galog.Infof("Deleting extra routes %v for interface %q", extraRoutes, nic.Interface.Name())
-		for _, r := range extraRoutes {
-			if err = lc.Delete(ctx, r); err != nil {
-				// Continue to delete the rest of the routes, and only log the error.
-				galog.Errorf("Failed to delete route %q for interface %q: %v", r.Destination.String(), nic.Interface.Name(), err)
+
+		if len(extraRoutes) == 0 {
+			galog.Debugf("No extra routes for interface %q", nic.Interface.Name())
+		} else {
+			galog.Infof("Deleting extra routes %v for interface %q", extraRoutes, nic.Interface.Name())
+			for _, r := range extraRoutes {
+				if err = lc.Delete(ctx, r); err != nil {
+					// Continue to delete the rest of the routes, and only log the error.
+					galog.Errorf("Failed to delete route %q for interface %q: %v", r.Destination.String(), nic.Interface.Name(), err)
+				}
 			}
 		}
 
 		// Find missing routes for the given interface.
-		missingRoutes, err := lc.MissingRoutes(ctx, nic.Interface.Name(), nic.ExtraAddresses.MergedMap())
+		missingRoutes, err := lc.MissingRoutes(ctx, nic.Interface.Name(), extraAddrs)
 		if err != nil {
 			return fmt.Errorf("failed to get missing routes for interface %q: %w", nic.Interface.Name(), err)
 		}
