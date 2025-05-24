@@ -119,16 +119,13 @@ func activeManager(ctx context.Context, managers []*service.Handle, opts *servic
 // rollback rolls back the changes created in Setup for all the network managers
 // except the one provided with skip argument.
 func rollback(ctx context.Context, managers []*service.Handle, skipID string, opts *service.Options) ([]string, error) {
-	galog.Debugf("Rolling back network configuration for all the linux network management service modules, except %q.", skipID)
+	galog.Debugf("Rolling back network configuration for all the linux network management service modules")
 
 	var rolledBack []string
 	for _, manager := range managers {
-		if manager.ID == skipID {
-			continue
-		}
-
-		// Rollback network configurations for the manager.
-		if err := manager.Rollback(ctx, opts); err != nil {
+		// Rollback network configurations for the manager. Avoid reloading the
+		// active manager as we'll need to reload it anyway after the setup.
+		if err := manager.Rollback(ctx, opts, manager.ID != skipID); err != nil {
 			return rolledBack, fmt.Errorf("failed to rollback network configuration(%q): %w", manager.ID, err)
 		}
 

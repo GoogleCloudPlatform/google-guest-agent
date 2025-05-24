@@ -49,7 +49,7 @@ type testBackend struct {
 	IDCb              func() string
 	IsManagingCb      func(context.Context, *service.Options) (bool, error)
 	WriteDropinsCb    func([]*nic.Configuration, string) (bool, error)
-	RollbackDropinsCb func([]*nic.Configuration, string) error
+	RollbackDropinsCb func([]*nic.Configuration, string, bool) error
 	ReloadCb          func(context.Context) error
 }
 
@@ -65,8 +65,8 @@ func (tb *testBackend) WriteDropins(nics []*nic.Configuration, filePrefix string
 	return tb.WriteDropinsCb(nics, filePrefix)
 }
 
-func (tb *testBackend) RollbackDropins(nics []*nic.Configuration, filePrefix string) error {
-	return tb.RollbackDropinsCb(nics, filePrefix)
+func (tb *testBackend) RollbackDropins(nics []*nic.Configuration, filePrefix string, active bool) error {
+	return tb.RollbackDropinsCb(nics, filePrefix, active)
 }
 
 func (tb *testBackend) Reload(ctx context.Context) error {
@@ -108,7 +108,7 @@ func (tb *testNetplanBackend) WriteDropins([]*nic.Configuration, string) (bool, 
 	return false, nil
 }
 
-func (tb *testNetplanBackend) RollbackDropins([]*nic.Configuration, string) error {
+func (tb *testNetplanBackend) RollbackDropins([]*nic.Configuration, string, bool) error {
 	return nil
 }
 
@@ -320,8 +320,8 @@ func TestSetup(t *testing.T) {
 				ReloadCb: networkdModule.Reload,
 			},
 			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
-				if opts.Name == "netplan" && opts.Args[0] == "apply" {
-					return &run.Result{}, errors.New("netplan apply failed")
+				if opts.Name == "netplan" && opts.Args[0] == "generate" {
+					return &run.Result{}, errors.New("netplan generate failed")
 				}
 				return &run.Result{}, nil
 			},
@@ -704,7 +704,6 @@ func TestRollback(t *testing.T) {
 		name         string
 		opts         *service.Options
 		backend      *testBackend
-		runner       *runMock
 		dropinRoutes bool
 		data         string
 		vlanData     string
@@ -721,8 +720,11 @@ func TestRollback(t *testing.T) {
 				},
 			}),
 			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				RollbackDropinsCb: func([]*nic.Configuration, string, bool) error {
 					return errors.New("rollback dropins failed")
+				},
+				ReloadCb: func(context.Context) error {
+					return nil
 				},
 			},
 			wantErr: true,
@@ -738,7 +740,10 @@ func TestRollback(t *testing.T) {
 				},
 			}),
 			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				RollbackDropinsCb: func([]*nic.Configuration, string, bool) error {
+					return nil
+				},
+				ReloadCb: func(context.Context) error {
 					return nil
 				},
 			},
@@ -755,34 +760,10 @@ func TestRollback(t *testing.T) {
 				},
 			}),
 			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				RollbackDropinsCb: func([]*nic.Configuration, string, bool) error {
 					return nil
 				},
-			},
-			data:     "test-data",
-			vlanData: "test-vlan-data",
-			wantErr:  false,
-		},
-		{
-			name:         "success-native-routes",
-			dropinRoutes: false,
-			opts: service.NewOptions(nil, []*nic.Configuration{
-				&nic.Configuration{
-					Interface: &ethernet.Interface{
-						NameOp: func() string { return "iface" },
-					},
-					ExtraAddresses: &address.ExtraAddresses{
-						IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
-					},
-				},
-			}),
-			runner: &runMock{
-				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
-					return &run.Result{}, nil
-				},
-			},
-			backend: &testBackend{
-				RollbackDropinsCb: func([]*nic.Configuration, string) error {
+				ReloadCb: func(context.Context) error {
 					return nil
 				},
 			},
@@ -804,7 +785,11 @@ func TestRollback(t *testing.T) {
 			backends = []netplanBackend{tc.backend}
 
 			oldRunner := run.Client
-			run.Client = tc.runner
+			run.Client = &runMock{
+				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+					return &run.Result{}, nil
+				},
+			}
 
 			t.Cleanup(func() {
 				backends = oldBackends
@@ -812,6 +797,7 @@ func TestRollback(t *testing.T) {
 			})
 
 			svc := &serviceNetplan{
+				backend:                  tc.backend,
 				ethernetDropinIdentifier: netplanDropinIdentifier,
 				ethernetSuffix:           netplanEthernetSuffix,
 				forceNoOpBackend:         true,
@@ -846,7 +832,7 @@ func TestRollback(t *testing.T) {
 				}
 			}
 
-			err := svc.Rollback(ctx, tc.opts)
+			err := svc.Rollback(ctx, tc.opts, false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want error? %v", err, tc.wantErr)
 			}

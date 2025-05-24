@@ -695,7 +695,7 @@ func TestRollback(t *testing.T) {
 				}
 			}
 
-			err := svc.Rollback(ctx, tc.opts)
+			err := svc.Rollback(ctx, tc.opts, false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Rollback() = %v, want error? %v", err, tc.wantErr)
 			}
