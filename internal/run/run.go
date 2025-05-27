@@ -264,6 +264,8 @@ func splitOutput(ctx context.Context, opts Options) (*Result, error) {
 // error, in case of success the output is set to [Result]'s Output field. The
 // requested OutputType is set to [Result]'s OutputType field.
 func combinedOutput(ctx context.Context, opts Options) (*Result, error) {
+	galog.Debugf("Running command: %+v", opts)
+
 	cmd := exec.CommandContext(ctx, opts.Name, opts.Args...)
 	cmd.Dir = opts.Dir
 	if err := writeToStdin(cmd, opts.Input); err != nil {

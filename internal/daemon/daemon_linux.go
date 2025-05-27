@@ -61,7 +61,7 @@ func (systemdClient) RestartService(ctx context.Context, service string, method 
 	}
 
 	if _, err := run.WithContext(ctx, run.Options{
-		OutputType: run.OutputNone,
+		OutputType: run.OutputCombined,
 		Name:       "systemctl",
 		Args:       []string{methodString, service},
 	}); err != nil {
@@ -73,7 +73,7 @@ func (systemdClient) RestartService(ctx context.Context, service string, method 
 // ReloadDaemon reloads a systemd daemon.
 func (systemdClient) ReloadDaemon(ctx context.Context, daemon string) error {
 	if _, err := run.WithContext(ctx, run.Options{
-		OutputType: run.OutputNone,
+		OutputType: run.OutputCombined,
 		Name:       "systemctl",
 		Args:       []string{"daemon-reload", daemon},
 	}); err != nil {
@@ -89,12 +89,12 @@ func (systemdClient) CheckUnitExists(ctx context.Context, unit string) (bool, er
 	}
 
 	_, err := run.WithContext(ctx, run.Options{
-		OutputType: run.OutputNone,
+		OutputType: run.OutputCombined,
 		Name:       "systemctl",
 		Args:       []string{"status", unit},
 	})
 	if err != nil {
-		return false, nil
+		return false, err
 	}
 	return true, nil
 }
