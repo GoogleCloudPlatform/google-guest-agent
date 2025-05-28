@@ -17,6 +17,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,19 +68,23 @@ func IsCorePluginEnabled() bool {
 
 	data, err := os.ReadFile(CorePluginEnabledConfigFile)
 	if err != nil {
-		galog.Errorf("Failed to read config file [%q]: %v, defaulting IsCorePluginEnabled to false", CorePluginEnabledConfigFile, err)
+		if errors.Is(err, os.ErrNotExist) {
+			galog.Infof("Config file [%q] doesn't exist, defaulting IsCorePluginEnabled to false", CorePluginEnabledConfigFile)
+		} else {
+			galog.Warnf("Failed to read config file [%q]: %v, defaulting IsCorePluginEnabled to false", CorePluginEnabledConfigFile, err)
+		}
 		return DefaultIsCorePluginEnabled
 	}
 
 	matches := exp.FindStringSubmatch(string(data))
 	if len(matches) != 2 {
-		galog.Errorf("Parsed content [%q] from config file [%q] doesn't match expected format, defaulting IsCorePluginEnabled to false", string(data), CorePluginEnabledConfigFile)
+		galog.Warnf("Parsed content [%q] from config file [%q] doesn't match expected format, defaulting IsCorePluginEnabled to false", string(data), CorePluginEnabledConfigFile)
 		return DefaultIsCorePluginEnabled
 	}
 
 	enableCorePlugin, err := strconv.ParseBool(matches[1])
 	if err != nil {
-		galog.Errorf("Failed to parse boolean [%q] from config file [%q]: %v, defaulting IsCorePluginEnabled to false", matches[1], CorePluginEnabledConfigFile, err)
+		galog.Warnf("Failed to parse boolean [%q] from config file [%q]: %v, defaulting IsCorePluginEnabled to false", matches[1], CorePluginEnabledConfigFile, err)
 		return DefaultIsCorePluginEnabled
 	}
 
