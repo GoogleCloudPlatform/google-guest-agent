@@ -18,6 +18,7 @@ package ini
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/go-ini/ini"
 )
@@ -90,4 +91,24 @@ func ReadIniFile(source any, ptr any) error {
 	}
 
 	return nil
+}
+
+// ToString parses the content of source and returns it as a string marshalled
+// in ini file format.
+func ToString(ptr any, opts ...LoadOptions) (string, error) {
+	if ptr == nil {
+		return "", ErrInvalidData
+	}
+
+	config := ini.Empty(opts...)
+
+	if err := ini.ReflectFrom(config, ptr); err != nil {
+		return "", fmt.Errorf("error marshalling file: %w", err)
+	}
+
+	buffer := new(strings.Builder)
+	if _, err := config.WriteTo(buffer); err != nil {
+		return "", fmt.Errorf("error writing file: %w", err)
+	}
+	return buffer.String(), nil
 }
