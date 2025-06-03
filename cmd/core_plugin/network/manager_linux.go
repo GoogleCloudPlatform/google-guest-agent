@@ -19,6 +19,8 @@ package network
 import (
 	"context"
 	"fmt"
+	"net"
+	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/dhclient"
@@ -29,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )
 
 var (
@@ -91,6 +94,13 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 		return fmt.Errorf("failed to setup routes: %w", err)
 	}
 
+	go func() {
+		// Setup might not have finished when we log and collect this information. Adding this
+		// temporary sleep for debugging purposes to make sure we have up-to-date information.
+		time.Sleep(2 * time.Second)
+		logInterfaceState(ctx)
+	}()
+
 	return nil
 }
 
@@ -134,4 +144,36 @@ func rollback(ctx context.Context, managers []*service.Handle, skipID string, op
 	}
 
 	return rolledBack, nil
+}
+
+// logInterfaceState logs the interface state and routes for all the network
+// interfaces.
+func logInterfaceState(ctx context.Context) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		galog.Warnf("Failed to get network interfaces: %v.", err)
+		return
+	}
+
+	// Log the interface state.
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			galog.Warnf("Failed to get addresses for interface %q: %v.", iface.Name, err)
+			continue
+		}
+		galog.Infof("Interface(%s) - State: %+v, Addrs: %+v", iface.Name, iface, addrs)
+	}
+
+	// Log the routes.
+	res, err := run.WithContext(ctx, run.Options{
+		OutputType: run.OutputStdout,
+		Name:       "ip",
+		Args:       []string{"route", "list", "table", "local"},
+	})
+	if err != nil {
+		galog.Warnf("Failed to get routes: %v.", err)
+		return
+	}
+	galog.Infof("Local Routes: %s", res.Output)
 }
