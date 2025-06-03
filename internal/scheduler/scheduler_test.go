@@ -291,6 +291,10 @@ func TestScheduleJob(t *testing.T) {
 func TestRun(t *testing.T) {
 	s := &Scheduler{}
 	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+	cfg.Retrieve().Telemetry.MetricCollectionEnabled = true
 	s.enableMetricRecording(ctx)
 
 	tests := []struct {

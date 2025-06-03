@@ -64,7 +64,7 @@ on_demand_plugins = true
 acs_client = true
 
 [Telemetry]
-metric_collection_enabled = true
+metric_collection_enabled = false
 
 [Accounts]
 deprovision_remove = false
