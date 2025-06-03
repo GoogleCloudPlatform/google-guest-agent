@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -182,10 +183,11 @@ func (sn *Module) WriteDropins(nics []*nic.Configuration, filePrefix string) (bo
 		// Only write the drop-in files for the primary NIC if the primary NIC is
 		// managed by guest-agent.
 		galog.Debugf("Writing systemd-networkd drop-in file: %s", filePath)
-		if err := sn.writeEthernetConfig(nic, filePath, nic.Index == 0); err != nil {
+		wrote, err := sn.writeEthernetConfig(nic, filePath, nic.Index == 0)
+		if err != nil {
 			return changed, fmt.Errorf("error writing systemd-networkd drop-in configs: %v", err)
 		}
-		changed = true
+		changed = changed || wrote
 	}
 
 	return changed, nil
@@ -217,6 +219,7 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 	nicConfigs := opts.FilteredNICConfigs()
 
 	var keepVlanConfigs []string
+	var changed bool
 
 	// Write the config files.
 	for _, nic := range nicConfigs {
@@ -226,7 +229,8 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 
 		filePath := sn.networkFile(nic.Interface.Name())
 
-		if err := sn.writeEthernetConfig(nic, filePath, nic.Index == 0); err != nil {
+		wroteEthernet, err := sn.writeEthernetConfig(nic, filePath, nic.Index == 0)
+		if err != nil {
 			return fmt.Errorf("error writing network configs: %v", err)
 		}
 
@@ -238,12 +242,16 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 		}
 
 		// Setup the interface's VLANs.
+		wroteVlan := false
 		for _, vic := range nic.VlanInterfaces {
-			if err := sn.writeVlanConfig(vic); err != nil {
+			wrote, err := sn.writeVlanConfig(vic)
+			if err != nil {
 				return fmt.Errorf("error writing vlan configs: %w", err)
 			}
 			keepVlanConfigs = append(keepVlanConfigs, vic.InterfaceName())
+			wroteVlan = wroteVlan || wrote
 		}
+		changed = changed || wroteVlan || wroteEthernet
 	}
 
 	// Cleanup any vlan interfaces that are no longer present.
@@ -254,7 +262,7 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 
 	// If we've not changed any configuration we shouldn't have to reload
 	// systemd-networkd.
-	if len(nicConfigs) == 0 && !vlanCleanedup {
+	if !changed && !vlanCleanedup {
 		return nil
 	}
 
@@ -365,15 +373,41 @@ type networkdNetdevConfig struct {
 }
 
 // write writes networkd's .netdev config file.
-func (nd *networkdNetdevConfig) write(sn *Module, iface string) error {
-	if err := ini.WriteIniFile(sn.netdevFile(iface), &nd); err != nil {
-		return fmt.Errorf("error saving .netdev config for %s: %w", iface, err)
+func (nd *networkdNetdevConfig) write(sn *Module, iface string) (bool, error) {
+	galog.V(2).Debugf("Writing systemd-networkd's .netdev configuration file: %s.", sn.netdevFile(iface))
+
+	equals, err := nd.equals(sn.netdevFile(iface))
+	if err != nil {
+		// Don't fail if we can't check if the file is equal. Assume we need to reload.
+		galog.Debugf("Error checking if networkd .netdev configuration file is equal: %v", err)
 	}
-	return nil
+	if equals {
+		galog.Debugf("Networkd .netdev configuration file is equal to the new configuration, skipping write.")
+		return false, nil
+	}
+
+	if err := ini.WriteIniFile(sn.netdevFile(iface), &nd); err != nil {
+		return false, fmt.Errorf("error saving .netdev config for %s: %w", iface, err)
+	}
+	return true, nil
+}
+
+// equals checks if the networkd .netdev configuration file is equal to the
+// provided configuration.
+func (nd networkdNetdevConfig) equals(fPath string) (bool, error) {
+	if !file.Exists(fPath, file.TypeFile) {
+		return false, nil
+	}
+
+	oldCfg := new(networkdNetdevConfig)
+	if err := ini.ReadIniFile(fPath, oldCfg); err != nil {
+		return false, fmt.Errorf("error reading existing networkd's .netdev config: %w", err)
+	}
+	return reflect.DeepEqual(&nd, oldCfg), nil
 }
 
 // writeVlanConfig writes the systemd config for the provided vlan interface.
-func (sn *Module) writeVlanConfig(vic *ethernet.VlanInterface) error {
+func (sn *Module) writeVlanConfig(vic *ethernet.VlanInterface) (bool, error) {
 	galog.Debugf("Write vlan's systemd-networkd network config for %s.", vic.InterfaceName())
 
 	iface := vic.InterfaceName()
@@ -385,8 +419,9 @@ func (sn *Module) writeVlanConfig(vic *ethernet.VlanInterface) error {
 		Link:    &networkdLinkConfig{MACAddress: vic.MacAddr, MTUBytes: vic.MTU},
 	}
 
-	if err := network.write(sn.netdevFile(iface)); err != nil {
-		return fmt.Errorf("failed to write networkd's vlan .network config: %w", err)
+	wroteNetwork, err := network.write(sn.networkFile(iface))
+	if err != nil {
+		return false, fmt.Errorf("failed to write networkd's vlan .network config: %w", err)
 	}
 
 	// Create and setup .netdev file.
@@ -395,16 +430,17 @@ func (sn *Module) writeVlanConfig(vic *ethernet.VlanInterface) error {
 		VLAN:   networkdVlan{ID: vic.Vlan, ReorderHeader: false},
 	}
 
-	if err := netdev.write(sn, iface); err != nil {
-		return fmt.Errorf("failed to write networkd's vlan .netdev config: %w", err)
+	wroteNetdev, err := netdev.write(sn, iface)
+	if err != nil {
+		return false, fmt.Errorf("failed to write networkd's vlan .netdev config: %w", err)
 	}
 
-	return nil
+	return (wroteNetwork || wroteNetdev), nil
 }
 
 // writeEthernetConfig writes the systemd config for all the provided interfaces
 // in the provided directory using the given priority.
-func (sn *Module) writeEthernetConfig(nic *nic.Configuration, filePath string, primary bool) error {
+func (sn *Module) writeEthernetConfig(nic *nic.Configuration, filePath string, primary bool) (bool, error) {
 	galog.Debugf("Write systemd-networkd network config for %s.", nic.Interface.Name())
 
 	dhcpIpv6 := map[bool]string{true: "yes", false: "ipv4"}
@@ -424,11 +460,12 @@ func (sn *Module) writeEthernetConfig(nic *nic.Configuration, filePath string, p
 		data.DHCPv6 = &networkdDHCPConfig{RoutesToDNS: false, RoutesToNTP: false}
 	}
 
-	if err := data.write(sn.networkFile(nic.Interface.Name())); err != nil {
-		return fmt.Errorf("failed to write networkd's ethernet interface config: %w", err)
+	wrote, err := data.write(sn.networkFile(nic.Interface.Name()))
+	if err != nil {
+		return false, fmt.Errorf("failed to write networkd's ethernet interface config: %w", err)
 	}
 
-	return nil
+	return wrote, nil
 }
 
 // netdevFile returns the networkd's .netdev file path.
@@ -530,18 +567,44 @@ type networkdConfig struct {
 }
 
 // write writes the networkd configuration file to its destination.
-func (sc *networkdConfig) write(fPath string) error {
+func (sc *networkdConfig) write(fPath string) (bool, error) {
 	galog.V(2).Debugf("Writing systemd-networkd's configuration file: %s.", fPath)
+
+	// Check if the file exists, and if it does, check if the contents are the
+	// same. If they are the same, we don't need to write the file.
+	equals, err := sc.equals(fPath)
+	if err != nil {
+		// Don't fail if we can't check if the file is equal. Assume we need to reload.
+		galog.Debugf("Error checking if systemd-networkd configuration file is equal: %v", err)
+	}
+	if equals {
+		galog.Debugf("Systemd-networkd configuration file is equal to the new configuration, skipping write.")
+		return false, nil
+	}
 
 	dir := filepath.Dir(fPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("error creating configuration directory %s: %v", dir, err)
+		return false, fmt.Errorf("error creating configuration directory %s: %v", dir, err)
 	}
 
 	if err := ini.WriteIniFile(fPath, &sc); err != nil {
-		return fmt.Errorf("error saving .network config: %s: %w", fPath, err)
+		return false, fmt.Errorf("error saving .network config: %s: %w", fPath, err)
 	}
-	return nil
+	return true, nil
+}
+
+// equals checks if the networkd configuration file is equal to the provided
+// configuration.
+func (sc networkdConfig) equals(fPath string) (bool, error) {
+	if !file.Exists(fPath, file.TypeFile) {
+		return false, nil
+	}
+
+	cfg := new(networkdConfig)
+	if err := ini.ReadIniFile(fPath, cfg); err != nil {
+		return false, fmt.Errorf("error reading systemd-networkd configuration file: %w", err)
+	}
+	return reflect.DeepEqual(&sc, cfg), nil
 }
 
 // rollbackConfiguration rolls back the .network files created previously

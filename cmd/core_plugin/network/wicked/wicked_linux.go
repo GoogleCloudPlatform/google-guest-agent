@@ -114,16 +114,15 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 		// Don't write a new config file if one already exists.
 		if file.Exists(fPath, file.TypeFile) {
 			galog.Infof("Wicked config file for %s already exists (%s), skipping.", nic.Interface.Name(), fPath)
-			continue
-		}
+		} else {
+			// Write the config file for the current NIC.
+			if err := sn.writeEthernetConfig(nic, fPath); err != nil {
+				return err
+			}
 
-		// Write the config file for the current NIC.
-		if err := sn.writeEthernetConfig(nic, fPath); err != nil {
-			return err
+			// Add the interface to the list of interfaces to bring up.
+			ifupInterfaces = append(ifupInterfaces, nic.Interface.Name())
 		}
-
-		// Add the interface to the list of interfaces to bring up.
-		ifupInterfaces = append(ifupInterfaces, nic.Interface.Name())
 
 		priority := dhclientVlanRoutePriority
 

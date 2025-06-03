@@ -172,11 +172,6 @@ type serviceNetplan struct {
 	// reloaded after a change in the netplan configuration.
 	backendReload bool
 
-	// dropinRoutes indicates if the netplan drop-in should not include routes.
-	// Resulting in the routes being added using the linux "native"
-	// implementation.
-	dropinRoutes bool
-
 	// ethernetDropinIdentifier is the identifier to use for the ethernet drop-in
 	// file, i.e. by default it's "google-guest-agent" resulting in a drop-in file
 	// name like "20-google-guest-agent-ethernet.yaml".
@@ -200,7 +195,6 @@ func defaultModule() *serviceNetplan {
 func (sn *serviceNetplan) defaultConfig() {
 	sn.backend = nil
 	sn.backendReload = true
-	sn.dropinRoutes = true
 	sn.priority = defaultPriority
 	sn.ethernetDropinIdentifier = netplanDropinIdentifier
 	sn.netplanConfigDir = defaultNetplanConfigDir

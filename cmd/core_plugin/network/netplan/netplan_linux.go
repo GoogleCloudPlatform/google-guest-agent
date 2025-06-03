@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
@@ -114,7 +115,6 @@ func (sn *serviceNetplan) setOSFlags(osInfo osinfo.OSInfo) {
 
 	if osInfo.OS == "ubuntu" && osInfo.Version.Major == 18 && osInfo.Version.Minor == 04 {
 		sn.backendReload = false
-		sn.dropinRoutes = false
 	}
 }
 
@@ -229,11 +229,12 @@ func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, erro
 		return true, nil
 	}
 
-	if err := sn.write(dropin, sn.vlanDropinFile()); err != nil {
+	wrote, err := sn.write(dropin, sn.vlanDropinFile())
+	if err != nil {
 		return false, fmt.Errorf("failed to write netplan vlan drop-in config: %+v", err)
 	}
 
-	return true, nil
+	return wrote, nil
 }
 
 // writeDropin writes the netplan drop-in file.
@@ -273,30 +274,43 @@ func (sn *serviceNetplan) writeDropin(nics []*nic.Configuration) (bool, error) {
 		dropin.Network.Ethernets[key] = ne
 	}
 
-	if err := sn.write(dropin, sn.ethernetDropinFile()); err != nil {
+	update, err := sn.write(dropin, sn.ethernetDropinFile())
+	if err != nil {
 		return false, fmt.Errorf("error writing netplan dropin: %w", err)
 	}
 
-	return true, nil
+	return update, nil
 }
 
 // write writes the netplan dropin file.
-func (sn *serviceNetplan) write(nd netplanDropin, dropinFile string) error {
+func (sn *serviceNetplan) write(nd netplanDropin, dropinFile string) (bool, error) {
 	dir := filepath.Dir(dropinFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("error creating netplan drop-in directory: %w", err)
+		return false, fmt.Errorf("error creating netplan drop-in directory: %w", err)
 	}
 
+	// Check the existing file. Avoid writing if they're the same.
+	equals, err := nd.equals(dropinFile)
+	if err != nil {
+		// Don't fail if we can't check if the file is equal. Assume we need to reload.
+		galog.Debugf("Error checking if netplan drop-in file is equal: %v", err)
+	}
+	if equals {
+		galog.Debugf("Netplan drop-in file is equal to the new configuration, skipping write.")
+		return false, nil
+	}
+
+	// Marshal the configuration and write the file.
 	data, err := yaml.Marshal(&nd)
 	if err != nil {
-		return fmt.Errorf("error marshalling netplan drop-in yaml file: %w", err)
+		return false, fmt.Errorf("error marshalling netplan drop-in yaml file: %w", err)
 	}
 
 	if err := os.WriteFile(dropinFile, data, netplanDropinFileMode); err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return true, nil
 }
 
 // ethernetDropinFile returns the netplan ethernet drop-in file considering a
@@ -348,4 +362,21 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options) e
 	}
 
 	return nil
+}
+
+// equals checks if the netplan drop-in file is equal to the provided drop-in
+// configuration.
+func (nd netplanDropin) equals(cfgPath string) (bool, error) {
+	if !file.Exists(cfgPath, file.TypeFile) {
+		return false, nil
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return false, fmt.Errorf("error reading netplan drop-in file: %w", err)
+	}
+	cfg := new(netplanDropin)
+	if err = yaml.Unmarshal(data, cfg); err != nil {
+		return false, fmt.Errorf("error unmarshalling netplan drop-in yaml file: %w", err)
+	}
+	return reflect.DeepEqual(&nd, cfg), nil
 }

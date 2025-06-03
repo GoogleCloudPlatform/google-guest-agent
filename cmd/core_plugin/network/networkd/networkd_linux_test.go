@@ -514,7 +514,7 @@ func TestSystemdNetworkdConfig(t *testing.T) {
 
 			for _, nic := range nicConfigs {
 				filePath := mockSystemd.networkFile(nic.Interface.Name())
-				if err := mockSystemd.writeEthernetConfig(nic, filePath, nic.Index == 0 /* primary interface? */); err != nil {
+				if _, err := mockSystemd.writeEthernetConfig(nic, filePath, nic.Index == 0 /* primary interface? */); err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			}
@@ -870,7 +870,7 @@ func TestVlanSetup(t *testing.T) {
 	}
 
 	// Second run with os.ReadDir() succeeding.
-	if err := mod.writeVlanConfig(vic); err != nil {
+	if _, err := mod.writeVlanConfig(vic); err != nil {
 		t.Fatalf("failed to write vlan config: %v", err)
 	}
 
