@@ -43,7 +43,10 @@ type Handle struct {
 	Setup func(context.Context, *Options) error
 
 	// Rollback rolls back the changes created in Setup.
-	Rollback func(context.Context, *Options) error
+	//
+	// If active is false, the network configuration will be reloaded after the
+	// rollback is completed.
+	Rollback func(context.Context, *Options, bool) error
 }
 
 // NewOptions creates a new Options struct.

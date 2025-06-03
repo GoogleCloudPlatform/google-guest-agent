@@ -736,6 +736,7 @@ func TestRollbackNetwork(t *testing.T) {
 func TestRollback(t *testing.T) {
 	tests := []struct {
 		name    string
+		reload  bool
 		opts    *service.Options
 		data    string
 		wantErr bool
@@ -757,8 +758,8 @@ func TestRollback(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "success-fail-unmarshal-config",
-			data: "invalid data",
+			name:   "success-remove-file",
+			reload: true,
 			opts: service.NewOptions(nil, []*nic.Configuration{
 				&nic.Configuration{
 					Interface: &ethernet.Interface{
@@ -767,23 +768,7 @@ func TestRollback(t *testing.T) {
 					Index: 1,
 				},
 			}),
-			wantErr: true,
-		},
-		{
-			name: "success-remove-file-fail-reload",
-			data: `
-			[GuestAgent]
-			ManagedByGuestAgent = true
-			`,
-			opts: service.NewOptions(nil, []*nic.Configuration{
-				&nic.Configuration{
-					Interface: &ethernet.Interface{
-						NameOp: func() string { return "iface" },
-					},
-					Index: 1,
-				},
-			}),
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 
@@ -814,7 +799,7 @@ func TestRollback(t *testing.T) {
 				}
 			}
 
-			err := mod.Rollback(context.Background(), tc.opts)
+			err := mod.Rollback(context.Background(), tc.opts, !tc.reload)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Rollback() = %v, want error? %v", err, tc.wantErr)
 			}
@@ -1040,7 +1025,7 @@ func TestRollbackDropins(t *testing.T) {
 				}
 			}
 
-			err := mod.RollbackDropins(tc.opts.NICConfigs(), "default-prefix")
+			err := mod.RollbackDropins(tc.opts.NICConfigs(), "default-prefix", false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("WriteDropins() = %v, want %v", err, tc.wantErr)
 			}

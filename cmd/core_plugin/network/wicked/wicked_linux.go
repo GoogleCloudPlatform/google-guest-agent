@@ -154,11 +154,19 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 		return fmt.Errorf("failed to cleanup vlan interfaces: %w", err)
 	}
 
-	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: append([]string{"ifreload"}, ifupInterfaces...)}
-	if _, err := run.WithContext(ctx, opt); err != nil {
-		return fmt.Errorf("error enabling interfaces: %v", err)
+	if err := sn.reloadInterfaces(ctx, ifupInterfaces); err != nil {
+		return fmt.Errorf("failed to reload interfaces: %w", err)
 	}
 
+	return nil
+}
+
+// reloadInterfaces reloads the provided interfaces.
+func (sn *serviceWicked) reloadInterfaces(ctx context.Context, interfaces []string) error {
+	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: append([]string{"ifreload"}, interfaces...)}
+	if _, err := run.WithContext(ctx, opt); err != nil {
+		return fmt.Errorf("error reloading interfaces: %w", err)
+	}
 	return nil
 }
 
@@ -297,8 +305,8 @@ func (sn *serviceWicked) writeEthernetConfig(nic *nic.Configuration, filePath st
 }
 
 // Rollback rolls back the network interface.
-func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) error {
-	galog.Infof("Rolling back changes for wicked.")
+func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options, active bool) error {
+	galog.Infof("Rolling back changes for wicked with reload [%t].", !active)
 
 	// If the config directory does not exist we got nothing to rollback, skip it.
 	if !file.Exists(sn.configDir, file.TypeDir) {
@@ -309,6 +317,12 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) er
 	// Remove the config files.
 	var reloadInterfaces []string
 	for _, nic := range opts.FilteredNICConfigs() {
+		// If this is the active network manager, we only want to rollback the
+		// primary NIC if we are not managing it.
+		if active && (nic.Index != 0 || nic.ShouldManage()) {
+			continue
+		}
+
 		// Remove the config file for the current NIC.
 		removed, err := sn.removeInterface(ctx, sn.ifcfgFilePath(nic.Interface.Name()), nic.Index == 0)
 		if err != nil {
@@ -335,11 +349,10 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options) er
 	}
 
 	// Reload the wicked configuration.
-	args := []string{"ifreload"}
-	args = append(args, reloadInterfaces...)
-	opt := run.Options{OutputType: run.OutputNone, Name: "wicked", Args: args}
-	if _, err := run.WithContext(ctx, opt); err != nil {
-		return fmt.Errorf("error reloading wicked configuration: %w", err)
+	if !active {
+		if err := sn.reloadInterfaces(ctx, reloadInterfaces); err != nil {
+			return fmt.Errorf("failed to reload interfaces: %w", err)
+		}
 	}
 
 	return nil

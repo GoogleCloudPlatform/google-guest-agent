@@ -194,10 +194,16 @@ func (sn *Module) WriteDropins(nics []*nic.Configuration, filePrefix string) (bo
 }
 
 // RollbackDropins rolls back the drop-in files previously created by us.
-func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix string) error {
+func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix string, active bool) error {
 	galog.Debugf("Rolling back systemd-networkd drop-in files.")
 
 	for _, nic := range nics {
+		// If this is the active network manager, we only want to rollback the
+		// primary NIC if we are not managing it.
+		if active && (nic.Index != 0 || nic.ShouldManage()) {
+			continue
+		}
+
 		filePath := sn.dropinFile(filePrefix, nic.Interface.Name())
 
 		if _, err := rollbackConfiguration(filePath); err != nil {
@@ -506,13 +512,19 @@ func (sn *Module) deprecatedNetworkFile(iface string) string {
 }
 
 // Rollback rolls back the changes created in Setup.
-func (sn *Module) Rollback(ctx context.Context, opts *service.Options) error {
-	galog.Infof("Rolling back changes for systemd-networkd.")
+func (sn *Module) Rollback(ctx context.Context, opts *service.Options, active bool) error {
+	galog.Infof("Rolling back changes for systemd-networkd with reload [%t].", !active)
 
 	ethernetRequiresReload := false
 
 	// Rollback ethernet interfaces.
 	for _, nic := range opts.FilteredNICConfigs() {
+		// If this is the active network manager, we only want to rollback the
+		// primary NIC if we are not managing it.
+		if active && (nic.Index != 0 || nic.ShouldManage()) {
+			continue
+		}
+
 		iface := nic.Interface.Name()
 
 		reqRestart1, err := rollbackConfiguration(sn.networkFile(iface))
@@ -540,8 +552,10 @@ func (sn *Module) Rollback(ctx context.Context, opts *service.Options) error {
 	}
 
 	// Attempt to reload systemd-networkd configurations.
-	if err := sn.Reload(ctx); err != nil {
-		return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
+	if !active {
+		if err := sn.Reload(ctx); err != nil {
+			return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
+		}
 	}
 
 	return nil
@@ -612,6 +626,7 @@ func (sc networkdConfig) equals(fPath string) (bool, error) {
 func rollbackConfiguration(configFile string) (bool, error) {
 	galog.Debugf("Rolling back systemd-networkd configuration(%s).", configFile)
 
+	// Check if the file exists.
 	if !file.Exists(configFile, file.TypeFile) {
 		galog.Debugf("No systemd-networkd configuration found: %s.", configFile)
 		return false, nil

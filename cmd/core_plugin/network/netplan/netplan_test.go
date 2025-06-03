@@ -46,7 +46,7 @@ func (tb *noopBackend) WriteDropins([]*nic.Configuration, string) (bool, error) 
 	return true, nil
 }
 
-func (tb *noopBackend) RollbackDropins([]*nic.Configuration, string) error {
+func (tb *noopBackend) RollbackDropins([]*nic.Configuration, string, bool) error {
 	return nil
 }
 

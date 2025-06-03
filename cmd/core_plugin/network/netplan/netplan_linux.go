@@ -162,21 +162,30 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 		return err
 	}
 
+	// Apply the netplan configuration.
+	if netplanChanged || netplanVlanChanged {
+		if err := sn.generateConfigs(ctx); err != nil {
+			return fmt.Errorf("error applying netplan changes: %w", err)
+		}
+	}
+
 	// Reload the backend if networkd's configuration has changed.
-	if backendChanged && sn.backendReload {
+	if (netplanChanged || netplanVlanChanged || backendChanged) && sn.backendReload {
 		if err := sn.backend.Reload(ctx); err != nil {
 			return fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
 		}
 	}
 
-	// Apply the netplan configuration.
-	if netplanChanged || netplanVlanChanged {
-		opt := run.Options{OutputType: run.OutputNone, Name: "netplan", Args: []string{"apply"}}
-		if _, err := run.WithContext(ctx, opt); err != nil {
-			return fmt.Errorf("error applying netplan changes: %w", err)
-		}
-	}
+	return nil
+}
 
+// generateConfigs regenerates the netplan configuration. This does not reload
+// the backend's configuration.
+func (sn *serviceNetplan) generateConfigs(ctx context.Context) error {
+	opt := run.Options{OutputType: run.OutputNone, Name: "netplan", Args: []string{"generate"}}
+	if _, err := run.WithContext(ctx, opt); err != nil {
+		return fmt.Errorf("error reloading netplan changes: %w", err)
+	}
 	return nil
 }
 
@@ -336,18 +345,19 @@ func (sn *serviceNetplan) vlanDropinFile() string {
 }
 
 // Rollback rolls back the network configuration.
-func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options) error {
-	galog.Infof("Rolling back changes for netplan.")
+func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, active bool) error {
+	galog.Infof("Rolling back changes for netplan with reload [%t]", !active)
 
 	// Rollback the backend's drop-in files.
 	for _, backend := range backends {
-		if err := backend.RollbackDropins(opts.FilteredNICConfigs(), backendDropinPrefix); err != nil {
+		if err := backend.RollbackDropins(opts.FilteredNICConfigs(), backendDropinPrefix, active); err != nil {
 			return err
 		}
 	}
 
-	// Remove the netplan drop-in file.
-	if file.Exists(sn.ethernetDropinFile(), file.TypeFile) {
+	// Remove the netplan drop-in file. Don't remove it if we are the active network
+	// manager.
+	if !active && file.Exists(sn.ethernetDropinFile(), file.TypeFile) {
 		if err := os.Remove(sn.ethernetDropinFile()); err != nil {
 			return fmt.Errorf("error removing netplan dropin: %w", err)
 		}
@@ -358,6 +368,15 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options) e
 	if file.Exists(vlanDropin, file.TypeFile) {
 		if err := os.Remove(vlanDropin); err != nil {
 			return fmt.Errorf("error removing netplan vlan dropin: %w", err)
+		}
+	}
+
+	if !active {
+		if err := sn.generateConfigs(ctx); err != nil {
+			return fmt.Errorf("error reloading netplan changes: %w", err)
+		}
+		if err := sn.backend.Reload(ctx); err != nil {
+			return fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
 		}
 	}
 
