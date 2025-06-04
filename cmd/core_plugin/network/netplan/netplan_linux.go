@@ -27,6 +27,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
@@ -371,6 +372,11 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 		}
 	}
 
+	// Attempt to restore the default netplan configuration.
+	if err := sn.restoreDefaultConfig(ctx); err != nil {
+		return fmt.Errorf("error restoring default netplan configuration: %w", err)
+	}
+
 	if !active {
 		if err := sn.generateConfigs(ctx); err != nil {
 			return fmt.Errorf("error reloading netplan changes: %w", err)
@@ -380,6 +386,54 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 		}
 	}
 
+	return nil
+}
+
+// restoreDefaultConfig restores the default netplan configuration.
+func (sn *serviceNetplan) restoreDefaultConfig(ctx context.Context) error {
+	const (
+		defaultConfigPath = "/etc/netplan/90-default.yaml"
+		defaultConfig     = `network:
+	version: 2
+	ethernets:
+			all-en:
+					match:
+							name: en*
+					dhcp4: true
+					dhcp4-overrides:
+							use-domains: true
+					dhcp6: true
+					dhcp6-overrides:
+							use-domains: true
+			all-eth:
+					match:
+							name: eth*
+					dhcp4: true
+					dhcp4-overrides:
+							use-domains: true
+					dhcp6: true
+					dhcp6-overrides:
+							use-domains: true
+`
+	)
+
+	if !cfg.Retrieve().NetworkInterfaces.RestoreDebian12NetplanConfig {
+		galog.Debugf("Skipping restore of default netplan configuration.")
+		return nil
+	}
+
+	osDesc := osinfo.Read()
+	if osDesc.OS != "debian" || osDesc.Version.Major != 12 {
+		galog.Debugf("Skipping restore of default netplan configuration for non-Debian 12.")
+		return nil
+	}
+
+	if !file.Exists(defaultConfigPath, file.TypeFile) {
+		if err := os.WriteFile(defaultConfigPath, []byte(defaultConfig), 0644); err != nil {
+			return fmt.Errorf("error writing default netplan configuration: %w", err)
+		}
+		galog.Debugf("Restored default netplan configuration.")
+	}
 	return nil
 }
 
