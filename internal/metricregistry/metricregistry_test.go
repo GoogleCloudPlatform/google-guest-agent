@@ -102,11 +102,6 @@ func TestIsMetricValid(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "guest_agent_module_metrics",
-			metric: &acmpb.GuestAgentModuleMetrics{},
-			want:   true,
-		},
-		{
 			name:   "unknown_metric",
 			metric: &acmpb.CurrentPluginStates{},
 			want:   false,

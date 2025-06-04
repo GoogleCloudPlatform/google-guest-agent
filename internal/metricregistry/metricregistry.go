@@ -33,7 +33,7 @@ const (
 	messageType = "message_type"
 	// GuestAgentModuleMetricMsg is the message type label to use with any metrics
 	// sent by agent.
-	guestAgentModuleMetricMsg = "agent_controlplane.GuestAgentModuleMetric"
+	guestAgentModuleMetricMsg = "agent_controlplane.GuestAgentModuleMetrics"
 	// DefaultMaxRecords is the default maximum number of records to store in
 	// in-memory registry before flushing.
 	DefaultMaxRecords = 100
@@ -114,7 +114,7 @@ func isMetricValid(metric proto.Message) bool {
 	}
 
 	switch metric.(type) {
-	case *acmpb.GuestAgentModuleMetric, *acmpb.GuestAgentModuleMetrics:
+	case *acmpb.GuestAgentModuleMetric:
 		return true
 	default:
 		return false
@@ -172,14 +172,25 @@ func (mr *MetricRegistry) Flush(ctx context.Context) {
 	mr.metrics = nil
 	mr.metricsMu.Unlock()
 
+	var moduleMetrics []*acmpb.GuestAgentModuleMetric
 	for _, metric := range toFlush {
-		galog.V(2).Debugf("Flushing metric: %+v", metric)
-		_, err := client.SendMessage(ctx, map[string]string{messageType: guestAgentModuleMetricMsg}, metric)
-		if err != nil {
-			// Client internally retries these errors so returning here is not
-			// actionable and simply logged for debugging.
-			galog.V(2).Warnf("Failed to send metric: %+v to ACS: %v", metric, err)
+		switch metric.(type) {
+		case *acmpb.GuestAgentModuleMetric:
+			moduleMetrics = append(moduleMetrics, metric.(*acmpb.GuestAgentModuleMetric))
 		}
+	}
+
+	if len(moduleMetrics) == 0 {
+		galog.V(2).Debugf("No metrics to flush for %q", mr.name)
+		return
+	}
+
+	galog.V(2).Debugf("Sending metrics to ACS: %+v", moduleMetrics)
+	_, err := client.SendMessage(ctx, map[string]string{messageType: guestAgentModuleMetricMsg}, &acmpb.GuestAgentModuleMetrics{Metrics: moduleMetrics})
+	if err != nil {
+		// Client internally retries these errors so returning here is not
+		// actionable and simply logged for debugging.
+		galog.V(2).Warnf("Failed to send metrics: %+v to ACS: %v", moduleMetrics, err)
 	}
 }
 
