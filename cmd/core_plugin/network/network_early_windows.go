@@ -106,5 +106,5 @@ func defaultRouteFromTable(table []route.Handle) (*route.Handle, error) {
 		return primaryRoute, nil
 	}
 
-	return nil, fmt.Errorf("no default route found")
+	return nil, fmt.Errorf("no default route to %s found in route table %+v", defaultRouteDestination.String(), table)
 }
