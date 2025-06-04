@@ -33,8 +33,8 @@ func TestNewRootCommand(t *testing.T) {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly: %v", err)
 	}
 
-	if cmd.Name() != "ggactl_plugin_cleanup" {
-		t.Errorf("newRootCommand.Name = %s, want ggactl_plugin_cleanup", cmd.Name())
+	if cmd.Name() != "ggactl_plugin" {
+		t.Errorf("newRootCommand.Name = %s, want ggactl_plugin", cmd.Name())
 	}
 
 	if len(cmd.Commands()) != 3 {
@@ -50,7 +50,7 @@ func TestNewRootCommand(t *testing.T) {
 	}{
 		{
 			name: "plugin_cleanup_all",
-			args: []string{"all"},
+			args: []string{"dynamic-cleanup"},
 			want: "",
 		},
 	}
