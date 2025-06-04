@@ -28,7 +28,7 @@ import (
 // New returns a new plugin cleanup command.
 func New() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "all",
+		Use:   "dynamic-cleanup",
 		Short: "Remove all dynamic plugins",
 		Long:  "Remove all dynamic plugins. It is for stopping and removing all active plugins on the host.",
 		Args:  cobra.NoArgs,
