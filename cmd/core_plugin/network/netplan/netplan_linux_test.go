@@ -38,10 +38,12 @@ import (
 )
 
 type runMock struct {
+	seenOpts []run.Options
 	callback func(context.Context, run.Options) (*run.Result, error)
 }
 
 func (rm *runMock) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	rm.seenOpts = append(rm.seenOpts, opts)
 	return rm.callback(ctx, opts)
 }
 
@@ -235,6 +237,8 @@ func TestSetup(t *testing.T) {
 		runCallback func(context.Context, run.Options) (*run.Result, error)
 		want        *netplanDropin
 		wantErr     bool
+		noReload    bool
+		writeFile   bool
 	}{
 		{
 			name: "empty-options",
@@ -244,7 +248,8 @@ func TestSetup(t *testing.T) {
 					return false, nil
 				},
 			},
-			wantErr: false,
+			wantErr:  false,
+			noReload: true,
 		},
 		{
 			name: "fail-write-backend-dropins",
@@ -263,7 +268,8 @@ func TestSetup(t *testing.T) {
 			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 				return &run.Result{}, nil
 			},
-			wantErr: true,
+			wantErr:  true,
+			noReload: true,
 		},
 		{
 			name: "fail-networkctl",
@@ -476,6 +482,51 @@ func TestSetup(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "success-no-backend-reload",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+				},
+			}),
+			backend: &testBackend{
+				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+					return false, nil
+				},
+				ReloadCb: networkdModule.Reload,
+			},
+			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+				return &run.Result{}, nil
+			},
+			wantErr:   false,
+			writeFile: true,
+			noReload:  true,
+		},
+		{
+			name: "success-backend-reload",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+				},
+			}),
+			backend: &testBackend{
+				WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+					return true, nil
+				},
+				ReloadCb: networkdModule.Reload,
+			},
+			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+				return &run.Result{}, nil
+			},
+			wantErr:   false,
+			writeFile: true,
+			noReload:  false,
+		},
 	}
 
 	ctx := context.Background()
@@ -486,10 +537,10 @@ func TestSetup(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			oldRunner := run.Client
-
-			run.Client = &runMock{
+			mockRunner := &runMock{
 				callback: tc.runCallback,
 			}
+			run.Client = mockRunner
 
 			execLookPath = func(string) (string, error) {
 				return "netplan", nil
@@ -507,6 +558,36 @@ func TestSetup(t *testing.T) {
 				backendReload:            true,
 				forceNoOpBackend:         true,
 				netplanConfigDir:         filepath.Join(t.TempDir(), "netplan"),
+			}
+
+			// Write a pre-existing file.
+			if tc.writeFile {
+				dropinFPath := svc.ethernetDropinFile()
+				if err := os.MkdirAll(filepath.Dir(dropinFPath), 0755); err != nil {
+					t.Fatalf("Failed to create test directory: %v", err)
+				}
+				dropinFile := netplanDropin{
+					Network: netplanNetwork{
+						Version: netplanConfigVersion,
+						Ethernets: map[string]netplanEthernet{
+							"iface": netplanEthernet{
+								Match: netplanMatch{
+									Name: "iface",
+								},
+								DHCPv4: &trueVal,
+								DHCP4Overrides: &netplanDHCPOverrides{
+									UseDomains: &trueVal,
+								},
+								DHCP6Overrides: &netplanDHCPOverrides{
+									UseDomains: &trueVal,
+								},
+							},
+						},
+					},
+				}
+				if _, err := svc.write(dropinFile, dropinFPath); err != nil {
+					t.Fatalf("Failed to write test data: %v", err)
+				}
 			}
 
 			err := svc.Setup(ctx, tc.opts)
@@ -533,6 +614,11 @@ func TestSetup(t *testing.T) {
 				} else {
 					t.Errorf("Setup() did not generate a drop-in file")
 				}
+			}
+
+			// No commands should have been run if no files are written/changed.
+			if tc.noReload != (len(mockRunner.seenOpts) == 0) {
+				t.Errorf("Setup() called commands %d times, want %t\nCommands: %+v", len(mockRunner.seenOpts), tc.noReload, mockRunner.seenOpts)
 			}
 
 			// If vlan interfaces are present, the vlan drop-in file should not exist.

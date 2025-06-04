@@ -28,7 +28,6 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
@@ -183,6 +182,17 @@ func (s systemdMockRunner) WithContext(ctx context.Context, opts run.Options) (*
 	}
 
 	return nil, &exec.ExitError{}
+}
+
+// runMock is the Mock Runner to use for testing.
+type runMock struct {
+	seenOpts []run.Options
+	callback func(ctx context.Context, opts run.Options) (*run.Result, error)
+}
+
+func (r *runMock) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	r.seenOpts = append(r.seenOpts, opts)
+	return r.callback(ctx, opts)
 }
 
 // systemdTestSetup sets up the environment before each test.
@@ -608,7 +618,10 @@ func TestSetup(t *testing.T) {
 		name        string
 		opts        *service.Options
 		testOptions testOptions
+		runCallback func(context.Context, run.Options) (*run.Result, error)
 		wantErr     bool
+		writeFile   bool
+		noReload    bool
 	}{
 		{
 			name:    "empty-success",
@@ -642,9 +655,6 @@ func TestSetup(t *testing.T) {
 					Interface: &ethernet.Interface{
 						NameOp: func() string { return "iface" },
 					},
-					ExtraAddresses: &address.ExtraAddresses{
-						IPAliases: address.NewIPAddressMap([]string{"10.10.10.10", "10.10.10.10/24"}, nil),
-					},
 					Index: 1,
 				},
 			}),
@@ -652,6 +662,26 @@ func TestSetup(t *testing.T) {
 				createConfigDir: true,
 			},
 			wantErr: true,
+		},
+		{
+			name: "success-no-reload",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 1,
+				},
+			}),
+			testOptions: testOptions{
+				createConfigDir: true,
+			},
+			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+				return &run.Result{}, nil
+			},
+			wantErr:   false,
+			writeFile: true,
+			noReload:  true,
 		},
 	}
 
@@ -673,9 +703,51 @@ func TestSetup(t *testing.T) {
 				}
 			}
 
+			// Setup mock runner if a callback is provided.
+			var mockRunner *runMock
+			if tc.runCallback != nil {
+				oldRunner := run.Client
+				mockRunner = &runMock{
+					callback: tc.runCallback,
+				}
+				run.Client = mockRunner
+				t.Cleanup(func() {
+					run.Client = oldRunner
+				})
+			}
+
+			if tc.writeFile {
+				configPath := mod.networkFile("iface")
+				configData := networkdConfig{
+					Match: networkdMatchConfig{
+						Name: "iface",
+					},
+					Network: networkdNetworkConfig{
+						DHCP:            "ipv4",
+						DNSDefaultRoute: false,
+					},
+					DHCPv4: &networkdDHCPConfig{
+						RoutesToDNS: false,
+						RoutesToNTP: false,
+					},
+					DHCPv6: &networkdDHCPConfig{
+						RoutesToDNS: false,
+						RoutesToNTP: false,
+					},
+				}
+				if _, err := configData.write(configPath); err != nil {
+					t.Fatalf("failed to write file: %v", err)
+				}
+			}
+
 			err := mod.Setup(ctx, tc.opts)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want %v", err, tc.wantErr)
+			}
+
+			// Only time commands are run are for reloads.
+			if mockRunner != nil && tc.noReload != (len(mockRunner.seenOpts) == 0) {
+				t.Errorf("Setup() called commands %d times, want %t\nCommands: %+v", len(mockRunner.seenOpts), tc.noReload, mockRunner.seenOpts)
 			}
 		})
 	}
