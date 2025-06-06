@@ -32,7 +32,7 @@ import (
 const (
 	// DefaultIsCorePluginEnabled is the default value for the core plugin
 	// enabled configuration knob.
-	DefaultIsCorePluginEnabled = false
+	DefaultIsCorePluginEnabled = true
 )
 
 var (
@@ -62,7 +62,7 @@ func SetCorePluginEnabled(enableCorePlugin bool) error {
 }
 
 // IsCorePluginEnabled returns whether the core plugin is enabled or not. In
-// case of any error, it defaults to false.
+// case of any error, it defaults to [DefaultIsCorePluginEnabled].
 func IsCorePluginEnabled() bool {
 	exp := regexp.MustCompile(`enabled=(\w+)`)
 

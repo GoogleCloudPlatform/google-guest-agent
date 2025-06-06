@@ -324,7 +324,7 @@ func TestIsPluginEnabled(t *testing.T) {
 		{
 			name:        "none_set",
 			mdsData:     `{}`,
-			wantEnabled: false,
+			wantEnabled: true,
 		},
 	}
 

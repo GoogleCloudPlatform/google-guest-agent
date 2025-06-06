@@ -79,7 +79,8 @@ func main() {
 func launchScriptRunner(ctx context.Context, mdsClient metadata.MDSClientInterface, event string) error {
 	var enabled bool
 	opts := run.Options{
-		Name:       metadataScriptRunnerLegacy,
+		// Default to new script runner.
+		Name:       metadataScriptRunnerNew,
 		OutputType: run.OutputStream,
 		Args:       []string{event},
 	}
@@ -88,8 +89,8 @@ func launchScriptRunner(ctx context.Context, mdsClient metadata.MDSClientInterfa
 	if err != nil {
 		galog.Warnf("Failed to fetch MDS descriptor: [%v], falling back to legacy script runner", err)
 	} else {
-		if enabled = mds.HasCorePluginEnabled(); enabled {
-			opts.Name = metadataScriptRunnerNew
+		if enabled = mds.HasCorePluginEnabled(); !enabled {
+			opts.Name = metadataScriptRunnerLegacy
 		}
 	}
 
