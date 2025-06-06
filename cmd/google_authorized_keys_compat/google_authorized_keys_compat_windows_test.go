@@ -127,7 +127,7 @@ func TestLaunchAuthorizedKeys(t *testing.T) {
 		{
 			name:        "mds_error",
 			runner:      &testRunner{},
-			wantCommand: authorizedKeysLegacy,
+			wantCommand: authorizedKeysNew,
 			mdsClient:   &MDSClient{throwErr: true},
 			wantErr:     false,
 		},

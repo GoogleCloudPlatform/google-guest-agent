@@ -51,7 +51,7 @@ var (
 	corePluginPath = ""
 	// skipCorePlugin determines if core plugin initialization should be skipped.
 	// Core plugin is not yet supported and must be set to true by default.
-	skipCorePlugin = true
+	skipCorePlugin = false
 )
 
 const (
@@ -76,7 +76,7 @@ func setupFlags() {
 	flag.BoolVar(&forceOnDemandPlugins, "on_demand_plugins", false, "force on-demand plugins (even if disabled on the configuration)")
 	// Core plugin flags.
 	flag.StringVar(&corePluginPath, "core_plugin_path", entryPath(), "path to core plugin binary")
-	flag.BoolVar(&skipCorePlugin, "core_plugins", true, "skip core plugin installation")
+	flag.BoolVar(&skipCorePlugin, "core_plugins", false, "skip core plugin installation")
 
 	flag.Parse()
 }

@@ -535,7 +535,7 @@ func (desc *Descriptor) HasServiceAccount() bool {
 
 // HasCorePluginEnabled returns whether the Core Plugin is enabled or not based
 // on MDS descriptor. If neither instance or project level metadata is set, it
-// defaults to *false*.
+// defaults to *true*.
 func (desc *Descriptor) HasCorePluginEnabled() bool {
 	if desc.Instance().Attributes().EnableCorePlugin() != nil {
 		return *desc.Instance().Attributes().EnableCorePlugin()
@@ -544,5 +544,5 @@ func (desc *Descriptor) HasCorePluginEnabled() bool {
 		return *desc.Project().Attributes().EnableCorePlugin()
 	}
 
-	return false
+	return true
 }

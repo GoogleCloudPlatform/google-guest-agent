@@ -47,21 +47,21 @@ func TestIsCorePluginEnabled(t *testing.T) {
 		{
 			name:    "invalid_content",
 			content: "invalid_content",
-			want:    false,
+			want:    true,
 		},
 		{
 			name:    "invalid_value",
 			content: "enabled=invalid_value",
-			want:    false,
+			want:    true,
 		},
 		{
 			name: "empty_file",
-			want: false,
+			want: true,
 		},
 		{
 			name:   "no_file",
 			nofile: true,
-			want:   false,
+			want:   true,
 		},
 	}
 
