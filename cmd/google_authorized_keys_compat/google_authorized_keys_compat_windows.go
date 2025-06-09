@@ -41,7 +41,7 @@ const (
 func launchAuthorizedKeys(ctx context.Context, mdsClient metadata.MDSClientInterface, username string) error {
 	var enabled bool
 	opts := run.Options{
-		Name:       authorizedKeysLegacy,
+		Name:       authorizedKeysNew,
 		OutputType: run.OutputCombined,
 		Args:       []string{username},
 	}
@@ -50,8 +50,8 @@ func launchAuthorizedKeys(ctx context.Context, mdsClient metadata.MDSClientInter
 	if err != nil {
 		galog.Warnf("Failed to fetch MDS descriptor: [%v], falling back to legacy authorized keys", err)
 	} else {
-		if enabled = mds.HasCorePluginEnabled(); enabled {
-			opts.Name = authorizedKeysNew
+		if enabled = mds.HasCorePluginEnabled(); !enabled {
+			opts.Name = authorizedKeysLegacy
 		}
 	}
 

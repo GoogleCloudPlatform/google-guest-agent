@@ -85,27 +85,27 @@ func TestSetupError(t *testing.T) {
 		{
 			name:               "event_data_error",
 			event:              &events.EventData{Error: fmt.Errorf("test error")},
-			wantCfgFileEnabled: false,
+			wantCfgFileEnabled: true,
 			wantNoop:           true,
 		},
 		{
 			name:               "invalid_event_data",
 			event:              &events.EventData{Data: "invalid"},
-			wantCfgFileEnabled: false,
+			wantCfgFileEnabled: true,
 			wantNoop:           true,
 		},
 		{
 			name:               "enable_core_plugin_disable_error",
 			event:              &events.EventData{Data: mdsEnable},
 			disableErr:         fmt.Errorf("test error"),
-			wantCfgFileEnabled: false,
+			wantCfgFileEnabled: true,
 			wantNoop:           false,
 		},
 		{
 			name:               "enable_core_plugin_stop_error",
 			event:              &events.EventData{Data: mdsEnable},
 			stopErr:            fmt.Errorf("test error"),
-			wantCfgFileEnabled: false,
+			wantCfgFileEnabled: true,
 			wantNoop:           false,
 		},
 		{

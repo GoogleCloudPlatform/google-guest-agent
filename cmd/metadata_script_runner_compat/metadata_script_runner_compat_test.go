@@ -150,7 +150,7 @@ func TestLaunchScriptRunner(t *testing.T) {
 		{
 			name:        "mds_error",
 			runner:      &testRunner{},
-			wantCommand: metadataScriptRunnerLegacy,
+			wantCommand: metadataScriptRunnerNew,
 			wantArgs:    []string{event},
 			mdsClient:   &MDSClient{throwErr: true},
 			wantErr:     false,
