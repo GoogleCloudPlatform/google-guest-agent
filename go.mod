@@ -8,7 +8,6 @@ require (
 	github.com/GoogleCloudPlatform/galog v0.0.0-20250304215735-ba267badf488
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/go-ini/ini v1.67.0
-	github.com/go-yaml/yaml v2.1.0+incompatible
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-tpm v0.9.1
 	github.com/google/go-tpm-tools v0.4.4
@@ -20,6 +19,7 @@ require (
 	google.golang.org/api v0.228.0
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.6
+	gopkg.in/yaml.v3 v3.0.1
 	software.sslmate.com/src/go-pkcs12 v0.5.0
 )
 
@@ -78,5 +78,4 @@ require (
 	google.golang.org/genproto v0.0.0-20250324211829-b45e905df463 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250324211829-b45e905df463 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250324211829-b45e905df463 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
