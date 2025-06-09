@@ -19,4 +19,4 @@
 # ensures that the routes are always present even when network interfaces are
 # reconfigured.
 
-ggactl_cleanup routes setup
+ggactl_plugin routes setup
