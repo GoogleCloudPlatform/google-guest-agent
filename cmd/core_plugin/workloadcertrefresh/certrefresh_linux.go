@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -105,7 +106,12 @@ type outputOpts struct {
 // moduleSetup is the initialization function for refresher module that
 // schedules the refresher job to run on a schedule.
 func moduleSetup(ctx context.Context, _ any) error {
-	return scheduler.Instance().ScheduleJob(ctx, NewCertRefresher())
+	job := NewCertRefresher()
+	if !job.ShouldEnable(ctx) {
+		galog.Infof("Skipping schedule job request for %q", job.ID())
+		return nil
+	}
+	return scheduler.Instance().ScheduleJob(ctx, job)
 }
 
 // modueTeardown is the teardown function for refresher module. It unschedules
