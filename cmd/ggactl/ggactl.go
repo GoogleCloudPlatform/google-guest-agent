@@ -42,7 +42,7 @@ const (
 // subcommands.
 func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "ggactl_plugin_cleanup",
+		Use:   "ggactl_plugin",
 		Short: "Guest Agent CLI for plugin cleanup.",
 		Long:  "Guest Agent CLI for removing all dynamic plugins.",
 	}
