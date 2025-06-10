@@ -40,7 +40,11 @@ type Manager struct {
 
 // NewManager creates a new Manager.
 func NewManager() *Manager {
-	return &Manager{guestAgentProcessName: daemon.GuestAgent, guestAgentManagerProcessName: daemon.GuestAgentManager, corePluginsEnabled: config.IsCorePluginEnabled()}
+	// IsCorePluginEnabled defaults to [true] if the config file is not present. If
+	// core plugin was ever enabled, the config file will be present.
+	alreadyEnabled := config.IsConfigFilePresent() && config.IsCorePluginEnabled()
+	galog.Infof("Compat manager created with core plugin already enabled: %t", alreadyEnabled)
+	return &Manager{guestAgentProcessName: daemon.GuestAgent, guestAgentManagerProcessName: daemon.GuestAgentManager, corePluginsEnabled: alreadyEnabled}
 }
 
 // Setup sets up the configuration to enable/disable the Core Plugin and the
