@@ -162,7 +162,6 @@ func TestRun(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed with error: %v", err)
 	}
-	cfg.Retrieve().Telemetry.MetricCollectionEnabled = true
 
 	ctx := context.Background()
 	eventManager := newManager()

@@ -63,7 +63,6 @@ func TestMetricRunFlusher(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
 	}
-	cfg.Retrieve().Telemetry.MetricCollectionEnabled = true
 	cfg.Retrieve().Core.ACSClient = false
 
 	mr := &MetricRegistry{
@@ -128,7 +127,6 @@ func TestMetricRecord(t *testing.T) {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
 	}
 	// Disable for unit tests to avoid any attempt to send metrics to ACS.
-	cfg.Retrieve().Telemetry.MetricCollectionEnabled = true
 	cfg.Retrieve().Core.ACSClient = false
 	mr := New(ctx, time.Second, 3, "record_test")
 
