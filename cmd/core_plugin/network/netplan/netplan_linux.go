@@ -190,7 +190,10 @@ func (sn *serviceNetplan) generateConfigs(ctx context.Context) error {
 	return nil
 }
 
-// writeVlanDropin writes the netplan drop-in file for the vlan interfaces.
+// writeVlanDropin writes the netplan drop-in file for the vlan interfaces. All
+// interfaces are consolidated into a single drop-in file, if no vlan interfaces
+// are configured, the drop-in file is removed - accounting for the removal
+// aspect of hot unplugging a dynamic vlan.
 func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, error) {
 	galog.Debugf("Writing vlan drop-in configuration.")
 
