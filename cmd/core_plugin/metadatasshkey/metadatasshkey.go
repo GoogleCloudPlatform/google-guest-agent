@@ -162,7 +162,10 @@ func addSystemUsers(ctx context.Context, config *cfg.Sections, desc *metadata.De
 // metadataChanged reports whether the state of metadata ssh key enablement or
 // keys have changed and should be reconfigured.
 func metadataChanged(config *cfg.Sections, desc *metadata.Descriptor, lastValidKeys userKeyMap, lastEnabled bool) bool {
-	return enableMetadataSSHKey(config, desc) != lastEnabled || !reflect.DeepEqual(findValidKeys(desc), lastValidKeys)
+	newMap := findValidKeys(desc)
+	galog.Debugf("lastValidKeys: %v", lastValidKeys)
+	galog.Debugf("newMap: %v", newMap)
+	return enableMetadataSSHKey(config, desc) != lastEnabled || !reflect.DeepEqual(newMap, lastValidKeys)
 }
 
 func findValidKeys(desc *metadata.Descriptor) userKeyMap {
@@ -186,6 +189,7 @@ func findValidKeys(desc *metadata.Descriptor) userKeyMap {
 			continue
 		}
 		keyMap[username] = append(keyMap[username], keycontent)
+		galog.Infof("Found valid key %q for user %q", keycontent, username)
 	}
 	return keyMap
 }
