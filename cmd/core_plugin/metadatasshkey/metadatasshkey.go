@@ -121,6 +121,8 @@ func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metada
 	}
 	enabled := enableMetadataSSHKey(config, desc)
 	lastEnabled = enabled
+	newKeys := findValidKeys(desc)
+	lastUserKeyMap = newKeys
 	if !enabled {
 		galog.V(2).Infof("Accounts management is disabled or oslogin is enabled, disabling metadata ssh key.")
 		return false, deprovisionUnusedUsers(ctx, config, make(userKeyMap))
@@ -131,16 +133,14 @@ func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metada
 			onetimePlatformSetupFinished.Store(true)
 		}
 	}
-	errs = append(errs, addSystemUsers(ctx, config, desc)...)
+	errs = append(errs, addSystemUsers(ctx, config, newKeys)...)
 	return false, errs
 }
 
 // addSystemUsers will create users on the local system and add keys from
 // metadata to their account. Calling this function will update lastValidKeys.
-func addSystemUsers(ctx context.Context, config *cfg.Sections, desc *metadata.Descriptor) []error {
-	newKeys := findValidKeys(desc)
+func addSystemUsers(ctx context.Context, config *cfg.Sections, newKeys userKeyMap) []error {
 	var errs []error
-	lastUserKeyMap = newKeys
 	for username, keys := range newKeys {
 		userAccount, err := ensureUserExists(ctx, username)
 		if err != nil {
