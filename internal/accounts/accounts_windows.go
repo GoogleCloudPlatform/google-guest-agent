@@ -112,6 +112,10 @@ func CreateUser(_ context.Context, u *User) error {
 
 // DelUser deletes the user from the system.
 func DelUser(_ context.Context, u *User) error {
+	if u == nil {
+		return fmt.Errorf("user is nil")
+	}
+
 	if err := netUserDel(u.Name); err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
@@ -128,6 +132,10 @@ func CreateGroup(_ context.Context, group string) error {
 
 // DelGroup deletes the group from the system.
 func DelGroup(_ context.Context, g *Group) error {
+	if g == nil {
+		return fmt.Errorf("group is nil")
+	}
+
 	if err := netLocalGroupDel(g.Name); err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
 	}
@@ -146,6 +154,16 @@ func FindGroup(_ context.Context, name string) (*Group, error) {
 
 // AddUserToGroup adds the user to the given group.
 func AddUserToGroup(_ context.Context, u *User, g *Group) error {
+	if u == nil && g == nil {
+		return fmt.Errorf("user and group are nil")
+	}
+	if u == nil {
+		return fmt.Errorf("user is nil")
+	}
+	if g == nil {
+		return fmt.Errorf("group is nil")
+	}
+
 	osSpecific, ok := u.osSpecific.(*windowsUserInfo)
 	if !ok {
 		return fmt.Errorf("failed to get os specific user info for user")
@@ -160,6 +178,16 @@ func AddUserToGroup(_ context.Context, u *User, g *Group) error {
 // RemoveUserFromGroup removes the provided user from the given group. If the
 // user is not a member of the group, this is a no-op.
 func RemoveUserFromGroup(_ context.Context, u *User, g *Group) error {
+	if u == nil && g == nil {
+		return fmt.Errorf("user and group are nil")
+	}
+	if u == nil {
+		return fmt.Errorf("user is nil")
+	}
+	if g == nil {
+		return fmt.Errorf("group is nil")
+	}
+
 	osSpecific, ok := u.osSpecific.(*windowsUserInfo)
 	if !ok {
 		return fmt.Errorf("failed to get os specific user info for user")

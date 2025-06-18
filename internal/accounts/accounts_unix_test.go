@@ -482,6 +482,10 @@ func TestCreateUserError(t *testing.T) {
 			wantGusersContents: "",
 			wantErr:            errors.New("failed to run useraddcmd"),
 		},
+		{
+			name:    "nil_user",
+			wantErr: errors.New("user is nil"),
+		},
 	}
 
 	ctx := context.Background()
@@ -635,6 +639,10 @@ func TestDelUserError(t *testing.T) {
 			gusersContents:     "",
 			wantErr:            errors.New("failed to run userdel_cmd"),
 		},
+		{
+			name:    "nil_user",
+			wantErr: errors.New("user is nil"),
+		},
 	}
 
 	ctx := context.Background()
@@ -741,6 +749,7 @@ func TestAddUserToGroup(t *testing.T) {
 		group      *Group
 		addUserCmd string
 		wantArgs   string
+		wantErr    bool
 	}{
 		{
 			name: "add_user",
@@ -779,7 +788,7 @@ func TestAddUserToGroup(t *testing.T) {
 	}
 }
 
-func TestAdduserToGroupError(t *testing.T) {
+func TestAddUserToGroupError(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed: %v", err)
 	}
@@ -802,6 +811,22 @@ func TestAdduserToGroupError(t *testing.T) {
 			},
 			addUserCmd: "#!/bin/sh\nexit 1",
 			wantErr:    errors.New("failed to run password add command " + testCmd + "  -a {user} {group}: exit status 1"),
+		},
+		{
+			name: "nil_user",
+			group: &Group{
+				Name: fakeGroup,
+			},
+			wantErr: errors.New("user is nil"),
+		},
+		{
+			name:    "nil_group",
+			u:       testrunner,
+			wantErr: errors.New("group is nil"),
+		},
+		{
+			name:    "nil_user_and_group",
+			wantErr: errors.New("user and group are nil"),
 		},
 	}
 
@@ -896,6 +921,22 @@ func TestRemoveUserFromGroupError(t *testing.T) {
 			group:         &Group{},
 			removeUserCmd: "#!/bin/sh\nexit 1",
 			wantErr:       true,
+		},
+		{
+			name: "nil_user",
+			group: &Group{
+				Name: fakeGroup,
+			},
+			wantErr: true,
+		},
+		{
+			name:    "nil_group",
+			u:       testrunner,
+			wantErr: true,
+		},
+		{
+			name:    "nil_user_and_group",
+			wantErr: true,
 		},
 	}
 

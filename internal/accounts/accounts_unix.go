@@ -190,6 +190,10 @@ func parsePasswdEntry(line string, username string) (*User, error) {
 // information about the created user is important the caller should call
 // FindUser after creation. Returns the wrapped run error if the command failed.
 func CreateUser(ctx context.Context, u *User) error {
+	if u == nil {
+		return fmt.Errorf("user is nil")
+	}
+
 	useUID, useGID := u.UnixUID(), u.UnixGID()
 
 	// If the it's not possible to reuse the homedir, the user will be created
@@ -379,6 +383,16 @@ func CreateGroup(ctx context.Context, groupName string) error {
 // AddUserToGroup adds the user to the named group. Returns the wrapped
 // run error if the command failed.
 func AddUserToGroup(ctx context.Context, u *User, g *Group) error {
+	if u == nil && g == nil {
+		return fmt.Errorf("user and group are nil")
+	}
+	if u == nil {
+		return fmt.Errorf("user is nil")
+	}
+	if g == nil {
+		return fmt.Errorf("group is nil")
+	}
+
 	cmd := cfg.Retrieve().Accounts.GPasswdAddCmd
 	if _, err := runCommandTemplate(ctx, cmd, u, g); err != nil {
 		return fmt.Errorf("failed to run password add command %s: %w", cmd, err)
@@ -389,6 +403,16 @@ func AddUserToGroup(ctx context.Context, u *User, g *Group) error {
 // RemoveUserFromGroup removes the user from the named group. Returns the run
 // error if the command failed.
 func RemoveUserFromGroup(ctx context.Context, u *User, g *Group) error {
+	if u == nil && g == nil {
+		return fmt.Errorf("user and group are nil")
+	}
+	if u == nil {
+		return fmt.Errorf("user is nil")
+	}
+	if g == nil {
+		return fmt.Errorf("group is nil")
+	}
+
 	cmd := cfg.Retrieve().Accounts.GPasswdRemoveCmd
 	if _, err := runCommandTemplate(ctx, cmd, u, g); err != nil {
 		return fmt.Errorf("failed to run gpasswd_remove_cmd %s: %w", cmd, err)
@@ -399,6 +423,10 @@ func RemoveUserFromGroup(ctx context.Context, u *User, g *Group) error {
 // DelUser removes the user from the OS. Returns the wrapped
 // run error if the command failed.
 func DelUser(ctx context.Context, u *User) error {
+	if u == nil {
+		return fmt.Errorf("user is nil")
+	}
+
 	cmd := cfg.Retrieve().Accounts.UserDelCmd
 	if _, err := runCommandTemplate(ctx, cmd, u, nil); err != nil {
 		return fmt.Errorf("failed to run userdel_cmd %s: %w", cmd, err)

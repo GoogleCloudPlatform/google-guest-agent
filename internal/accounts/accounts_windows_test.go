@@ -382,27 +382,38 @@ func TestDelUser(t *testing.T) {
 	tests := []struct {
 		// name is the name of the test.
 		name string
+		// createUser indicates whether to create a user.
+		createTestUser bool
 		// opts are the options for overriding syscalls.
 		opts accountsTestOpts
 		// expectErr indicates whether an error is expected.
 		expectErr bool
 	}{
 		{
-			name:      "success",
-			expectErr: false,
+			name:           "success",
+			createTestUser: true,
+			expectErr:      false,
 		},
 		{
-			name: "failure",
+			name:           "failure",
+			createTestUser: true,
 			opts: accountsTestOpts{
 				overrideNetUserDel: true,
 			},
+			expectErr: true,
+		},
+		{
+			name:      "nil-user",
 			expectErr: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testUser := createTestUser(t, "testuser", "password123456789")
+			var testUser *User
+			if test.createTestUser {
+				testUser = createTestUser(t, "testuser", "password123456789")
+			}
 			accountsTestSetup(t, test.opts)
 			err := DelUser(context.Background(), testUser)
 			if (err == nil) == test.expectErr {
@@ -476,20 +487,28 @@ func TestDelGroup(t *testing.T) {
 	tests := []struct {
 		// name is the name of the test.
 		name string
+		// createGroup indicates whether to create a group.
+		createGroup bool
 		// opts are the options for overriding syscalls.
 		opts accountsTestOpts
 		// expectErr indicates whether an error is expected.
 		expectErr bool
 	}{
 		{
-			name:      "success",
-			expectErr: false,
+			name:        "success",
+			createGroup: true,
+			expectErr:   false,
 		},
 		{
-			name: "syscall-error",
+			name:        "syscall-error",
+			createGroup: true,
 			opts: accountsTestOpts{
 				overrideNetLocalGroupDel: true,
 			},
+			expectErr: true,
+		},
+		{
+			name:      "nil-group",
 			expectErr: true,
 		},
 	}
@@ -498,7 +517,10 @@ func TestDelGroup(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testGroup := createTestGroup(t, "testgroup")
+			var testGroup *Group
+			if test.createGroup {
+				testGroup = createTestGroup(t, "testgroup")
+			}
 			accountsTestSetup(t, test.opts)
 
 			err := DelGroup(ctx, testGroup)
@@ -520,29 +542,57 @@ func TestAddUserToGroup(t *testing.T) {
 	tests := []struct {
 		// name is the name of the test.
 		name string
+		// createTestUser indicates whether to create a user.
+		createTestUser bool
+		// createTestGroup indicates whether to create a group.
+		createTestGroup bool
 		// opts are the options for overriding syscalls.
 		opts accountsTestOpts
 		// expectErr indicates whether an error is expected.
 		expectErr bool
 	}{
 		{
-			name:      "success",
-			expectErr: false,
+			name:            "success",
+			createTestUser:  true,
+			createTestGroup: true,
+			expectErr:       false,
 		},
 		{
-			name: "syscall-error",
+			name:            "syscall-error",
+			createTestUser:  true,
+			createTestGroup: true,
 			opts: accountsTestOpts{
 				overrideNetLocalGroupAddMembers: true,
 			},
+			expectErr: true,
+		},
+		{
+			name:            "nil-user",
+			createTestGroup: true,
+			expectErr:       true,
+		},
+		{
+			name:           "nil-group",
+			createTestUser: true,
+			expectErr:      true,
+		},
+		{
+			name:      "nil-user-and-group",
 			expectErr: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testUser := createTestUser(t, "testuser", "password123456789")
-			testGroup := createTestGroup(t, "testgroup")
 			accountsTestSetup(t, test.opts)
+			var testUser *User
+			if test.createTestUser {
+				testUser = createTestUser(t, "testuser", "password123456789")
+			}
+			var testGroup *Group
+			if test.createTestGroup {
+				testGroup = createTestGroup(t, "testgroup")
+			}
 
 			err := AddUserToGroup(context.Background(), testUser, testGroup)
 			if (err == nil) == test.expectErr {
@@ -556,35 +606,65 @@ func TestRemoveUserFromGroup(t *testing.T) {
 	tests := []struct {
 		// name is the name of the test.
 		name string
+		// createTestUser indicates whether to create a user.
+		createTestUser bool
+		// createTestGroup indicates whether to create a group.
+		createTestGroup bool
 		// opts are the options for overriding syscalls.
 		opts accountsTestOpts
 		// expectErr indicates whether an error is expected.
 		expectErr bool
 	}{
 		{
-			name:      "success",
-			expectErr: false,
+			name:            "success",
+			createTestUser:  true,
+			createTestGroup: true,
+			expectErr:       false,
 		},
 		{
-			name: "syscall-error",
+			name:            "syscall-error",
+			createTestUser:  true,
+			createTestGroup: true,
 			opts: accountsTestOpts{
 				overrideNetLocalGroupDelMembers: true,
 			},
+			expectErr: true,
+		},
+		{
+			name:            "nil-user",
+			createTestGroup: true,
+			expectErr:       true,
+		},
+		{
+			name:           "nil-group",
+			createTestUser: true,
+			expectErr:      true,
+		},
+		{
+			name:      "nil-user-and-group",
 			expectErr: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testUser := createTestUser(t, "testuser", "password123456789")
-			testGroup := createTestGroup(t, "testgroup")
-			err := AddUserToGroup(context.Background(), testUser, testGroup)
-			if err != nil {
-				t.Fatalf("failed to add testuser to testgroup: %v", err)
+			var testUser *User
+			var testGroup *Group
+			if test.createTestUser {
+				testUser = createTestUser(t, "testuser", "password123456789")
+			}
+			if test.createTestGroup {
+				testGroup = createTestGroup(t, "testgroup")
+			}
+			if testUser != nil && testGroup != nil {
+				err := AddUserToGroup(context.Background(), testUser, testGroup)
+				if err != nil {
+					t.Fatalf("failed to add testuser to testgroup: %v", err)
+				}
 			}
 
 			accountsTestSetup(t, test.opts)
-			err = RemoveUserFromGroup(context.Background(), testUser, testGroup)
+			err := RemoveUserFromGroup(context.Background(), testUser, testGroup)
 			if (err == nil) == test.expectErr {
 				t.Fatalf("RemoveUserFromGroup(%+v, %v) = err %v, want err %v", testUser, "testgroup", err, test.expectErr)
 			}
