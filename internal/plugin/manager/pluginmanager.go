@@ -747,6 +747,7 @@ func (m *PluginManager) startMonitoring(ctx context.Context, p *Plugin) {
 // stopMonitoring stops/removes the plugin monitoring job.
 func (m *PluginManager) stopMonitoring(p *Plugin) {
 	galog.Infof("Removing plugin monitor job for plugin %q", p.FullName())
+	galog.Infof("Plugin monitors: %+v", m.pluginMonitors)
 	pm, ok := m.pluginMonitors[p.FullName()]
 	if !ok {
 		galog.Warnf("Plugin monitor not found for %q, ignoring stop monitor request", p.FullName())
@@ -775,6 +776,7 @@ func (m *PluginManager) startMetricsMonitoring(ctx context.Context, p *Plugin) {
 // stopMetricsMonitoring stops/removes the plugin metrics monitoring job.
 func (m *PluginManager) stopMetricsMonitoring(p *Plugin) {
 	galog.Infof("Removing plugin metrics monitor job for plugin %q", p.FullName())
+	galog.Infof("Plugin metrics monitors: %+v", m.pluginMetricsMonitors)
 
 	m.pluginMetricsMu.Lock()
 	pm, ok := m.pluginMetricsMonitors[p.FullName()]

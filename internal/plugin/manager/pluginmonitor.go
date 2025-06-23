@@ -71,7 +71,7 @@ func (m *PluginMonitor) Interval() (time.Duration, bool) {
 }
 
 // ShouldEnable informs scheduler if this job should be scheduled job or not.
-// Always return true to have plugin monitoring.
+// Only schedule plugin monitoring if the plugin is running.
 func (m *PluginMonitor) ShouldEnable(ctx context.Context) bool {
 	return true
 }

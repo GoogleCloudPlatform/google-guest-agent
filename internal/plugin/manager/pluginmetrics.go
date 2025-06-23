@@ -66,7 +66,7 @@ func (p *PluginMetrics) Interval() (time.Duration, bool) {
 
 // ShouldEnable returns true if this job should be scheduled or not by the
 // scheduler.
-func (*PluginMetrics) ShouldEnable(ctx context.Context) bool {
+func (p *PluginMetrics) ShouldEnable(ctx context.Context) bool {
 	return true
 }
 
