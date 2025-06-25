@@ -112,6 +112,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set the version of the binary as soon as config is loaded for any other
+	// modules to use. Setting value explicitly after cfg load makes sure version
+	// is as expected and its not coming from instance config or any other files.
+	cfg.Retrieve().Core.Version = version
+
 	setupFlags()
 	ctx, cancel := context.WithCancel(context.Background())
 

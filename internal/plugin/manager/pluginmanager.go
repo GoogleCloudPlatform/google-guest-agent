@@ -30,6 +30,7 @@ import (
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/boundedlist"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
@@ -215,7 +216,8 @@ func (m *PluginManager) StopPlugin(ctx context.Context, name string) error {
 // ACS is disabled. Plugin Manager will be initialized during early Guest Agent
 // startup to configure the core plugins.
 func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, error) {
-	galog.Infof("Initializing plugin manager for instance %q", instanceID)
+	version := cfg.Retrieve().Core.Version
+	galog.Infof("Initializing plugin manager for instance %q, agent version: %q", instanceID, version)
 	pluginManager.setInstanceID(instanceID)
 
 	// Cleanup old plugin state in a separate goroutine. This operation is not
@@ -253,6 +255,17 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 				delete(pluginManager.inProgressPluginRequests, p.Name)
 				wg.Done()
 			}()
+
+			if p.Name == CorePluginName && p.Revision != version {
+				// If core plugin is already running, just set the state to running and
+				// return. If the revision is different, it means the core plugin is
+				// being updated and there's no need to relaunch if not running.
+				if p.IsRunning(ctx) {
+					p.setState(acpb.CurrentPluginStates_DaemonPluginState_RUNNING)
+				}
+				galog.Infof("Plugin %q state is different from expected revision %q, skipping relaunch", p.FullName(), version)
+				return
+			}
 
 			if err := connectOrReLaunch(ctx, p); err != nil {
 				galog.Errorf("Failed to connect or relaunch plugin %q: %v", p.FullName(), err)

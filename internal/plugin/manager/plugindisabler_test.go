@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -190,5 +191,52 @@ func TestStopStepApi(t *testing.T) {
 	}
 	if step.ErrorStatus() != wantErrorStatus {
 		t.Errorf("stopStep.ErrorStatus() = %s, want %s", step.ErrorStatus(), wantErrorStatus)
+	}
+}
+
+func TestIsSameExecutablePath(t *testing.T) {
+	var validPaths, invalidPaths []string
+	var plugin *Plugin
+	if runtime.GOOS == "windows" {
+		plugin = &Plugin{EntryPath: `C:\Users\testuser\AppData\Local\Temp\testplugin.exe`}
+		validPaths = []string{`C:\Users\testuser\AppData\Local\Temp\testplugin.exe.old805949437`, plugin.EntryPath}
+		invalidPaths = []string{`C:\Users\testuser\AppData\Local\Temp\testplugin2.exe.old805949437`, `C:\Users\testuser\AppData\Local\Temp\testplugin2.exe`}
+	} else {
+		plugin = &Plugin{EntryPath: `/var/lib/google/guest_agent/testplugin`}
+		validPaths = []string{"/var/lib/google/guest_agent/testplugin (deleted)", plugin.EntryPath}
+		invalidPaths = []string{"/var/lib/google/guest_agent/testplugin2 (deleted)", "/var/lib/google/guest_agent/testplugin2"}
+	}
+
+	tests := []struct {
+		desc         string
+		validPaths   []string
+		invalidPaths []string
+		want         bool
+	}{
+		{
+			desc:       "valid_paths",
+			validPaths: validPaths,
+			want:       true,
+		},
+		{
+			desc:         "invalid_paths",
+			invalidPaths: invalidPaths,
+			want:         false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			for _, path := range tc.validPaths {
+				if !plugin.isSameExecutablePath(path) {
+					t.Errorf("isSameExecutablePath(%q) = false, want true for plugin %+v", path, plugin)
+				}
+			}
+			for _, path := range tc.invalidPaths {
+				if plugin.isSameExecutablePath(path) {
+					t.Errorf("isSameExecutablePath(%q) = true, want false for plugin %+v", path, plugin)
+				}
+			}
+		})
 	}
 }

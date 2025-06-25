@@ -18,6 +18,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
 
@@ -49,6 +52,22 @@ func (ss *stopStep) ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_St
 	return acmpb.CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED
 }
 
+// isSameExecutablePath checks if the executable path is the same as the plugin
+// entry path.
+func (p *Plugin) isSameExecutablePath(executable string) bool {
+	if runtime.GOOS == "windows" {
+		// On Windows, when the process is running and the binary is being deleted
+		// path show up similar to -
+		// C:\Users\<username>\AppData\Local\Temp\ProcessName.exe.old805949437"
+		return strings.Contains(executable, filepath.Base(p.EntryPath))
+	}
+
+	// If the pathname has been unlinked/deleted, the /proc returned executable
+	// path will contain the string '(deleted)' appended to the original pathname.
+	entryPath := strings.TrimSuffix(executable, " (deleted)")
+	return p.EntryPath == entryPath
+}
+
 func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 	pluginPid := p.pid()
 	proc, err := ps.FindPid(pluginPid)
@@ -60,10 +79,12 @@ func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 	// Ensures PID is not reused by a different process and then attempts to
 	// stop and kill the plugin process.
 
-	if proc.Exe != p.EntryPath {
+	if !p.isSameExecutablePath(proc.Exe) {
 		galog.Infof("Plugin PID (%d) is being reused by a different process running from (%q) different from expected binary(%q), skipping stop RPC", pluginPid, proc.Exe, p.EntryPath)
 		return nil
 	}
+
+	galog.Infof("Stopping %q plugin process (%d) running from %q", p.FullName(), pluginPid, proc.Exe)
 
 	if _, err := p.Stop(ctx, ss.cleanup); err != nil {
 		galog.Warnf("Stop %s plugin failed with error: %v", p.FullName(), err)
