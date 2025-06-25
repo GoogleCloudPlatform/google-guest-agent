@@ -17,9 +17,12 @@ package nm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -262,6 +265,11 @@ func TestSetup(t *testing.T) {
 					Index: 1,
 				},
 			}),
+			runMock: &runMock{
+				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+					return &run.Result{}, fmt.Errorf("unknown error")
+				},
+			},
 			createConfigDirs: false,
 			wantErr:          true,
 		},
@@ -545,11 +553,11 @@ method = auto
 				networkScriptsDir: path.Join(t.TempDir(), "NetworkManager", "ifcfg"),
 			}
 
-			if tc.createConfigDirs {
-				if err := os.MkdirAll(svc.configDir, 0755); err != nil {
-					t.Fatalf("failed to create mock network config directory: %v", err)
-				}
+			if err := os.MkdirAll(svc.configDir, 0755); err != nil {
+				t.Fatalf("failed to create mock network config directory: %v", err)
+			}
 
+			if tc.createConfigDirs {
 				if err := os.MkdirAll(svc.networkScriptsDir, 0755); err != nil {
 					t.Fatalf("failed to create mock network scripts directory: %v", err)
 				}
@@ -703,6 +711,88 @@ func TestRollback(t *testing.T) {
 			if !tc.wantErr && file.Exists(svc.configFilePath("iface"), file.TypeFile) {
 				t.Errorf("config file %s was not removed", svc.configFilePath("iface"))
 			}
+		})
+	}
+}
+
+func TestCleanupVlanConfigs(t *testing.T) {
+	tests := []struct {
+		name           string
+		configFiles    []string
+		survivingFiles []string
+	}{
+		{
+			name:        "empty-config-dir",
+			configFiles: []string{},
+		},
+		{
+			name: "all-valid-files",
+			configFiles: []string{
+				"google-guest-agent-test1-iface.1.nmconnection",
+				"google-guest-agent-test1-iface2.1.nmconnection",
+				"google-guest-agent-test1-iface3.2.nmconnection",
+			},
+		},
+		{
+			name: "valid-unkown-prefix-leftover",
+			configFiles: []string{
+				"google-guest-agent-test2-iface.1.nmconnection",
+				"google-guest-agent-test2-iface2.2.nmconnection",
+				"google-guest-agent-test2-iface3.3.nmconnection",
+				"unkown-prefix-iface4.nmconnection",
+			},
+			survivingFiles: []string{
+				"unkown-prefix-iface4.nmconnection",
+			},
+		},
+		{
+			name: "keep-matching-surviving-files",
+			configFiles: []string{
+				"google-guest-agent-test3-iface.1.nmconnection",
+				"google-guest-agent-test3-iface2.2.nmconnection",
+				"google-guest-agent-test3-iface3.3.nmconnection",
+			},
+			survivingFiles: []string{
+				"google-guest-agent-test3-iface2.2.nmconnection",
+				"google-guest-agent-test3-iface3.3.nmconnection",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &serviceNetworkManager{
+				configDir: path.Join(t.TempDir(), "NetworkManager", "config"),
+			}
+
+			for _, file := range tc.configFiles {
+				if err := os.MkdirAll(svc.configDir, 0755); err != nil {
+					t.Fatalf("failed to create mock network config directory: %v", err)
+				}
+
+				fpath := filepath.Join(svc.configDir, file)
+				if err := os.WriteFile(fpath, []byte("config data"), 0644); err != nil {
+					t.Fatalf("failed to create mock network config file: %v", err)
+				}
+			}
+
+			if err := svc.cleanupVlanConfigs(tc.survivingFiles); err != nil {
+				t.Errorf("cleanupVlanConfigs() = %v, want nil", err)
+			}
+
+			if len(tc.configFiles) > 0 {
+				dir, err := os.ReadDir(svc.configDir)
+				if err != nil {
+					t.Fatalf("failed to open config directory: %v", err)
+				}
+
+				for _, file := range dir {
+					if !slices.Contains(tc.survivingFiles, file.Name()) {
+						t.Errorf("file %s was not removed", file.Name())
+					}
+				}
+			}
+
 		})
 	}
 }

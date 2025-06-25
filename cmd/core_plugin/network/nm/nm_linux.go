@@ -23,6 +23,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -31,7 +33,9 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ini"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/regex"
 )
 
 // NewService returns a new NetworkManager service handler.
@@ -97,6 +101,8 @@ func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Option
 	galog.Info("Setting up NetworkManager interfaces.")
 	nicConfigs := opts.FilteredNICConfigs()
 
+	var keepVlanConfigs []string
+
 	// Write the config files.
 	for _, nic := range nicConfigs {
 		if !nic.ShouldManage() {
@@ -115,7 +121,12 @@ func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Option
 			if err := sn.writeVlanConfig(vic, sn.configFilePath(vic.InterfaceName())); err != nil {
 				return err
 			}
+			keepVlanConfigs = append(keepVlanConfigs, vic.InterfaceName())
 		}
+	}
+
+	if err := sn.cleanupVlanConfigs(keepVlanConfigs); err != nil {
+		return fmt.Errorf("failed to cleanup vlan configs: %w", err)
 	}
 
 	// This is primarily for RHEL-7 compatibility. Without reloading, attempting
@@ -136,6 +147,63 @@ func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Option
 		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"conn", "up", connID}}
 		if _, err := run.WithContext(ctx, opt); err != nil {
 			return fmt.Errorf("error enabling NetworkManager connection(%q): %w", connID, err)
+		}
+	}
+
+	return nil
+}
+
+// cleanupVlanConfigs removes vlan interfaces that are no longer present. The
+// process involves iterating over all configuration files present in the known
+// configuration directory and removing the files which names match the known
+// naming pattern for vlan interfaces and that are not present in the keepMe
+// list.
+func (sn *serviceNetworkManager) cleanupVlanConfigs(keepMe []string) error {
+	galog.Debugf("Cleaning up NetworkManager vlan interfaces.")
+
+	if !file.Exists(sn.configDir, file.TypeDir) {
+		galog.V(2).Debugf("No NetworkManager configuration directory found: %s.", sn.configDir)
+		return nil
+	}
+
+	files, err := os.ReadDir(sn.configDir)
+	if err != nil {
+		return fmt.Errorf("failed to read content from %s: %w", sn.configDir, err)
+	}
+
+	configExp := `(?P<prefix>google-guest-agent)-(?P<interface>.*\.[0-9]+)\.(?P<extension>nmconnection)`
+	configRegex := regexp.MustCompile(configExp)
+
+	for _, file := range files {
+		// Skip directories.
+		if file.IsDir() {
+			continue
+		}
+
+		fileName := file.Name()
+		groups := regex.GroupsMap(configRegex, fileName)
+
+		galog.V(2).Debugf("Vlan file(%q) name extracted groups: %v.", fileName, groups)
+
+		// If we don't have a matching interface skip it.
+		currIface, ok := groups["interface"]
+		if !ok {
+			continue
+		}
+
+		// If prefix is not google-guest-agent that means it's not a vlan interface
+		// we created.
+		if prefix, ok := groups["prefix"]; !ok || prefix != "google-guest-agent" {
+			continue
+		}
+
+		// If this is an interface still present skip it.
+		if slices.Contains(keepMe, currIface) {
+			continue
+		}
+
+		if err := os.Remove(filepath.Join(sn.configDir, fileName)); err != nil {
+			return fmt.Errorf("failed to remove vlan interface config(%s): %w", fileName, err)
 		}
 	}
 
