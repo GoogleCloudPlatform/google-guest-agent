@@ -144,7 +144,7 @@ func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Option
 		}
 
 		connID := sn.connectionID(nic.Interface.Name())
-		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"conn", "up", connID}}
+		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"conn", "up", "id", connID}}
 		if _, err := run.WithContext(ctx, opt); err != nil {
 			return fmt.Errorf("error enabling NetworkManager connection(%q): %w", connID, err)
 		}
