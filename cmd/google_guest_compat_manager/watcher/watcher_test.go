@@ -373,6 +373,9 @@ func TestNewManager(t *testing.T) {
 	if got := gotManager.guestAgentManagerProcessName; got != managerDaemon {
 		t.Errorf("NewManager() returned manager with guest agent manager process name: %s, want: %s", got, managerDaemon)
 	}
+	if !gotManager.corePluginsEnabled {
+		t.Errorf("NewManager() returned manager with core plugins enabled: %t, want: true", gotManager.corePluginsEnabled)
+	}
 }
 
 func TestReadInstanceID(t *testing.T) {
