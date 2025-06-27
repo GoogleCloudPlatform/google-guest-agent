@@ -137,7 +137,7 @@ func newWsfcManager(opts connectOpts) *wsfcManager {
 }
 
 // reset resets the wsfc agent state if required.
-func (wm *wsfcManager) reset(ctx context.Context, desc *metadata.Descriptor) error {
+func (wm *wsfcManager) reset(ctx context.Context, desc *metadata.Descriptor) (bool, error) {
 	newAddr := listenerAddr(desc)
 	newState := isWsfcEnabled(desc)
 
@@ -145,14 +145,18 @@ func (wm *wsfcManager) reset(ctx context.Context, desc *metadata.Descriptor) err
 
 	// If WSFC is disabled or listener address has changed stop the currently
 	// running agent.
+	noop := true
 	if !newState || newAddr != wm.agent.address() {
-		if err := wm.agent.stop(ctx); err != nil {
-			return fmt.Errorf("failed to stop wsfc agent: %w", err)
+		if wm.agent.isRunning() {
+			if err := wm.agent.stop(ctx); err != nil {
+				return false, fmt.Errorf("failed to stop wsfc agent: %w", err)
+			}
+			noop = false
 		}
 	}
 
 	if !newState {
-		return nil
+		return noop, nil
 	}
 
 	// If WSFC is enabled or listener address has changed start the agent.
@@ -160,11 +164,17 @@ func (wm *wsfcManager) reset(ctx context.Context, desc *metadata.Descriptor) err
 		wm.agent.setAddress(newAddr)
 	}
 
-	if err := wm.agent.run(ctx); err != nil {
-		return fmt.Errorf("failed to run agent: %w", err)
+	if wm.agent.isRunning() {
+		galog.Debugf("WSFC agent is already running, ignoring run request")
+		return true, nil
 	}
 
-	return nil
+	if err := wm.agent.run(ctx); err != nil {
+		return false, fmt.Errorf("failed to run agent: %w", err)
+	}
+
+	galog.Infof("WSFC agent started successfully on address: %q", newAddr)
+	return false, nil
 }
 
 // metadataSubscriber is the callback function for MDS events, any new MDS
@@ -187,14 +197,15 @@ func (wm *wsfcManager) metadataSubscriber(ctx context.Context, evType string, da
 		return true, true, nil
 	}
 
-	if err := wm.reset(ctx, desc); err != nil {
-		return true, false, fmt.Errorf("failed to reset wsfc agent: %w", err)
+	noop, err := wm.reset(ctx, desc)
+	if err != nil {
+		return true, noop, fmt.Errorf("failed to reset wsfc agent: %w", err)
 	}
 
 	// Update the previous metadata descriptor to the current one on success so
 	// it retries on failure.
 	wm.prevDescriptor = desc
-	return true, false, nil
+	return true, noop, nil
 }
 
 // hasDescriptorChanged returns true if the metadata descriptor has changed.

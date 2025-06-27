@@ -234,8 +234,12 @@ func TestResetStartAndStop(t *testing.T) {
 	mgr := newWsfcManager(connectOpts{protocol: unixProtocol, addr: sock})
 	ctx := context.WithValue(context.Background(), overrideIPExistCheck, "1")
 
-	if err := mgr.reset(ctx, &metadata.Descriptor{}); err != nil {
+	noop, err := mgr.reset(ctx, &metadata.Descriptor{})
+	if err != nil {
 		t.Fatalf("reset(ctx, &metadata.Descriptor{}) failed unexpectedly with error: %v", err)
+	}
+	if noop {
+		t.Errorf("reset(ctx, &metadata.Descriptor{}) returned noop on start = %t, want false", noop)
 	}
 
 	if !mgr.agent.isRunning() {
@@ -253,8 +257,12 @@ func TestResetStartAndStop(t *testing.T) {
 		t.Fatalf("UnmarshalDescriptor(%v) failed unexpectedly with error: %v", disable, err)
 	}
 
-	if err := mgr.reset(ctx, desc); err != nil {
+	noop, err = mgr.reset(ctx, desc)
+	if err != nil {
 		t.Fatalf("reset(ctx, &metadata.Descriptor{}) failed unexpectedly with error: %v", err)
+	}
+	if noop {
+		t.Errorf("reset(ctx, &metadata.Descriptor{}) returned noop on disable = %t, want false", noop)
 	}
 
 	if mgr.agent.isRunning() {
@@ -273,8 +281,15 @@ func TestResetAddressChange(t *testing.T) {
 	mgr := newWsfcManager(connectOpts{protocol: unixProtocol, addr: sock})
 	ctx := context.WithValue(context.Background(), overrideIPExistCheck, "1")
 
-	if err := mgr.reset(ctx, &metadata.Descriptor{}); err != nil {
-		t.Fatalf("reset(ctx, &metadata.Descriptor{}) failed unexpectedly with error: %v", err)
+	wantNoop := []bool{false, true}
+	for _, wantNoop := range wantNoop {
+		noop, err := mgr.reset(ctx, &metadata.Descriptor{})
+		if err != nil {
+			t.Fatalf("reset(ctx, &metadata.Descriptor{}) failed unexpectedly with error: %v", err)
+		}
+		if noop != wantNoop {
+			t.Errorf("reset(ctx, &metadata.Descriptor{}) returned noop on address set = %t, want %t", noop, wantNoop)
+		}
 	}
 
 	if !mgr.agent.isRunning() {
@@ -288,8 +303,14 @@ func TestResetAddressChange(t *testing.T) {
 	newAddr := filepath.Join(t.TempDir(), "new-socket")
 	cfg.Retrieve().WSFC.Port = newAddr
 
-	if err := mgr.reset(ctx, &metadata.Descriptor{}); err != nil {
-		t.Fatalf("reset(ctx, &metadata.Descriptor{}) failed unexpectedly with error: %v", err)
+	for _, wantNoop := range wantNoop {
+		noop, err := mgr.reset(ctx, &metadata.Descriptor{})
+		if err != nil {
+			t.Fatalf("reset(ctx, &metadata.Descriptor{}) failed unexpectedly with error: %v", err)
+		}
+		if noop != wantNoop {
+			t.Errorf("reset(ctx, &metadata.Descriptor{}) returned noop on address reset = %t, want %t", noop, wantNoop)
+		}
 	}
 
 	if !mgr.agent.isRunning() {
