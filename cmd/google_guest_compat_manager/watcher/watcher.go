@@ -171,7 +171,7 @@ func (w *Manager) stopCorePlugin(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize plugin manager: %w", err)
 	}
 
-	return pm.StopPlugin(ctx, "GuestAgentCorePlugin")
+	return pm.StopPlugin(ctx, manager.CorePluginName)
 }
 
 func (w *Manager) readInstanceID(ctx context.Context) error {

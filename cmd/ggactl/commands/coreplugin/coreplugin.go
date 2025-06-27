@@ -16,6 +16,7 @@
 package coreplugin
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/ggactl/commands"
@@ -35,8 +36,31 @@ func New() *cobra.Command {
 			return fmt.Errorf("no subcommand specified for core plugin")
 		},
 	}
-	corePlugin.AddCommand(newRestartCmd())
+	corePlugin.AddCommand(newRestartCmd(), newStopCmd())
 	return corePlugin
+}
+
+// NewStopCmd returns a new cobra command that implements stop command
+// for core plugin.
+func newStopCmd() *cobra.Command {
+	stop := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop core plugin",
+		Long:  "Stops the guest agent core plugin.",
+		Args:  cobra.NoArgs,
+		RunE:  stopCorePlugin,
+	}
+
+	return stop
+}
+
+func stopCorePlugin(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	pluginManager, err := newPluginManager(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to restart core plugin, initialize plugin manager failed with error: %w", err)
+	}
+	return pluginManager.StopPlugin(ctx, manager.CorePluginName)
 }
 
 // NewRestartCmd returns a new cobra command that implements restart command
@@ -54,12 +78,7 @@ func newRestartCmd() *cobra.Command {
 }
 
 func restartCorePlugin(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	id, err := commands.FetchInstanceID(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to restart core plugin, fetch instance ID failed with error: %w", err)
-	}
-	pluginManager, err := manager.InitAdHocPluginManager(ctx, id)
+	pluginManager, err := newPluginManager(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("unable to restart core plugin, initialize plugin manager failed with error: %w", err)
 	}
@@ -72,4 +91,16 @@ func restartCorePlugin(cmd *cobra.Command, args []string) error {
 	}
 	cmd.Println("Restarting core plugin...")
 	return nil
+}
+
+func newPluginManager(ctx context.Context) (*manager.PluginManager, error) {
+	id, err := commands.FetchInstanceID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to restart core plugin, fetch instance ID failed with error: %w", err)
+	}
+	pluginManager, err := manager.InitAdHocPluginManager(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("unable to restart core plugin, initialize plugin manager failed with error: %w", err)
+	}
+	return pluginManager, nil
 }
