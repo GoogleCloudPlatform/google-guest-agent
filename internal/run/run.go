@@ -175,7 +175,7 @@ func (rr Runner) WithContext(ctx context.Context, opts Options) (*Result, error)
 // channel.
 func streamOutput(ctx context.Context, opts Options) (*Result, error) {
 	galog.Debugf("Running command: %+v", opts)
-	cmd := exec.CommandContext(ctx, opts.Name, opts.Args...)
+	cmd := newCommand(ctx, true, opts)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -231,7 +231,7 @@ func scanPipe(pipe io.ReadCloser, streamOut chan string) {
 func splitOutput(ctx context.Context, opts Options) (*Result, error) {
 	galog.Debugf("Running command: %+v", opts)
 
-	cmd := exec.CommandContext(ctx, opts.Name, opts.Args...)
+	cmd := newCommand(ctx, true, opts)
 
 	var stdout, stderr bytes.Buffer
 	var resOutput *bytes.Buffer
@@ -266,7 +266,7 @@ func splitOutput(ctx context.Context, opts Options) (*Result, error) {
 func combinedOutput(ctx context.Context, opts Options) (*Result, error) {
 	galog.Debugf("Running command: %+v", opts)
 
-	cmd := exec.CommandContext(ctx, opts.Name, opts.Args...)
+	cmd := newCommand(ctx, true, opts)
 	cmd.Dir = opts.Dir
 	if err := writeToStdin(cmd, opts.Input); err != nil {
 		return nil, fmt.Errorf("failed to write input in combinedOutput: %v", err)

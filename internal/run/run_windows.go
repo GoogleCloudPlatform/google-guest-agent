@@ -20,9 +20,31 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
 )
+
+// newCommand creates a new command with the given [Options] and context.
+func newCommand(ctx context.Context, withContext bool, opts Options) *exec.Cmd {
+	var cmd *exec.Cmd
+	if withContext {
+		cmd = exec.CommandContext(ctx, opts.Name, opts.Args...)
+	} else {
+		cmd = exec.Command(opts.Name, opts.Args...)
+	}
+
+	// We force the child process to inherit the current process's token. This
+	// ensures that the child process will be launched with the same privileges
+	// as the parent process.
+	token, err := syscall.OpenCurrentProcessToken()
+	if err != nil {
+		galog.Debugf("Failed to get current process token: %v", err)
+	} else {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Token: token}
+	}
+	return cmd
+}
 
 // start starts the command. It calls cmd.Start() on behalf of the requested
 // command, it doesn't wait for the process and sets the process' pid in the
@@ -30,16 +52,9 @@ import (
 func start(ctx context.Context, opts Options) (*Result, error) {
 	galog.Debugf("Attempting process start: %+v", opts)
 
-	var cmd *exec.Cmd
-
 	// If we are running on detach mode we can't use the passed down context as
 	// it would kill the child process if the context is canceled.
-	if opts.ExecMode == ExecModeDetach {
-		cmd = exec.Command(opts.Name, opts.Args...)
-	} else {
-		cmd = exec.CommandContext(ctx, opts.Name, opts.Args...)
-	}
-
+	cmd := newCommand(ctx, opts.ExecMode != ExecModeDetach, opts)
 	cmd.Dir = opts.Dir
 
 	if err := writeToStdin(cmd, ""); err != nil {

@@ -25,19 +25,24 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 )
 
+// newCommand creates a new command with the given [Options] and context.
+func newCommand(ctx context.Context, withContext bool, opts Options) *exec.Cmd {
+	if withContext {
+		return exec.CommandContext(ctx, opts.Name, opts.Args...)
+	}
+	return exec.Command(opts.Name, opts.Args...)
+}
+
 // start starts the command. It calls cmd.Start() on behalf of the requested
 // command, it doesn't wait for the process and sets the process' pid in the
 // [Result]'s Pid field.
 func start(ctx context.Context, opts Options) (*Result, error) {
 	galog.Debugf("Attempting process start: %+v", opts)
-
-	var cmd *exec.Cmd
+	cmd := newCommand(ctx, opts.ExecMode != ExecModeDetach, opts)
 
 	// If we are running on detach mode we can't use the passed down context as
 	// it would kill the child process if the context is canceled.
 	if opts.ExecMode == ExecModeDetach {
-		cmd = exec.Command(opts.Name, opts.Args...)
-
 		// Force setpgid so no group signal propagation is performed by the os - as
 		// the child will have its own group. Meaning the child process will not for
 		// example get a SIGINT when the parent process does.
@@ -48,8 +53,6 @@ func start(ctx context.Context, opts Options) (*Result, error) {
 		// is down and plugins are still running. To keep consistency set
 		// [CLONE_PARENT] flag.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Cloneflags: syscall.CLONE_PARENT}
-	} else {
-		cmd = exec.CommandContext(ctx, opts.Name, opts.Args...)
 	}
 
 	cmd.Dir = opts.Dir
