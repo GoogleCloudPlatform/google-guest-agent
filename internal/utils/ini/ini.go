@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/go-ini/ini"
 )
 
@@ -47,6 +48,7 @@ func WriteIniFile(filePath string, ptr any, opts ...LoadOptions) error {
 		return fmt.Errorf("error saving file: %w", err)
 	}
 
+	galog.V(2).Debugf("Successfully written INI file at: %q", filePath)
 	return nil
 }
 

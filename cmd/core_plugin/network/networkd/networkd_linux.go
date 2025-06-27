@@ -463,10 +463,9 @@ func (sn *Module) writeEthernetConfig(nic *nic.Configuration, filePath string, p
 	if !primary {
 		data.Network.DNSDefaultRoute = false
 		data.DHCPv4 = &networkdDHCPConfig{RoutesToDNS: false, RoutesToNTP: false}
-		data.DHCPv6 = &networkdDHCPConfig{RoutesToDNS: false, RoutesToNTP: false}
 	}
 
-	wrote, err := data.write(sn.networkFile(nic.Interface.Name()))
+	wrote, err := data.write(filePath)
 	if err != nil {
 		return false, fmt.Errorf("failed to write networkd's ethernet interface config: %w", err)
 	}
@@ -572,9 +571,6 @@ type networkdConfig struct {
 
 	// DHCPv4 is the systemd-networkd ini file's [DHCPv4] section.
 	DHCPv4 *networkdDHCPConfig `ini:",omitempty"`
-
-	// DHCPv6 is the systemd-networkd ini file's [DHCPv4] section.
-	DHCPv6 *networkdDHCPConfig `ini:",omitempty"`
 
 	// Link is the systemd-networkd init file's [Link] section.
 	Link *networkdLinkConfig `ini:",omitempty"`

@@ -730,10 +730,6 @@ func TestSetup(t *testing.T) {
 						RoutesToDNS: false,
 						RoutesToNTP: false,
 					},
-					DHCPv6: &networkdDHCPConfig{
-						RoutesToDNS: false,
-						RoutesToNTP: false,
-					},
 				}
 				if _, err := configData.write(configPath); err != nil {
 					t.Fatalf("failed to write file: %v", err)

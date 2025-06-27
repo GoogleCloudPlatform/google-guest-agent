@@ -91,7 +91,10 @@ type networkdRoute struct {
 }
 
 // networkdDHCPConfig contains the dhcp specific configurations for a
-// systemd network configuration.
+// systemd network configuration. RouteToDNS and RouteToNTP are present
+// only in context of [DHCPv4].
+// https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#RoutesToDNS=
+// https://www.freedesktop.org/software/systemd/man/latest/systemd.network.html#RoutesToNTP=
 type networkdDHCPConfig struct {
 	// RoutesToDNS defines if routes to the DNS servers received from the DHCP
 	// should be configured/installed.
