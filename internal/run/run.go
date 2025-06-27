@@ -89,6 +89,9 @@ type Options struct {
 	// Dir specifies the working directory of the command/process. If not
 	// specified the exec.Command's Dir behavior is honored.
 	Dir string
+	// InheritEnv specifies whether to inherit the environment of the parent
+	// process. If not specified the exec.Command's default behavior is honored.
+	InheritEnv bool
 }
 
 // ExecMode represents the command execution mode: i.e. blocking, non-blocking,
@@ -193,6 +196,10 @@ func streamOutput(ctx context.Context, opts Options) (*Result, error) {
 	go scanPipe(stdout, outChan)
 	go scanPipe(stderr, errChan)
 
+	if opts.InheritEnv {
+		cmd.Env = os.Environ()
+	}
+
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("unable to start command: %w", err)
 	}
@@ -252,6 +259,11 @@ func splitOutput(ctx context.Context, opts Options) (*Result, error) {
 		resOutput = &stdout
 	}
 
+	// Inherit the environment of the parent process.
+	if opts.InheritEnv {
+		cmd.Env = os.Environ()
+	}
+
 	if err := cmd.Run(); err != nil {
 		return nil, errorWithOutput(err, stderr.String())
 	}
@@ -270,6 +282,9 @@ func combinedOutput(ctx context.Context, opts Options) (*Result, error) {
 	cmd.Dir = opts.Dir
 	if err := writeToStdin(cmd, opts.Input); err != nil {
 		return nil, fmt.Errorf("failed to write input in combinedOutput: %v", err)
+	}
+	if opts.InheritEnv {
+		cmd.Env = os.Environ()
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {

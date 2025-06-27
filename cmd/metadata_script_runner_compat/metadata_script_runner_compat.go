@@ -83,6 +83,7 @@ func launchScriptRunner(ctx context.Context, mdsClient metadata.MDSClientInterfa
 		Name:       metadataScriptRunnerNew,
 		OutputType: run.OutputStream,
 		Args:       []string{event},
+		InheritEnv: true,
 	}
 
 	mds, err := mdsClient.Get(ctx)

@@ -19,6 +19,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 
@@ -53,6 +54,9 @@ func start(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	cmd.Dir = opts.Dir
+	if opts.InheritEnv {
+		cmd.Env = os.Environ()
+	}
 
 	if err := writeToStdin(cmd, opts.Input); err != nil {
 		return nil, fmt.Errorf("failed to write input in start: %v", err)
