@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/config"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ssh"
 )
 
@@ -544,5 +545,5 @@ func (desc *Descriptor) HasCorePluginEnabled() bool {
 		return *desc.Project().Attributes().EnableCorePlugin()
 	}
 
-	return true
+	return config.IsCorePluginEnabled()
 }
