@@ -65,7 +65,7 @@ func main() {
 	logOpts := logger.Options{
 		Ident:             filepath.Base(os.Args[0]),
 		LogToStderr:       true,
-		LogToCloudLogging: true,
+		LogToCloudLogging: cfg.Retrieve().Core.CloudLoggingEnabled,
 		Level:             cfg.Retrieve().Core.LogLevel,
 		LogFile:           cfg.Retrieve().Core.LogFile,
 	}

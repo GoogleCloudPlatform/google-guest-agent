@@ -68,7 +68,7 @@ func setupFlags() {
 	// Log flags.
 	flag.StringVar(&logOpts.LogFile, "logfile", cfg.Retrieve().Core.LogFile, "path to the log file")
 	flag.BoolVar(&logOpts.LogToStderr, "logtostderr", false, "write logs to stderr")
-	flag.BoolVar(&logOpts.LogToCloudLogging, "logtocloud", true, "write logs to cloud logging")
+	flag.BoolVar(&logOpts.LogToCloudLogging, "logtocloud", cfg.Retrieve().Core.CloudLoggingEnabled, "write logs to cloud logging")
 	flag.IntVar(&logOpts.Level, "loglevel", cfg.Retrieve().Core.LogLevel, "log level: "+galog.ValidLevels())
 	flag.IntVar(&logOpts.Verbosity, "logverbosity", cfg.Retrieve().Core.LogVerbosity, "log verbosity")
 

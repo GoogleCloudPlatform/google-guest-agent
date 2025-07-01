@@ -69,7 +69,7 @@ const (
 )
 
 func setupFlags() {
-	enableCloudLogging := true
+	enableCloudLogging := cfg.Retrieve().Core.CloudLoggingEnabled
 
 	// In test environments we don't have access to the cloud logging API, in such
 	// a scenario we inject CORE_PLUGIN_CLOUD_LOGGING_ENABLED=false to disable
