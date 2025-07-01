@@ -69,7 +69,7 @@ func IsCorePluginEnabled() bool {
 	data, err := os.ReadFile(CorePluginEnabledConfigFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			galog.Infof("Config file [%q] doesn't exist, defaulting IsCorePluginEnabled to %t", CorePluginEnabledConfigFile, DefaultIsCorePluginEnabled)
+			galog.Debugf("Config file [%q] doesn't exist, defaulting IsCorePluginEnabled to %t", CorePluginEnabledConfigFile, DefaultIsCorePluginEnabled)
 		} else {
 			galog.Warnf("Failed to read config file [%q]: %v, defaulting IsCorePluginEnabled to %t", CorePluginEnabledConfigFile, err, DefaultIsCorePluginEnabled)
 		}
