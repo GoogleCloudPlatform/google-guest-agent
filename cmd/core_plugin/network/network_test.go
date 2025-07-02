@@ -78,11 +78,13 @@ func TestLateInitFailure(t *testing.T) {
 	tests := []struct {
 		name           string
 		mds            any
+		wantError      bool
 		disabledConfig bool
 	}{
 		{
-			name: "invalid-mds",
-			mds:  context.Background(),
+			name:      "invalid-mds",
+			wantError: true,
+			mds:       context.Background(),
 		},
 		{
 			name:           "valid-mds",
@@ -105,8 +107,8 @@ func TestLateInitFailure(t *testing.T) {
 			}
 
 			mod := &lateModule{}
-			if err := mod.moduleSetup(context.Background(), tc.mds); err == nil {
-				t.Errorf("lateInit() returned nil error, want non-nil")
+			if err := mod.moduleSetup(context.Background(), tc.mds); (err == nil) == tc.wantError {
+				t.Errorf("lateInit() returned error %v, want error %t", err, tc.wantError)
 			}
 		})
 	}

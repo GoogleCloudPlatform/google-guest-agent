@@ -82,7 +82,8 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 	// initialization - first setup is not done and no metadata longpoll event
 	// handler is registered.
 	if !config.NetworkInterfaces.Setup {
-		return fmt.Errorf("network interface setup disabled, skipping")
+		galog.Infof("Network interface setup disabled, skipping")
+		return nil
 	}
 
 	// Do the initial setup of the network interfaces. It will be handled by the
