@@ -298,7 +298,7 @@ func addToGUsers(ctx context.Context, username string) error {
 		return fmt.Errorf("failed to append %s to %s: %w", username, googleUsersFile, err)
 	}
 
-	if n == len(data) {
+	if n != len(data) {
 		return fmt.Errorf("failed writing %s to %s, wrote %d bytes, expected %d", username, googleUsersFile, n, len(data))
 	}
 
