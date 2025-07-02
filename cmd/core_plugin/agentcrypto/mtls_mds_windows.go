@@ -202,6 +202,11 @@ func (j *CredsJob) writeClientCredentials(ctx context.Context, creds []byte, out
 		return fmt.Errorf("failed to write PFX file: %w", err)
 	}
 
+	if !j.useNativeStore {
+		galog.Debug("Skipping client credentials write to system store update as it is disabled in the configuration")
+		return nil
+	}
+
 	blob := windows.CryptDataBlob{
 		Size: uint32(len(pfx)),
 		Data: &pfx[0],
