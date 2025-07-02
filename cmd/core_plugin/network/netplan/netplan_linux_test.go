@@ -714,6 +714,9 @@ func TestRollback(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
+	execLookPath = func(string) (string, error) {
+		return "netplan", nil
+	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

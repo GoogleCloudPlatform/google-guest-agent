@@ -381,6 +381,14 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 	}
 
 	if !active {
+		if _, err := execLookPath("netplan"); err != nil {
+			if err == exec.ErrNotFound {
+				galog.Debugf("Netplan CLI not found, skipping reload.")
+				return nil
+			}
+			return fmt.Errorf("error looking up netplan path: %w", err)
+		}
+
 		if err := sn.generateConfigs(ctx); err != nil {
 			return fmt.Errorf("error reloading netplan changes: %w", err)
 		}

@@ -138,11 +138,9 @@ func TestRollback(t *testing.T) {
 		managers       []*service.Handle
 		skipID         string
 		wantRolledBack []string
-		wantError      bool
 	}{
 		{
 			name:           "success",
-			wantError:      false,
 			wantRolledBack: []string{"manager-1"},
 			managers: []*service.Handle{
 				{
@@ -154,8 +152,8 @@ func TestRollback(t *testing.T) {
 			},
 		},
 		{
-			name:      "failure",
-			wantError: true,
+			name:           "failure",
+			wantRolledBack: []string{"manager-1"},
 			managers: []*service.Handle{
 				{
 					ID: "manager-1",
@@ -167,7 +165,6 @@ func TestRollback(t *testing.T) {
 		},
 		{
 			name:           "success-skip",
-			wantError:      false,
 			skipID:         "manager-1",
 			wantRolledBack: []string{"manager-1", "manager-2"},
 			managers: []*service.Handle{
@@ -193,8 +190,8 @@ func TestRollback(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			rolledBack, err := rollback(ctx, tc.managers, tc.skipID, opts)
-			if (err == nil) == tc.wantError {
-				t.Errorf("rollback(ctx, %+v, %q, nil) = %v, want %v", tc.managers, tc.skipID, err, tc.wantError)
+			if err != nil {
+				t.Errorf("rollback(ctx, %+v, %q, nil) = %v, want nil", tc.managers, tc.skipID, err)
 			}
 
 			if diff := cmp.Diff(tc.wantRolledBack, rolledBack); diff != "" {

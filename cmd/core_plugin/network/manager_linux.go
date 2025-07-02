@@ -136,7 +136,7 @@ func rollback(ctx context.Context, managers []*service.Handle, skipID string, op
 		// Rollback network configurations for the manager. Avoid reloading the
 		// active manager as we'll need to reload it anyway after the setup.
 		if err := manager.Rollback(ctx, opts, manager.ID == skipID); err != nil {
-			return rolledBack, fmt.Errorf("failed to rollback network configuration(%q): %w", manager.ID, err)
+			galog.Debugf("failed to rollback network configuration(%q): %v", manager.ID, err)
 		}
 
 		rolledBack = append(rolledBack, manager.ID)
