@@ -258,7 +258,7 @@ func isUDSSupported() bool {
 
 	listener, err := net.Listen(udsProtocol, sockAddr)
 	if err != nil {
-		galog.Infof("Failed to listen on %q, UDS is unsupported?: %v", sockAddr, err)
+		galog.Infof("Cannot listen on %q, UDS not supported/disabled, fallback to TCP: %v", sockAddr, err)
 		return false
 	}
 
