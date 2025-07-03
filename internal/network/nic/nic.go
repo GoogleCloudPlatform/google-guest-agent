@@ -124,7 +124,7 @@ func newConfig(nic *metadata.NetworkInterface, config *cfg.Sections, ignore addr
 		if _, cached := seenBadMacAddrs.Get(res.MacAddr); !cached {
 			seenBadMacAddrs.Put(res.MacAddr, true)
 			res.Invalid = true
-			galog.Warnf("failed to get interface for NIC %s: %v", res.MacAddr, err)
+			galog.V(2).Warnf("NIC %q has an invalid MAC address, skipping", res.MacAddr)
 		}
 	}
 	res.Interface = iface
