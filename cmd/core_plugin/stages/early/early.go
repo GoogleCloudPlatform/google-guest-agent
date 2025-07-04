@@ -29,7 +29,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/winpassreset"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 )
@@ -50,7 +49,6 @@ var (
 		network.NewEarlyModule,
 		iosched.NewModule,
 		agentcrypto.NewModule,
-		winpassreset.NewModule,
 	}
 )
 
