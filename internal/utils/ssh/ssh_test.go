@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+	// allowlist:crypto/rsa
 )
 
 func TestGetUserKey(t *testing.T) {

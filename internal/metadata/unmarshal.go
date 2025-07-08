@@ -306,3 +306,8 @@ func (k *WindowsKey) UnmarshalJSON(b []byte) error {
 	k.internal = &key
 	return nil
 }
+
+// MarshalJSON marshals WindowsKey to JSON.
+func (k *WindowsKey) MarshalJSON() ([]byte, error) {
+	return json.Marshal(k.internal)
+}

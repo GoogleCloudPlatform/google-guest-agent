@@ -19,9 +19,18 @@ package winpassreset
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
+	"math/big"
+	"reflect"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
@@ -31,7 +40,10 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/lru"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/serialport"
 	"golang.org/x/sys/windows/registry"
+	// allowlist:crypto/rsa
+	// allowlist:crypto/sha1
 )
 
 const (
@@ -46,41 +58,56 @@ var (
 	// badReg is a list of bad registry keys that we don't want to log.
 	badReg = lru.New[string](64)
 
+	// credsWriter is the serial port logger for writing credentials.
+	credsWriter = &serialport.Writer{Port: "COM4"}
+
+	// sshdVersion is the minimum version of sshd that is supported.
+	sshdVersionMajor = 8
+	sshdVersionMinor = 6
+
 	// The following are stubbed out for error injection in tests.
 	regWriteMultiString = reg.WriteMultiString
 	regReadMultiString  = reg.ReadMultiString
 	resetPassword       = defaultResetPassword
 	modifiedKeys        = defaultModifiedKeys
+	newCredentials      = defaultNewCredentials
 )
+
+// module is the windows password reset module.
+type module struct {
+	// prevKeys is the previous windows keys.
+	prevKeys []*metadata.WindowsKey
+}
 
 // NewModule returns the windows password reset module.
 func NewModule(_ context.Context) *manager.Module {
+	mod := &module{}
 	return &manager.Module{
 		ID:          winpassModuleID,
-		Setup:       moduleSetup,
+		Setup:       mod.moduleSetup,
 		Description: "Resets the password for a user on a Windows VM",
 	}
 }
 
 // moduleSetup initializes the module.
-func moduleSetup(ctx context.Context, data any) error {
+func (mod *module) moduleSetup(ctx context.Context, data any) error {
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("winpass module expects a metadata descriptor in the data pointer")
 	}
 
-	if err := setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys()); err != nil {
+	if _, err := mod.setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys()); err != nil {
 		galog.Errorf("failed to reset password: %v", err)
 	}
 
 	eManager := events.FetchManager()
-	sub := events.EventSubscriber{Name: winpassModuleID, Callback: eventCallback, MetricName: acmpb.GuestAgentModuleMetric_WINDOWS_PASSWORD_RESET}
+	sub := events.EventSubscriber{Name: winpassModuleID, Callback: mod.eventCallback, MetricName: acmpb.GuestAgentModuleMetric_WINDOWS_PASSWORD_RESET}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
 	return nil
 }
 
 // eventCallback is the callback event handler for the winpass module.
-func eventCallback(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
+func (mod *module) eventCallback(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
@@ -94,36 +121,144 @@ func eventCallback(ctx context.Context, evType string, data any, evData *events.
 		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
-	return true, false, setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys())
+	// Return early if nothing has changed.
+	if !mod.metadataChanged(desc.Instance().Attributes().WindowsKeys()) {
+		return true, true, nil
+	}
+
+	noop, err := mod.setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys())
+	return true, noop, err
+}
+
+func (mod *module) metadataChanged(newKeys []*metadata.WindowsKey) bool {
+	return len(mod.prevKeys) != len(newKeys) || !reflect.DeepEqual(mod.prevKeys, newKeys)
 }
 
 // setupAccounts sets up accounts in the registry and creates and updates them
 // as needed.
-func setupAccounts(ctx context.Context, newKeys []*metadata.WindowsKey) error {
+func (mod *module) setupAccounts(ctx context.Context, keys []*metadata.WindowsKey) (bool, error) {
+	galog.Infof("Setting up Windows accounts.")
+	mod.prevKeys = keys
+
+	// Get windows keys difference.
 	regKeys, err := regReadMultiString(reg.GCEKeyBase, accountsRegKey)
 	if err != nil && !errors.Is(err, registry.ErrNotExist) {
-		return fmt.Errorf("failed to read registry keys: %w", err)
+		return true, fmt.Errorf("failed to read registry keys: %w", err)
 	}
-	diffKeys := modifiedKeys(regKeys, newKeys)
+	galog.Debugf("Found registry keys: %v", regKeys)
+	diffKeys := modifiedKeys(regKeys, keys)
+
+	// If there are no new keys, skip account setup.
+	if len(diffKeys) == 0 {
+		galog.Info("No new keys found, skipping account setup.")
+		return true, nil
+	}
 
 	// Create or update the accounts in the machine.
 	for _, key := range diffKeys {
-		if err := resetPassword(ctx, key); err != nil {
+		creds, err := resetPassword(ctx, key)
+		if err != nil {
 			galog.Errorf("error setting password for user %s: %v", key.UserName(), err)
+			creds = &credentials{
+				PasswordFound: false,
+				Exponent:      key.Exponent(),
+				Modulus:       key.Modulus(),
+				UserName:      key.UserName(),
+				ErrorMessage:  err.Error(),
+			}
+		}
+		if err := creds.writeToSerialPort(); err != nil {
+			return false, fmt.Errorf("failed to print credentials to serial port: %w", err)
 		}
 	}
 
 	// Update the registry with the new keys.
 	var jsonKeys []string
-	for _, key := range newKeys {
-		jsonKey, err := json.Marshal(key)
+	for _, key := range keys {
+		jsonKey, err := key.MarshalJSON()
 		if err != nil {
-			return fmt.Errorf("failed to marshal key: %w", err)
+			return false, fmt.Errorf("failed to marshal key: %w", err)
 		}
 		jsonKeys = append(jsonKeys, string(jsonKey))
 	}
 
-	return regWriteMultiString(reg.GCEKeyBase, accountsRegKey, jsonKeys)
+	galog.Debugf("Writing registry keys: %v", jsonKeys)
+	if err = regWriteMultiString(reg.GCEKeyBase, accountsRegKey, jsonKeys); err != nil {
+		return false, fmt.Errorf("failed to write registry keys: %w", err)
+	}
+	galog.Infof("Successfully set up Windows accounts.")
+	return false, nil
+}
+
+// credentials is the JSON representation of an account's credentials.
+type credentials struct {
+	ErrorMessage      string `json:"errorMessage,omitempty"`
+	EncryptedPassword string `json:"encryptedPassword,omitempty"`
+	UserName          string `json:"userName,omitempty"`
+	PasswordFound     bool   `json:"passwordFound,omitempty"`
+	Exponent          string `json:"exponent,omitempty"`
+	Modulus           string `json:"modulus,omitempty"`
+	HashFunction      string `json:"hashFunction,omitempty"`
+}
+
+// defaultNewCredentials creates a new credentials object using the given key and password.
+func defaultNewCredentials(k *metadata.WindowsKey, pwd string) (*credentials, error) {
+	mod, err := base64.StdEncoding.DecodeString(k.Modulus())
+	if err != nil {
+		return nil, fmt.Errorf("error decoding modulus: %v", err)
+	}
+	exp, err := base64.StdEncoding.DecodeString(k.Exponent())
+	if err != nil {
+		return nil, fmt.Errorf("error decoding exponent: %v", err)
+	}
+
+	key := &rsa.PublicKey{
+		N: new(big.Int).SetBytes(mod),
+		E: int(new(big.Int).SetBytes(exp).Int64()),
+	}
+
+	// TODO(b/429651111): Revisit usage of sha1 by default.
+	hashFunction := k.HashFunction()
+	if hashFunction == "" {
+		hashFunction = "sha1"
+	}
+
+	var hashFunc hash.Hash
+	switch hashFunction {
+	case "sha1":
+		hashFunc = sha1.New()
+	case "sha256":
+		hashFunc = sha256.New()
+	case "sha512":
+		hashFunc = sha512.New()
+	default:
+		return nil, fmt.Errorf("unknown hash function requested: %q", hashFunction)
+	}
+
+	encPwd, err := rsa.EncryptOAEP(hashFunc, rand.Reader, key, []byte(pwd), nil)
+	if err != nil {
+		return nil, fmt.Errorf("error encrypting password: %v", err)
+	}
+
+	return &credentials{
+		PasswordFound:     true,
+		Exponent:          k.Exponent(),
+		Modulus:           k.Modulus(),
+		UserName:          k.UserName(),
+		HashFunction:      k.HashFunction(),
+		EncryptedPassword: base64.StdEncoding.EncodeToString(encPwd),
+	}, nil
+}
+
+func (c *credentials) writeToSerialPort() error {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("failed to marshal credsJSON: %v", err)
+	}
+	if _, err = credsWriter.Write(append(data, []byte("\n")...)); err != nil {
+		return fmt.Errorf("failed to write credsJSON: %v", err)
+	}
+	return nil
 }
 
 // defaultModifiedKeys determines which keys are new or modified. This does not
@@ -154,6 +289,7 @@ func defaultModifiedKeys(regKeys []string, newKeys []*metadata.WindowsKey) []*me
 			toAdd = append(toAdd, key)
 		}
 	}
+	galog.Debugf("Found %d keys to add", len(toAdd))
 	return toAdd
 }
 
@@ -177,39 +313,56 @@ func regKeysToWindowsKey(regKeys []string) []*metadata.WindowsKey {
 
 // defaultResetPassword resets the password of the user specified in the key.
 // If the user does not exist, it will create it.
-func defaultResetPassword(ctx context.Context, key *metadata.WindowsKey) error {
+func defaultResetPassword(ctx context.Context, key *metadata.WindowsKey) (*credentials, error) {
 	newPassword, err := accounts.GeneratePassword(key.PasswordLength())
 	if err != nil {
-		return fmt.Errorf("failed to generate password: %w", err)
+		return nil, fmt.Errorf("failed to generate password: %w", err)
 	}
 
 	u, err := accounts.FindUser(ctx, key.UserName())
 	if err != nil {
+		galog.Infof("User %s does not exist, creating it.", key.UserName())
 		// If the user does not exist, we create it.
 		newUser := &accounts.User{
 			Name:     key.UserName(),
 			Password: newPassword,
 		}
-		err = accounts.CreateUser(ctx, newUser)
-		if err != nil {
-			return fmt.Errorf("failed to create user: %w", err)
+		if err = accounts.CreateUser(ctx, newUser); err != nil {
+			return nil, fmt.Errorf("failed to create user: %w", err)
 		}
-		u, err = accounts.FindUser(ctx, newUser.Name)
+		u, err = accounts.FindUser(ctx, key.UserName())
 		if err != nil {
-			return fmt.Errorf("failed to find user: %w", err)
+			return nil, fmt.Errorf("failed to find user %s after creation: %w", key.UserName(), err)
 		}
+		// Add the user to the administrator group if needed.
+		if key.AddToAdministrator() == nil || *key.AddToAdministrator() {
+			if err = accounts.AddUserToGroup(ctx, u, accounts.AdminGroup); err != nil {
+				return nil, fmt.Errorf("failed to add user %s to administrator group: %w", key.UserName(), err)
+			}
+			galog.Debugf("Successfully added user %s to administrator group", key.UserName())
+		}
+		galog.Infof("Successfully created user %s", key.UserName())
 	} else {
+		galog.Debugf("Updating password for user %s", key.UserName())
 		// If the user exists, we simply update the password.
 		if err = u.SetPassword(ctx, newPassword); err != nil {
-			return fmt.Errorf("failed to set password: %w", err)
+			return nil, fmt.Errorf("failed to set password: %w", err)
 		}
+		// Add the user to the administrator group if needed.
+		if key.AddToAdministrator() != nil && *key.AddToAdministrator() {
+			if err = accounts.AddUserToGroup(ctx, u, accounts.AdminGroup); err != nil {
+				return nil, fmt.Errorf("failed to add user %s to administrator group: %w", key.UserName(), err)
+			}
+			galog.Debugf("Successfully added user %s to administrator group", key.UserName())
+		}
+		galog.Infof("Successfully updated password for user %s", key.UserName())
 	}
 
-	// Add the user to the administrator group if needed.
-	if key.AddToAdministrator() != nil && *key.AddToAdministrator() {
-		if err = accounts.AddUserToGroup(ctx, u, accounts.AdminGroup); err != nil {
-			return fmt.Errorf("failed to add user to administrator group: %w", err)
-		}
+	// Create the credsJSON object.
+	creds, err := newCredentials(key, newPassword)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create credsJSON: %w", err)
 	}
-	return nil
+	galog.Debugf("Successfully created credentials for user %s", key.UserName())
+	return creds, nil
 }

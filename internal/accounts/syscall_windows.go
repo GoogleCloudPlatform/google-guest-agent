@@ -127,10 +127,9 @@ func defaultNetUserAdd(username, password string) error {
 	}
 	ret, _, _ := syscallN(procNetUserAdd.Addr(), 0, 1, uintptr(unsafe.Pointer(&uInfo1)), 0)
 
-	// Error 2236 is returned when the user already belongs to the group. No
-	// action is required; see:
-	// https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/terminal-server-error-messages-2200-to-2299#error-2236
-	if ret != 0 && ret != 2236 {
+	// Error 2224 is returned when the user already exists.
+	// https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/terminal-server-error-messages-2200-to-2299#error-2224
+	if ret != 0 && ret != 2224 {
 		return fmt.Errorf("nonzero return code(%v) from NetUserAdd: %w", ret, syscall.Errno(ret))
 	}
 	return nil
@@ -238,7 +237,8 @@ func defaultNetLocalGroupAddMembers(SID *syscall.SID, group string) error {
 		1,
 	)
 
-	// Ignore ERROR_MEMBER_IN_ALIAS (1378).
+	// Ignore ERROR_MEMBER_IN_ALIAS (1378)
+	// https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1300-1699-
 	if ret != 0 && ret != 1378 {
 		return fmt.Errorf("nonzero return code(%v) from NetLocalGroupAddMembers: %w", ret, syscall.Errno(ret))
 	}
@@ -262,8 +262,9 @@ func defaultNetLocalGroupDelMembers(SID *syscall.SID, group string) error {
 		1,
 	)
 
-	// Ignore ERROR_MEMBER_IN_ALIAS (1378).
-	if ret != 0 && ret != 1378 {
+	// Ignore ERROR_MEMBER_NOT_IN_ALIAS (1377).
+	// https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1300-1699-
+	if ret != 0 && ret != 1377 {
 		return fmt.Errorf("nonzero return code(%v) from NetLocalGroupDelMembers: %w", ret, syscall.Errno(ret))
 	}
 	return nil

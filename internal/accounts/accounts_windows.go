@@ -25,6 +25,8 @@ import (
 	mathRand "math/rand"
 	"os/user"
 	"syscall"
+
+	"github.com/GoogleCloudPlatform/galog"
 )
 
 // windowsUserInfo contains windows specific user information.
@@ -87,8 +89,8 @@ func FindUser(_ context.Context, username string) (*User, error) {
 	}
 
 	return &User{
-		Username:   user.Name,
-		Name:       user.Name,
+		Username:   username,
+		Name:       username,
 		HomeDir:    user.HomeDir,
 		UID:        user.Uid,
 		GID:        user.Gid,
@@ -101,11 +103,13 @@ func CreateUser(_ context.Context, u *User) error {
 	if u == nil {
 		return fmt.Errorf("user is nil")
 	}
+	galog.Debugf("Creating user %s", u.Name)
 
 	// Create a new user using the password.
 	if err := netUserAdd(u.Name, u.Password); err != nil {
 		return fmt.Errorf("failed to add user: %w", err)
 	}
+	galog.Debugf("Successfully created user %s", u.Name)
 	u.Password = ""
 	return nil
 }
@@ -115,18 +119,21 @@ func DelUser(_ context.Context, u *User) error {
 	if u == nil {
 		return fmt.Errorf("user is nil")
 	}
-
+	galog.Debugf("Deleting user %s", u.Name)
 	if err := netUserDel(u.Name); err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
+	galog.Debugf("Successfully deleted user %s", u.Name)
 	return nil
 }
 
 // CreateGroup creates a new group with the given name.
 func CreateGroup(_ context.Context, group string) error {
+	galog.Debugf("Creating group %s", group)
 	if err := netLocalGroupAdd(group); err != nil {
 		return fmt.Errorf("failed to create group: %w", err)
 	}
+	galog.Debugf("Successfully created group %s", group)
 	return nil
 }
 
@@ -135,10 +142,11 @@ func DelGroup(_ context.Context, g *Group) error {
 	if g == nil {
 		return fmt.Errorf("group is nil")
 	}
-
+	galog.Debugf("Deleting group %s", g.Name)
 	if err := netLocalGroupDel(g.Name); err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
 	}
+	galog.Debugf("Successfully deleted group %s", g.Name)
 	return nil
 }
 
@@ -168,10 +176,11 @@ func AddUserToGroup(_ context.Context, u *User, g *Group) error {
 	if !ok {
 		return fmt.Errorf("failed to get os specific user info for user")
 	}
-
+	galog.Debugf("Adding user %s to group %s", u.Name, g.Name)
 	if err := netLocalGroupAddMembers(osSpecific.SID, g.Name); err != nil {
 		return fmt.Errorf("failed to add user %s to group %v: %w", u.Username, g.Name, err)
 	}
+	galog.Debugf("Successfully added user %s to group %s", u.Name, g.Name)
 	return nil
 }
 
@@ -193,9 +202,11 @@ func RemoveUserFromGroup(_ context.Context, u *User, g *Group) error {
 		return fmt.Errorf("failed to get os specific user info for user")
 	}
 
+	galog.Debugf("Removing user %s from group %s", u.Name, g.Name)
 	if err := netLocalGroupDelMembers(osSpecific.SID, g.Name); err != nil {
 		return fmt.Errorf("failed to remove user %s from group %v: %w", u.Username, g.Name, err)
 	}
+	galog.Debugf("Successfully removed user %s from group %s", u.Name, g.Name)
 	return nil
 }
 
@@ -207,6 +218,7 @@ func RemoveUserFromGroup(_ context.Context, u *User, g *Group) error {
 // Characters that are difficult for users to type on a command line (quotes,
 // non english characters) are not used.
 func GeneratePassword(userPwLgth int) (string, error) {
+	galog.Debugf("Generating password")
 	var pwLgth int
 	minPwLgth := 15
 	maxPwLgth := 255
@@ -266,5 +278,6 @@ func GeneratePassword(userPwLgth int) (string, error) {
 
 	// Shuffle the password.
 	mathRand.Shuffle(len(pwd), func(i, j int) { pwd[i], pwd[j] = pwd[j], pwd[i] })
+	galog.Debugf("Successfully generated password")
 	return string(pwd), nil
 }

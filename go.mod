@@ -13,6 +13,7 @@ require (
 	github.com/google/go-tpm-tools v0.4.4
 	github.com/google/tink/go v1.7.0
 	github.com/spf13/cobra v1.8.1
+	go.bug.st/serial v1.6.3
 	golang.org/x/crypto v0.36.0
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/sys v0.31.0
@@ -59,7 +60,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	go.bug.st/serial v1.6.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.34.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0 // indirect

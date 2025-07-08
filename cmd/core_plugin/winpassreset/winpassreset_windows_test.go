@@ -25,6 +25,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/serialport"
 )
 
 // winpassTestOpts is a set of options to control the behavior of the
@@ -65,7 +66,6 @@ func TestModuleSetup(t *testing.T) {
 	{
 		"instance":  {
 			"attributes": {
-				"enable-oslogin": "true"
 			}
 		}
 	}`
@@ -106,11 +106,14 @@ func TestModuleSetup(t *testing.T) {
 		},
 	}
 
+	ctx := context.Background()
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			winpassTestSetup(t, test.opts)
 
-			if err := moduleSetup(context.Background(), test.desc); (err == nil) == test.expectErr {
+			mod := &module{}
+			if err := mod.moduleSetup(ctx, test.desc); (err == nil) == test.expectErr {
 				t.Fatalf("moduleSetup(ctx, %v) = %v, want %t", desc, err, test.expectErr)
 			}
 		})
@@ -123,7 +126,6 @@ func TestEventCallback(t *testing.T) {
 	{
 		"instance":  {
 			"attributes": {
-				"enable-oslogin": "true"
 			}
 		}
 	}`
@@ -160,7 +162,7 @@ func TestEventCallback(t *testing.T) {
 			opts:       winpassTestOpts{overrideRegRead: true, regReadErr: true},
 			expectBool: true,
 			wantErr:    true,
-			wantNoop:   false,
+			wantNoop:   true,
 		},
 		{
 			name:   "success",
@@ -182,7 +184,10 @@ func TestEventCallback(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			winpassTestSetup(t, test.opts)
 
-			got, noop, err := eventCallback(ctx, "metadata_changed", nil, test.evData)
+			mod := &module{
+				prevKeys: regKeysToWindowsKey([]string{`{"UserName": "test-user", "PasswordLength": 20}`}),
+			}
+			got, noop, err := mod.eventCallback(ctx, "metadata_changed", nil, test.evData)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("eventCallback(ctx, %q, '', %v) = %v, want error: %t", "metadata_changed", test.evData, err, test.wantErr)
 			}
@@ -191,6 +196,41 @@ func TestEventCallback(t *testing.T) {
 			}
 			if got != test.expectBool {
 				t.Errorf("eventCallback(ctx, %q, '', %v) = %t, want %t", "metadata_changed", test.evData, got, test.expectBool)
+			}
+		})
+	}
+}
+
+func TestMetadataChanged(t *testing.T) {
+	tests := []struct {
+		name     string
+		prevKeys string
+		newKeys  string
+		want     bool
+	}{
+		{
+			name:     "same",
+			prevKeys: `{"UserName": "test-user", "PasswordLength": 20}`,
+			newKeys:  `{"UserName": "test-user", "PasswordLength": 20}`,
+			want:     false,
+		},
+		{
+			name:     "different",
+			prevKeys: `{"UserName": "test-user", "PasswordLength": 20}`,
+			newKeys:  `{"UserName": "test-user-2", "PasswordLength": 20}`,
+			want:     true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			prevKeys := regKeysToWindowsKey([]string{test.prevKeys})
+			newKeys := regKeysToWindowsKey([]string{test.newKeys})
+			mod := &module{}
+			mod.prevKeys = prevKeys
+			got := mod.metadataChanged(newKeys)
+			if got != test.want {
+				t.Errorf("metadataChanged(ctx, %v) = %t, want %t", newKeys, got, test.want)
 			}
 		})
 	}
@@ -243,10 +283,20 @@ func TestResetPassword(t *testing.T) {
 				t.Fatalf("Failed to parse test key")
 			}
 
-			err := resetPassword(context.Background(), keys[0])
+			newCredentials = func(k *metadata.WindowsKey, pwd string) (*credentials, error) {
+				return &credentials{PasswordFound: true}, nil
+			}
+			t.Cleanup(func() {
+				newCredentials = defaultNewCredentials
+			})
+
+			_, err := resetPassword(context.Background(), keys[0])
 			if err != nil {
 				t.Fatalf("ResetPassword(ctx, %q) failed: %v", test.key, err)
 			}
+			t.Cleanup(func() {
+				accounts.DelUser(context.Background(), &accounts.User{Name: test.testUsername})
+			})
 
 			if test.isAdmin {
 				if user == nil {
@@ -323,10 +373,11 @@ func TestModifiedKeys(t *testing.T) {
 
 func TestSetupAccounts(t *testing.T) {
 	tests := []struct {
-		name      string
-		opts      winpassTestOpts
-		testKeys  []string
-		expectErr bool
+		name       string
+		opts       winpassTestOpts
+		testKeys   []string
+		expectErr  bool
+		expectNoop bool
 	}{
 		{
 			name: "success",
@@ -335,9 +386,10 @@ func TestSetupAccounts(t *testing.T) {
 				overrideModifiedKeys:  true,
 				overrideRegWrite:      true,
 				overrideRegRead:       true,
-				testRegEntries:        []string{`{"UserName": "test-user", "PasswordLength": 20}`},
+				testRegEntries:        []string{`{"UserName": "test-user0", "PasswordLength": 20}`},
 			},
-			testKeys: []string{`{"UserName": "test-user0", "PasswordLength": 20}`},
+			testKeys:   []string{`{"UserName": "test-user", "PasswordLength": 20}`},
+			expectNoop: false,
 		},
 		{
 			name: "read_reg_err",
@@ -348,7 +400,8 @@ func TestSetupAccounts(t *testing.T) {
 				overrideRegRead:       true,
 				regReadErr:            true,
 			},
-			expectErr: true,
+			expectErr:  true,
+			expectNoop: true,
 		},
 		{
 			name: "write_reg_err",
@@ -366,24 +419,95 @@ func TestSetupAccounts(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			winpassTestSetup(t, test.opts)
+			testKeys := regKeysToWindowsKey(test.testKeys)
 
-			var newKeys []*metadata.WindowsKey = []*metadata.WindowsKey{}
-			if test.testKeys != nil {
-				newKeys = regKeysToWindowsKey(test.testKeys)
-			}
-			err := setupAccounts(context.Background(), newKeys)
+			mod := &module{}
+			noop, err := mod.setupAccounts(context.Background(), testKeys)
 			if (err == nil) == test.expectErr {
-				t.Errorf("setupAccounts(ctx, %v) = %v, want %v", test.testKeys, err, test.expectErr)
+				t.Errorf("setupAccounts(ctx, %v) = Err %v, want %v", test.testKeys, err, test.expectErr)
+			}
+			if noop != test.expectNoop {
+				t.Errorf("setupAccounts(ctx, %v) = No-op %v, want %v", test.testKeys, noop, test.expectNoop)
+			}
+
+			t.Cleanup(func() {
+				accounts.DelUser(context.Background(), &accounts.User{Name: "test-user"})
+			})
+		})
+	}
+}
+
+func TestDefaultNewCredentials(t *testing.T) {
+	testModKey := "0MgqnC9ZGb8ATHuc00d/12AnnIzfq5TlEiubx0P8f5BidytVT6ZZ1Oa0IPBYkd0ZqXqxTtHXqrjtU/QX40eGe+T15ySMeE0VdH/UVOPvslWYxpIWnP+1jQEUhuuG5Af2Lq1qODRxnY7eMFzclrAzE2O+EoYN3Pq5JQMBcOaADDsKH91i8oCpeVuFZMZo7KKe1U87XJESLERP7lNkdgOHt9IJ1Q8rZGKAWKqx2GlYkxM7jh8xLhYGQ/mJq+tNAthyfXlosNzYiNbP7278H/OiHVrVrnC9S4kRuvM+U6BMdsFt7hRBSEWlGcKdpBiYTtqsGDzYDjisHuKbRTGl/O8FPw=="
+
+	tests := []struct {
+		name    string
+		key     string
+		pwd     string
+		wantErr bool
+	}{
+		{
+			name:    "success_sha1",
+			key:     fmt.Sprintf(`{"UserName": "test-user", "PasswordLength": 20, "Modulus": "%s", "Exponent": "AQAB"}`, testModKey),
+			pwd:     "password123456789",
+			wantErr: false,
+		},
+		{
+			name:    "invalid_key",
+			key:     `{"UserName": "test-user", "PasswordLength": 20}`,
+			pwd:     "password123456789",
+			wantErr: true,
+		},
+		{
+			name:    "success_sha256",
+			key:     fmt.Sprintf(`{"UserName": "test-user", "PasswordLength": 20, "Modulus": "%s", "Exponent": "AQAB", "HashFunction": "sha256"}`, testModKey),
+			pwd:     "password123456789",
+			wantErr: false,
+		},
+		{
+			name:    "success_sha512",
+			key:     fmt.Sprintf(`{"UserName": "test-user", "PasswordLength": 20, "Modulus": "%s", "Exponent": "AQAB", "HashFunction": "sha512"}`, testModKey),
+			pwd:     "password123456789",
+			wantErr: false,
+		},
+		{
+			name:    "invalid_hash_function",
+			key:     fmt.Sprintf(`{"UserName": "test-user", "PasswordLength": 20, "Modulus": "%s", "Exponent": "AQAB", "HashFunction": "invalid"}`, testModKey),
+			pwd:     "password123456789",
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			keys := regKeysToWindowsKey([]string{test.key})
+			if len(keys) == 0 {
+				t.Fatalf("Failed to parse test key")
+			}
+			creds, err := newCredentials(keys[0], test.pwd)
+			if (err != nil) != test.wantErr {
+				t.Errorf("newCredentials(%v, %q) = %v, want error: %t", test.key, test.pwd, err, test.wantErr)
+			}
+			if err == nil && creds == nil {
+				t.Errorf("newCredentials(%v, %q) = nil, want non-nil", test.key, test.pwd)
 			}
 		})
 	}
 }
 
+// testSerialPortWriter is a fake serial port writer for testing purposes.
+type testSerialPortWriter struct{}
+
+// Write writes the given data to the serial port.
+func (t *testSerialPortWriter) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
 // winpassTestSetup sets up the winpassreset package for testing purposes.
 func winpassTestSetup(t *testing.T, opts winpassTestOpts) {
 	if opts.overrideResetPassword {
-		resetPassword = func(ctx context.Context, key *metadata.WindowsKey) error {
-			return nil
+		resetPassword = func(ctx context.Context, key *metadata.WindowsKey) (*credentials, error) {
+			return &credentials{PasswordFound: true}, nil
 		}
 	}
 	if opts.overrideModifiedKeys {
@@ -410,25 +534,40 @@ func winpassTestSetup(t *testing.T, opts winpassTestOpts) {
 			return opts.testRegEntries, nil
 		}
 	}
+	newCredentials = func(k *metadata.WindowsKey, pwd string) (*credentials, error) {
+		return &credentials{PasswordFound: true}, nil
+	}
+	oldCredsWriter := credsWriter
+	credsWriter = &serialport.Writer{IsTest: true}
 
 	t.Cleanup(func() {
 		modifiedKeys = defaultModifiedKeys
 		resetPassword = defaultResetPassword
 		regWriteMultiString = reg.WriteMultiString
 		regReadMultiString = reg.ReadMultiString
+		newCredentials = defaultNewCredentials
+		credsWriter = oldCredsWriter
 	})
 }
 
 func createTestUser(t *testing.T, username string) *accounts.User {
 	t.Helper()
+	ctx := context.Background()
+
+	// Don't create the user if it already exists.
+	u, err := accounts.FindUser(ctx, username)
+	if err == nil {
+		t.Cleanup(func() {
+			accounts.DelUser(ctx, u)
+		})
+		return u
+	}
 
 	user := &accounts.User{
 		Name:     username,
 		Password: "password123456789",
 	}
-	ctx := context.Background()
-	err := accounts.CreateUser(ctx, user)
-	if err != nil {
+	if err := accounts.CreateUser(ctx, user); err != nil {
 		t.Fatalf("Failed to create test user: %v", err)
 	}
 	newUser, err := accounts.FindUser(ctx, user.Name)
