@@ -16,6 +16,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/url"
 
@@ -77,7 +78,11 @@ func (mp *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
 					galog.Errorf("Network error when requesting metadata, make sure your instance has an active network and can reach the metadata server.")
 				}
 			}
-			galog.Errorf("Error watching metadata: %s", err)
+			if errors.Is(err, context.Canceled) {
+				galog.V(2).Warnf("Metadata watcher context canceled.")
+			} else {
+				galog.Errorf("Error watching metadata: %s", err)
+			}
 			mp.failedPrevious = true
 		}
 	} else {
