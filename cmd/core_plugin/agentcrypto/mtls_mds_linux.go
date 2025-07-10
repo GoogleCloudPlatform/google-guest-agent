@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 
 	"github.com/GoogleCloudPlatform/galog"
-
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
@@ -55,13 +54,13 @@ var (
 
 // writeRootCACert writes Root CA cert from UEFI variable to output file.
 func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFile string) error {
-	// The directory should be executable, but the file does not need to be.
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0655); err != nil {
+	galog.Debugf("Writing root CA cert to %q", outputFile)
+
+	// Write the root CA cert to the output file.
+	if err := j.writeCredentials(ctx, content, outputFile); err != nil {
 		return err
 	}
-	if err := file.SaferWriteFile(ctx, content, outputFile, file.Options{Perm: 0644}); err != nil {
-		return err
-	}
+	galog.Debugf("Successfully wrote root CA cert to %q", outputFile)
 
 	if !j.useNativeStore {
 		galog.Debug("Skipping system store update as it is disabled in the configuration")
@@ -70,7 +69,7 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFi
 
 	// Best effort to update system store, don't fail.
 	if err := updateSystemStore(ctx, outputFile); err != nil {
-		galog.Errorf("Failed add Root MDS cert to system trust store with error: %v", err)
+		galog.Warnf("Failed add Root MDS cert to system trust store with error: %v", err)
 	}
 
 	return nil
@@ -79,11 +78,17 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFi
 // writeClientCredentials stores client credentials (certificate and private
 // key).
 func (j *CredsJob) writeClientCredentials(ctx context.Context, plaintext []byte, outputFile string) error {
+	galog.Debugf("Writing client credentials to %q", outputFile)
+	return j.writeCredentials(ctx, plaintext, outputFile)
+}
+
+// writeCredentials stores the provided credentials to the output file.
+func (j *CredsJob) writeCredentials(ctx context.Context, certContent []byte, outputFile string) error {
 	// The directory should be executable, but the file does not need to be.
 	if err := os.MkdirAll(filepath.Dir(outputFile), 0655); err != nil {
 		return err
 	}
-	return file.SaferWriteFile(ctx, plaintext, outputFile, file.Options{Perm: 0644})
+	return file.SaferWriteFile(ctx, certContent, outputFile, file.Options{Perm: 0644})
 }
 
 // getCAStoreUpdater iterates over known system trust store updaters and returns
@@ -94,6 +99,7 @@ func getCAStoreUpdater() (string, error) {
 	for u := range certUpdaters {
 		_, err := exec.LookPath(u)
 		if err == nil {
+			galog.V(3).Debugf("Found updater %q", u)
 			return u, nil
 		}
 		errs = append(errs, fmt.Sprintf("lookup for %q failed with error: %v", u, err))
@@ -112,15 +118,18 @@ func certificateDirFromUpdater(updater string) (string, error) {
 
 	for _, dir := range dirs {
 		if file.Exists(dir, file.TypeDir) {
+			galog.V(3).Debugf("Found directory %q for updater %q", dir, updater)
 			return dir, nil
 		}
 	}
 
-	return "", fmt.Errorf("no of the known directories %v found for updater %q", dirs, updater)
+	return "", fmt.Errorf("none of the known directories %v found for updater %q", dirs, updater)
 }
 
 // updateSystemStore updates the local system store with the cert.
 func updateSystemStore(ctx context.Context, cert string) error {
+	galog.Infof("Updating local system store with the cert %q", cert)
+
 	cmd, err := getCAStoreUpdater()
 	if err != nil {
 		return err
@@ -143,6 +152,6 @@ func updateSystemStore(ctx context.Context, cert string) error {
 		return fmt.Errorf("command %q failed with error: %w", cmd, err)
 	}
 
-	galog.Infof("Certificate %q added to system store successfully %s", cert, res.Output)
+	galog.Infof("Successfully added certificate %q to local system store: %s", cert, res.Output)
 	return nil
 }

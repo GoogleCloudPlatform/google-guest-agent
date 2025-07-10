@@ -23,11 +23,12 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
+
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 const (
@@ -53,6 +54,7 @@ type moduleHandler struct {
 
 // setup is the early initialization function for agentcrypto module.
 func (m *moduleHandler) setup(ctx context.Context, _ any) error {
+	galog.Infof("Initializing %s module", moduleID)
 	mds, err := m.metadata.Get(ctx)
 
 	// Schedules jobs that need to be started before notifying systemd Agent
@@ -70,12 +72,11 @@ func (m *moduleHandler) setup(ctx context.Context, _ any) error {
 	}
 
 	events.FetchManager().Subscribe(metadata.LongpollEvent, events.EventSubscriber{Name: moduleID, Callback: m.eventCallback, MetricName: acmpb.GuestAgentModuleMetric_AGENT_CRYPTO_INITIALIZATION})
+	galog.Infof("Successfully initialized %s module", moduleID)
 	return nil
 }
 
 func (m *moduleHandler) eventCallback(ctx context.Context, evType string, _ any, evData *events.EventData) (bool, bool, error) {
-	galog.Debugf("Running %q callback handler for event: %q", moduleID, evType)
-
 	if evData.Error != nil {
 		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
@@ -90,15 +91,19 @@ func (m *moduleHandler) eventCallback(ctx context.Context, evType string, _ any,
 	shouldSchedule := m.enableJob(ctx, mds)
 
 	if !shouldSchedule && alreadyScheduled {
+		galog.Debugf("Unscheduling certificate rotation job %q", MTLSSchedulerID)
 		sched.UnscheduleJob(MTLSSchedulerID)
+		galog.Debugf("Successfully unscheduled certificate rotation job %q", MTLSSchedulerID)
 		return true, false, nil
 	}
 
 	if shouldSchedule && !alreadyScheduled {
+		galog.Debugf("Scheduling certificate rotation job %q", MTLSSchedulerID)
 		job := New(useNativeStore(mds))
 		if err := sched.ScheduleJob(ctx, job); err != nil {
 			return true, false, fmt.Errorf("failed to schedule job %q: %v", MTLSSchedulerID, err)
 		}
+		galog.Debugf("Successfully scheduled certificate rotation job %q", MTLSSchedulerID)
 		return true, false, nil
 	}
 
@@ -112,17 +117,17 @@ func useNativeStore(mds *metadata.Descriptor) bool {
 
 	if cfg.Retrieve().MDS != nil {
 		useNative = cfg.Retrieve().MDS.HTTPSMDSEnableNativeStore
-		galog.Debugf("Found instance config file attribute for use native store set to: %t", useNative)
+		galog.V(1).Debugf("Found instance config file attribute for use native store set to: %t", useNative)
 	}
 
 	if mds.Project().Attributes().HTTPSMDSEnableNativeStore() != nil {
 		useNative = *mds.Project().Attributes().HTTPSMDSEnableNativeStore()
-		galog.Debugf("Found project level attribute for use native store set to: %t", useNative)
+		galog.V(1).Debugf("Found project level attribute for use native store set to: %t", useNative)
 	}
 
 	if mds.Instance().Attributes().HTTPSMDSEnableNativeStore() != nil {
 		useNative = *mds.Instance().Attributes().HTTPSMDSEnableNativeStore()
-		galog.Debugf("Found instance level attribute for use native store set to: %t", useNative)
+		galog.V(1).Debugf("Found instance level attribute for use native store set to: %t", useNative)
 	}
 
 	return useNative
@@ -135,17 +140,17 @@ func (m *moduleHandler) enableJob(ctx context.Context, mds *metadata.Descriptor)
 	var enable bool
 	if cfg.Retrieve().MDS != nil {
 		enable = !cfg.Retrieve().MDS.DisableHTTPSMdsSetup
-		galog.Debugf("Found instance config file attribute for enable credential refresher set to: %t", enable)
+		galog.V(1).Debugf("Found instance config file attribute for enable credential refresher set to: %t", enable)
 	}
 
 	if mds.Project().Attributes().DisableHTTPSMdsSetup() != nil {
 		enable = !*mds.Project().Attributes().DisableHTTPSMdsSetup()
-		galog.Debugf("Found project level attribute for enable credential refresher set to: %t", enable)
+		galog.V(1).Debugf("Found project level attribute for enable credential refresher set to: %t", enable)
 	}
 
 	if mds.Instance().Attributes().DisableHTTPSMdsSetup() != nil {
 		enable = !*mds.Instance().Attributes().DisableHTTPSMdsSetup()
-		galog.Debugf("Found instance level attribute for enable credential refresher set to: %t", enable)
+		galog.V(1).Debugf("Found instance level attribute for enable credential refresher set to: %t", enable)
 	}
 
 	if !enable {

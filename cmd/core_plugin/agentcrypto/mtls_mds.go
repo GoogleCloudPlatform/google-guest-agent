@@ -22,15 +22,15 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/uefi"
 	"github.com/google/go-tpm-tools/client"
-	tpmpb "github.com/google/go-tpm-tools/proto/tpm"
 	"github.com/google/go-tpm/legacy/tpm2"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/agentcrypto/proto/credentials"
 	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/uefi"
+	tpmpb "github.com/google/go-tpm-tools/proto/tpm"
 )
 
 const (
@@ -82,6 +82,7 @@ func New(useNativeStore bool) *CredsJob {
 
 // readRootCACert reads Root CA cert from UEFI variable.
 func (j *CredsJob) readRootCACert(name uefi.VariableName) (*uefi.Variable, error) {
+	galog.Debugf("Reading root CA cert from %+v", name)
 	rootCACert, err := uefi.ReadVariable(name)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read root CA cert file contents: %w", err)
@@ -91,13 +92,14 @@ func (j *CredsJob) readRootCACert(name uefi.VariableName) (*uefi.Variable, error
 		return nil, fmt.Errorf("unable to verify Root CA cert: %w", err)
 	}
 
-	galog.Infof("Successfully read root CA Cert from %+v", name)
+	galog.Debugf("Successfully read root CA Cert from %+v", name)
 	return rootCACert, nil
 }
 
 // getClientCredentials fetches encrypted credentials from MDS and unmarshal it
 // into GuestCredentialsResponse.
 func (j *CredsJob) getClientCredentials(ctx context.Context) (*pb.GuestCredentialsResponse, error) {
+	galog.Debugf("Fetching client credentials from MDS")
 	creds, err := j.client.GetKey(ctx, clientCertsKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get client credentials from MDS: %w", err)
@@ -108,29 +110,39 @@ func (j *CredsJob) getClientCredentials(ctx context.Context) (*pb.GuestCredentia
 		return nil, fmt.Errorf("unable to unmarshal MDS response(%+v): %w", creds, err)
 	}
 
+	galog.Debugf("Successfully fetched client credentials from MDS")
 	return res, nil
 }
 
 // extractKey decrypts the key cipher text (Key encryption Key encrypted Data
 // Decryption Key) through vTPM and returns the key (DEK) as plain text.
 func (j *CredsJob) extractKey(importBlob *tpmpb.ImportBlob) ([]byte, error) {
+	galog.Debugf("Extracting key from import blob")
+
+	galog.V(2).Debugf("Opening a channel to TPM")
 	rwc, err := tpm2.OpenTPM()
 	if err != nil {
 		return nil, fmt.Errorf("unable to open a channel to the TPM: %w", err)
 	}
 	defer rwc.Close()
+	galog.V(2).Debugf("Successfully opened a channel to TPM")
 
+	galog.V(2).Debugf("Loading a key from TPM")
 	ek, err := client.EndorsementKeyECC(rwc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load a key from TPM: %w", err)
 	}
 	defer ek.Close()
+	galog.V(2).Debugf("Successfully loaded a key from TPM")
 
+	galog.V(2).Debugf("Importing import blob")
 	dek, err := ek.Import(importBlob)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt import blob: %w", err)
 	}
+	galog.V(3).Debugf("Successfully decrypted import blob")
 
+	galog.Debugf("Successfully extracted key from import blob")
 	return dek, nil
 }
 
@@ -169,7 +181,7 @@ func (j *CredsJob) fetchClientCredentials(ctx context.Context, rootCA string) ([
 //
 // Note that these credentials are at
 // `C:\Program Files\Google\Compute Engine\certs\mds` on Windows.
-// Additionally agent also generates a PFX file on windows that can be used
+// Additionally agent also generates a PFX file on windows that can be used in
 // invoking HTTPS endpoint.
 //
 // Example usage of these credentials to call HTTPS endpoint of MDS:
@@ -194,9 +206,10 @@ func (j *CredsJob) Run(ctx context.Context) (bool, error) {
 	defer func() {
 		j.bootStrapped.Store(true)
 	}()
+	galog.Infof("Bootstrapping MDS mTLS credentials")
 
 	if !j.rootCertsInstalled.Load() {
-		galog.Infof("Fetching Root CA cert...")
+		galog.Infof("Installing Root CA cert...")
 		v, err := j.readRootCACert(googleRootCACertUEFIVar)
 		if err != nil {
 			return true, fmt.Errorf("failed to read Root CA cert with an error: %w", err)
@@ -205,13 +218,13 @@ func (j *CredsJob) Run(ctx context.Context) (bool, error) {
 		if err := j.writeRootCACert(ctx, v.Content, filepath.Join(defaultCredsDir, rootCACertFileName)); err != nil {
 			return true, fmt.Errorf("failed to store Root CA cert with an error: %w", err)
 		}
+		galog.Infof("Successfully installed Root CA cert")
 	}
 	// Set only when agent has at-least one successful run for installing root
 	// certs.
 	j.rootCertsInstalled.Store(true)
 
-	galog.Infof("Fetching client credentials...")
-
+	galog.Infof("Installing client credentials...")
 	creds, err := j.fetchClientCredentials(ctx, filepath.Join(defaultCredsDir, rootCACertFileName))
 	if err != nil {
 		return true, fmt.Errorf("failed to generate client credentials with an error: %w", err)
@@ -220,6 +233,7 @@ func (j *CredsJob) Run(ctx context.Context) (bool, error) {
 	if err := j.writeClientCredentials(ctx, creds, filepath.Join(defaultCredsDir, clientCredsFileName)); err != nil {
 		return true, fmt.Errorf("failed to store client credentials with an error: %w", err)
 	}
+	galog.Infof("Successfully installed client credentials")
 
 	galog.Infof("Successfully bootstrapped MDS mTLS credentials")
 	return true, nil
