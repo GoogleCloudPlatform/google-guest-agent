@@ -41,7 +41,7 @@ func TestSetupExistingFileSuccess(t *testing.T) {
 	config := &cfg.Sections{
 		Instance: &cfg.Instance{
 			InstanceID:    "pre-defined-instance-id",
-			InstanceIDDir: instanceFilePath,
+			InstanceIDDir: tmpDir,
 		},
 	}
 
@@ -69,13 +69,12 @@ func TestSetupSuccess(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	instanceFilePath := filepath.Join(tmpDir, "instanceid")
 	botoConfigFile = filepath.Join(tmpDir, "boto.cfg")
 
 	config := &cfg.Sections{
 		Instance: &cfg.Instance{
 			InstanceID:    "pre-defined-instance-id",
-			InstanceIDDir: instanceFilePath,
+			InstanceIDDir: tmpDir,
 		},
 	}
 
@@ -122,7 +121,6 @@ func TestSetupLinuxFailure(t *testing.T) {
 			})
 
 			tmpDir := t.TempDir()
-			instanceFilePath := filepath.Join(tmpDir, "instanceid")
 			botoConfigFile = filepath.Join(tmpDir, "boto.cfg")
 
 			if tc.invalidBotoConfigFile {
@@ -132,12 +130,12 @@ func TestSetupLinuxFailure(t *testing.T) {
 			config := &cfg.Sections{
 				Instance: &cfg.Instance{
 					InstanceID:    "pre-defined-instance-id",
-					InstanceIDDir: instanceFilePath,
+					InstanceIDDir: tmpDir,
 				},
 			}
 
 			if tc.invalidInstanceIDDir {
-				config.Instance.InstanceIDDir = filepath.Join("/dev/null", "invalid-dir", "invalid-file")
+				config.Instance.InstanceIDDir = filepath.Join("/dev/null", "invalid-dir")
 			}
 
 			if tc.invalidHostKeyDir {
@@ -163,13 +161,12 @@ func TestSetupSameIDSuccess(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	instanceFilePath := filepath.Join(tmpDir, "instanceid")
 	botoConfigFile = filepath.Join(tmpDir, "boto.cfg")
 
 	config := &cfg.Sections{
 		Instance: &cfg.Instance{
 			InstanceID:    "foobar",
-			InstanceIDDir: instanceFilePath,
+			InstanceIDDir: tmpDir,
 		},
 	}
 
