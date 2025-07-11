@@ -18,8 +18,10 @@ package ps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -42,10 +44,16 @@ const (
 	// defaultLinuxProcDir is the default location of proc filesystem mount point
 	// in a linux system.
 	defaultLinuxProcDir = "/proc/"
+	// defaultClkTime is the default value of CLK_TKC. 100 is a typical value
+	// and is used in case `getconf CLK_TCK` fails.
+	defaultClkTime = 100
 )
 
-// clkTime caches the [CLK_TCK] value for computing CPU usage.
-var clkTime float64
+var (
+	// sawClkTckErr is a flag to indicate if getconf CLK_TCK failed.
+	// If it fails, we use this flag to avoid repeated logging.
+	sawClkTckErr error
+)
 
 // init creates the Linux process finder.
 func init() {
@@ -56,6 +64,9 @@ func init() {
 
 // readClkTicks reads the [CLK_TCK] value by running [getconf CLK_TCK] command.
 func readClkTicks(ctx context.Context) (float64, error) {
+	if _, err := exec.LookPath("getconf"); err != nil {
+		return defaultClkTime, nil
+	}
 	opts := run.Options{
 		Name:       "getconf",
 		Args:       []string{"CLK_TCK"},
@@ -63,9 +74,14 @@ func readClkTicks(ctx context.Context) (float64, error) {
 	}
 	clkRes, err := run.WithContext(ctx, opts)
 	if err != nil {
-		return 0, fmt.Errorf("getconf CLK_TCK failed: %w", err)
+		// Avoid repeated logging if we already saw the error.
+		if !errors.Is(err, sawClkTckErr) {
+			galog.V(2).Warnf("getconf CLK_TCK failed: %v", err)
+			sawClkTckErr = err
+		}
+		return defaultClkTime, nil
 	}
-	return strconv.ParseFloat(strings.TrimSpace(string(clkRes.Output)), 64)
+	return strconv.ParseFloat(strings.TrimSpace(clkRes.Output), 64)
 }
 
 func (p linuxClient) FindPid(pid int) (Process, error) {
@@ -254,12 +270,9 @@ func (p linuxClient) CPUUsage(ctx context.Context, pid int) (float64, error) {
 	// Total time used is the sum of both values.
 	// Since the values are in clock ticks, divide by clock tick.
 	totalTimeTicks := utime + stime
-
-	if clkTime == 0 {
-		clkTime, err = readClkTicks(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("error reading clk time: %w", err)
-		}
+	clkTime, err := readClkTicks(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error reading clk time: %w", err)
 	}
 
 	runTime := totalTimeTicks / clkTime
