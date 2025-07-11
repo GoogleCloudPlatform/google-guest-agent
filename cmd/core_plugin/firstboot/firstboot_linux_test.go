@@ -43,6 +43,10 @@ func TestSetupExistingFileSuccess(t *testing.T) {
 			InstanceID:    "pre-defined-instance-id",
 			InstanceIDDir: instanceFilePath,
 		},
+		InstanceSetup: &cfg.InstanceSetup{
+			SetBotoConfig: false,
+			SetHostKeys:   false,
+		},
 	}
 
 	f, err := os.Create(instanceFilePath)
@@ -76,6 +80,10 @@ func TestSetupSuccess(t *testing.T) {
 		Instance: &cfg.Instance{
 			InstanceID:    "pre-defined-instance-id",
 			InstanceIDDir: instanceFilePath,
+		},
+		InstanceSetup: &cfg.InstanceSetup{
+			SetBotoConfig: false,
+			SetHostKeys:   false,
 		},
 	}
 
@@ -134,6 +142,10 @@ func TestSetupLinuxFailure(t *testing.T) {
 					InstanceID:    "pre-defined-instance-id",
 					InstanceIDDir: instanceFilePath,
 				},
+				InstanceSetup: &cfg.InstanceSetup{
+					SetBotoConfig: true,
+					SetHostKeys:   true,
+				},
 			}
 
 			if tc.invalidInstanceIDDir {
@@ -141,9 +153,7 @@ func TestSetupLinuxFailure(t *testing.T) {
 			}
 
 			if tc.invalidHostKeyDir {
-				config.InstanceSetup = &cfg.InstanceSetup{
-					HostKeyDir: filepath.Join(tmpDir, "invalid-host-key-dir"),
-				}
+				config.InstanceSetup.HostKeyDir = filepath.Join(tmpDir, "invalid-host-key-dir")
 			}
 
 			instanceID := "foobar"
@@ -170,6 +180,10 @@ func TestSetupSameIDSuccess(t *testing.T) {
 		Instance: &cfg.Instance{
 			InstanceID:    "foobar",
 			InstanceIDDir: instanceFilePath,
+		},
+		InstanceSetup: &cfg.InstanceSetup{
+			SetBotoConfig: false,
+			SetHostKeys:   false,
 		},
 	}
 
