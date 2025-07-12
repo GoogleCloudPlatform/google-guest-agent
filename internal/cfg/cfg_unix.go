@@ -24,9 +24,9 @@ const (
 	// defaultSocketConnectionsDir is where all plugin socket connections are made
 	// on Linux.
 	defaultSocketConnectionsDir = "/run/google-guest-agent/plugin-connections"
-	// defaultInstanceIDFile is the path to the file that contains the instance ID
-	// on Linux.
-	defaultInstanceIDFile = "/etc/google_instance_id"
+	// defaultInstanceIDDir is the path to the directory that contains the
+	// instance ID file `google_instance_id` on Linux.
+	defaultInstanceIDDir = "/etc"
 	// defaultCmdMonitor is the default directory for command monitors on linux.
 	defaultCmdMonitor = "/run/google-guest-agent/cmd-monitors/"
 	// defaultIPAliasesEnabled is the default value for the IPAliases
