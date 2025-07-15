@@ -46,13 +46,17 @@ var (
 // platformSetup runs the actual firstboot setup for linux.
 func platformSetup(ctx context.Context, projectID string, config *cfg.Sections) error {
 	// Generate host SSH keys and upload them to guest attributes.
-	if err := writeSSHKeys(ctx, config.InstanceSetup); err != nil {
-		return err
+	if config.InstanceSetup.SetHostKeys {
+		if err := writeSSHKeys(ctx, config.InstanceSetup); err != nil {
+			return err
+		}
 	}
 
 	// Write the boto config file.
-	if err := writeBotoConfig(projectID); err != nil {
-		return err
+	if config.InstanceSetup.SetBotoConfig {
+		if err := writeBotoConfig(projectID); err != nil {
+			return err
+		}
 	}
 
 	return nil
