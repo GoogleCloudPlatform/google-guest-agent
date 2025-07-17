@@ -39,7 +39,7 @@ var (
 	defaultConfigValues = map[string]string{
 		"baseStateDir":         defaultBaseStateDir,
 		"socketConnectionsDir": defaultSocketConnectionsDir,
-		"instanceIDFile":       defaultInstanceIDFile,
+		"instanceIDDir":        defaultInstanceIDDir,
 		"commandPipe":          defaultCmdMonitor,
 		"ipAliasesEnabled":     fmt.Sprintf("%t", defaultIPAliasesEnabled),
 	}
@@ -88,7 +88,7 @@ target_instance_ips = true
 
 [Instance]
 instance_id =
-instance_id_dir = {{.instanceIDFile}}
+instance_id_dir = {{.instanceIDDir}}
 
 [InstanceSetup]
 host_key_dir = /etc/ssh

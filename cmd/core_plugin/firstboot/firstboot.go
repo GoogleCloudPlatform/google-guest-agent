@@ -33,6 +33,8 @@ import (
 const (
 	// firstbootModuleID is the ID of the iosched module.
 	firstbootModuleID = "firstboot"
+	// instanceIDFile is the name of the instance id file.
+	instanceIDFile = "google_instance_id"
 )
 
 // NewModule returns the first boot module for late stage registration.
@@ -90,7 +92,7 @@ func runFirstboot(ctx context.Context, instanceID string, projectID string, conf
 // firstbootRun returns true if the instance is being booted for the first time,
 // or in a broader sense if the instance id has changed.
 func firstbootRun(instanceID string, projectID string, config *cfg.Sections) (bool, error) {
-	fPath := config.Instance.InstanceIDDir
+	fPath := filepath.Join(config.Instance.InstanceIDDir, instanceIDFile)
 	var currentInstanceID string
 
 	// If the instance id file exists, read the current instance id from it.
@@ -122,11 +124,13 @@ func firstbootRun(instanceID string, projectID string, config *cfg.Sections) (bo
 // writeInstanceID writes the instance id to the file.
 func writeInstanceID(fPath string, newInstanceID string) error {
 	// Make parent directories if they don't exist.
-	if err := os.MkdirAll(filepath.Dir(fPath), 0755); err != nil {
+	if err := os.MkdirAll(fPath, 0755); err != nil {
 		return fmt.Errorf("failed to create instance id file: %w", err)
 	}
 
-	f, err := os.OpenFile(fPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	// Write the instance id to the file.
+	instanceIDFilePath := filepath.Join(fPath, instanceIDFile)
+	f, err := os.OpenFile(instanceIDFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open instance id file: %w", err)
 	}

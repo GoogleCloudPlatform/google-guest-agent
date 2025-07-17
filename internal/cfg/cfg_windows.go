@@ -28,8 +28,9 @@ const (
 	// enough otherwise it will fail with error "bind: invalid argument".
 	// https://github.com/golang/go/issues/6895
 	defaultSocketConnectionsDir = `C:\ProgramData\Google\Compute Engine\google-guest-agent`
-	// defaultInstanceIDFile is the path to the instance id file on Windows.
-	defaultInstanceIDFile = `C:\ProgramData\Google\Compute Engine\google-guest-agent\google_instance_id`
+	// defaultInstanceIDDir is the path to the directory containing the instance
+	// id file `google_instance_id` on Windows.
+	defaultInstanceIDDir = `C:\ProgramData\Google\Compute Engine\google-guest-agent`
 	// defaultCmdMonitor is the default named pipe prefix for command monitor on
 	// windows. For windows this is more of a template than path. All users will
 	// append specific name to this.
