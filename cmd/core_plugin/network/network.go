@@ -23,12 +23,13 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/wsfc"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 const (
@@ -71,6 +72,7 @@ func NewLateModule(_ context.Context) *manager.Module {
 
 // moduleSetup is the setup function for the late network module.
 func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
+	galog.Debugf("Initializing %s module", networkLateModuleID)
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("network module expects a metadata descriptor in the data pointer")
@@ -96,6 +98,7 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 	sub := events.EventSubscriber{Name: networkLateModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_NETWORK_INITIALIZATION}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
 
+	galog.Debugf("Finished initializing %s module", networkLateModuleID)
 	return nil
 }
 
@@ -134,6 +137,7 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 		return true, nil
 	}
 
+	galog.V(1).Debugf("Network metadata has changed or failed configuration, setting up network interfaces.")
 	var ignoreAddressMap address.IPAddressMap
 	// If WSFC is enabled, map the configured IP addresses to WSFC configurations
 	// and use the mapping to ignore the matching addresses on the IPForwarding,
@@ -154,6 +158,7 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 		return false, fmt.Errorf("failed to setup network interfaces: %v", err)
 	}
 
+	galog.V(1).Debugf("Network interfaces setup completed successfully.")
 	return false, nil
 }
 

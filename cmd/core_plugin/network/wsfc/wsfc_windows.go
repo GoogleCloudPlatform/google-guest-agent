@@ -20,6 +20,7 @@ package wsfc
 import (
 	"strings"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
@@ -47,6 +48,7 @@ func AddressMap(desc *metadata.Descriptor, config *cfg.Sections) address.IPAddre
 
 	// addresses contains the wsfc wanted addresses.
 	addresses := wantedAddresses()
+	galog.Debugf("Found WSFC addresses: %s", addresses)
 
 	// Transform the wanted addresses into a slice - make sure to remove empty
 	// entries.
@@ -56,14 +58,17 @@ func AddressMap(desc *metadata.Descriptor, config *cfg.Sections) address.IPAddre
 // Enabled returns true if WSFC is enabled, false otherwise.
 func Enabled(desc *metadata.Descriptor, config *cfg.Sections) bool {
 	if config.WSFC != nil {
+		galog.V(1).Debugf("Found instance config file attribute for enable wsfc set to: %t", config.WSFC.Enable)
 		return config.WSFC.Enable
 	}
 
 	if desc.Instance().Attributes().EnableWSFC() != nil {
+		galog.V(1).Debugf("Found instance level attribute for enable wsfc set to: %t", *desc.Instance().Attributes().EnableWSFC())
 		return *desc.Instance().Attributes().EnableWSFC()
 	}
 
 	if desc.Project().Attributes().EnableWSFC() != nil {
+		galog.V(1).Debugf("Found project level attribute for enable wsfc set to: %t", *desc.Project().Attributes().EnableWSFC())
 		return *desc.Project().Attributes().EnableWSFC()
 	}
 

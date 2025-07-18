@@ -190,6 +190,7 @@ func (sn *Module) WriteDropins(nics []*nic.Configuration, filePrefix string) (bo
 		changed = changed || wrote
 	}
 
+	galog.Debugf("Finished writing systemd-networkd drop-in files.")
 	return changed, nil
 }
 
@@ -216,6 +217,7 @@ func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix string, 
 		}
 	}
 
+	galog.Debugf("Finished rolling back systemd-networkd drop-in files.")
 	return nil
 }
 
@@ -269,6 +271,8 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 	// If we've not changed any configuration we shouldn't have to reload
 	// systemd-networkd.
 	if !changed && !vlanCleanedup {
+		galog.Debugf("No configuration changes made, skipping reload.")
+		galog.Infof("Finished setting up systemd-networkd interfaces.")
 		return nil
 	}
 
@@ -277,6 +281,7 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 		return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
 	}
 
+	galog.Infof("Finished setting up systemd-networkd interfaces.")
 	return nil
 }
 
@@ -341,6 +346,7 @@ func (sn *Module) cleanupVlanConfigs(keepMe []string) (bool, error) {
 			continue
 		}
 
+		galog.Debugf("Removing systemd-networkd vlan interface config(%s).", fileName)
 		if err := os.Remove(filepath.Join(sn.configDir, fileName)); err != nil {
 			return requiresRestart, fmt.Errorf("failed to remove vlan interface config(%s): %w", fileName, err)
 		}
@@ -447,7 +453,7 @@ func (sn *Module) writeVlanConfig(vic *ethernet.VlanInterface) (bool, error) {
 // writeEthernetConfig writes the systemd config for all the provided interfaces
 // in the provided directory using the given priority.
 func (sn *Module) writeEthernetConfig(nic *nic.Configuration, filePath string, primary bool) (bool, error) {
-	galog.Debugf("Write systemd-networkd network config for %s.", nic.Interface.Name())
+	galog.Debugf("Writeing systemd-networkd network config for %s.", nic.Interface.Name())
 
 	dhcpIpv6 := map[bool]string{true: "yes", false: "ipv4"}
 	dhcp := dhcpIpv6[nic.SupportsIPv6]
@@ -533,7 +539,7 @@ func (sn *Module) Rollback(ctx context.Context, opts *service.Options, active bo
 
 		reqRestart2, err := rollbackConfiguration(sn.deprecatedNetworkFile(iface))
 		if err != nil {
-			galog.Warnf("Failed to rollback .network file: %v.", err)
+			galog.Warnf("Failed to rollback deprecated .network file: %v.", err)
 		}
 
 		ethernetRequiresReload = reqRestart1 || reqRestart2
@@ -546,12 +552,13 @@ func (sn *Module) Rollback(ctx context.Context, opts *service.Options, active bo
 	}
 
 	if !ethernetRequiresReload && !vlanCleanedUp {
-		galog.Debugf("No systemd-networkd's configuration rolled back, skipping restart.")
+		galog.Debugf("No systemd-networkd configuration rolled back, skipping restart.")
 		return nil
 	}
 
 	// Attempt to reload systemd-networkd configurations.
 	if !active {
+		galog.Debugf("Reloading systemd-networkd daemon.")
 		if err := sn.Reload(ctx); err != nil {
 			return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
 		}

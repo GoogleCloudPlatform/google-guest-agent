@@ -28,6 +28,7 @@ import (
 
 // platformEarlyInit is a hook for platform-specific early initialization.
 func platformEarlyInit(ctx context.Context, data any) error {
+	galog.Debugf("Initializing %s module", networkEarlyModuleID)
 	table, err := route.Table()
 	if err != nil {
 		return fmt.Errorf("failed to get route table: %w", err)
@@ -76,6 +77,7 @@ func platformEarlyInit(ctx context.Context, data any) error {
 		}
 	}
 
+	galog.Debugf("Finished initializing %s module", networkEarlyModuleID)
 	return nil
 }
 

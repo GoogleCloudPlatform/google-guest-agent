@@ -82,7 +82,7 @@ func NewModule(context.Context) *manager.Module {
 }
 
 func moduleSetup(ctx context.Context, data any) error {
-
+	galog.Debugf("Initializing %s module", hostnameModuleID)
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("expected metadata descriptor data in moduleSetup call")
@@ -110,7 +110,11 @@ func moduleSetup(ctx context.Context, data any) error {
 	if err := command.CurrentMonitor().RegisterHandler(ReconfigureHostnameCommand, ReconfigureHostname); err != nil {
 		return fmt.Errorf("failed to register command handler %q: %v", ReconfigureHostnameCommand, err)
 	}
-	return initPlatform(ctx)
+	err = initPlatform(ctx)
+	if err == nil {
+		galog.Debugf("Finished initializing %s module", hostnameModuleID)
+	}
+	return err
 }
 
 func moduleClose(ctx context.Context) {
@@ -123,7 +127,6 @@ func moduleClose(ctx context.Context) {
 // ReconfigureHostname takes a ReconfigureHostnameRequest as a []byte-encoded
 // json blob and returns a ReconfigureHostnameResponse []byte-encoded json blob.
 func ReconfigureHostname(ctx context.Context, _ []byte) ([]byte, error) {
-
 	var resp ReconfigureHostnameResponse
 	if cfg.Retrieve().Unstable.SetHostname {
 		if disallowedConfigurations[hostname] {
@@ -137,6 +140,7 @@ func ReconfigureHostname(ctx context.Context, _ []byte) ([]byte, error) {
 		}
 	}
 	if cfg.Retrieve().Unstable.SetFQDN {
+		galog.V(1).Debugf("SetFQDN is enabled.")
 		h := hostname
 		var err error
 		if runtime.GOOS != "windows" {
