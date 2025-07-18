@@ -113,7 +113,7 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 
 		// Don't write a new config file if one already exists.
 		if file.Exists(fPath, file.TypeFile) {
-			galog.Infof("Wicked config file for %s already exists (%s), skipping.", nic.Interface.Name(), fPath)
+			galog.Debugf("Wicked config file for %s already exists (%s), skipping.", nic.Interface.Name(), fPath)
 		} else {
 			// Write the config file for the current NIC.
 			if err := sn.writeEthernetConfig(nic, fPath); err != nil {
@@ -145,6 +145,7 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 
 	// Early return if there are no interfaces to bring up.
 	if len(ifupInterfaces) == 0 {
+		galog.Infof("No wicked interfaces to bring up.")
 		return nil
 	}
 
@@ -158,6 +159,7 @@ func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error
 		return fmt.Errorf("failed to reload interfaces: %w", err)
 	}
 
+	galog.Infof("Finished setting up wicked interfaces.")
 	return nil
 }
 
@@ -209,6 +211,7 @@ func (sn *serviceWicked) writeVlanConfig(vic *ethernet.VlanInterface, priority i
 		return fmt.Errorf("error writing vlan's ifcfg, wrote %d bytes, expected %d bytes", writeLen, len(content))
 	}
 
+	galog.Debugf("Successfully wrote wicked VLAN config file for %s.", vic.InterfaceName())
 	return nil
 }
 
@@ -269,6 +272,7 @@ func (sn *serviceWicked) cleanupVlanInterfaces(ctx context.Context, keepMe []str
 		}
 	}
 
+	galog.Debugf("Finished cleaning up old wicked interfaces.")
 	return nil
 }
 
@@ -301,6 +305,7 @@ func (sn *serviceWicked) writeEthernetConfig(nic *nic.Configuration, filePath st
 		return fmt.Errorf("error wicked ifcfg file: %s: %w", nic.Interface.Name(), err)
 	}
 
+	galog.Debugf("Successfully wrote wicked config file: %s", filePath)
 	return nil
 }
 
@@ -310,7 +315,7 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options, ac
 
 	// If the config directory does not exist we got nothing to rollback, skip it.
 	if !file.Exists(sn.configDir, file.TypeDir) {
-		galog.V(2).Debugf("Wicked config directory does not exist, skipping rollback.")
+		galog.Debugf("Wicked config directory does not exist, skipping rollback.")
 		return nil
 	}
 
@@ -369,6 +374,7 @@ func (sn *serviceWicked) removeInterface(ctx context.Context, filePath string, i
 
 	// File is not managed by us, skip it.
 	if !shouldRemove {
+		galog.Debugf("Wicked config file is not managed by guest agent: %q", filePath)
 		return false, nil
 	}
 
@@ -379,6 +385,7 @@ func (sn *serviceWicked) removeInterface(ctx context.Context, filePath string, i
 		if err = os.Remove(filePath); err != nil {
 			return false, fmt.Errorf("error deleting config file: %s, %v", filePath, err)
 		}
+		galog.Debugf("Successfully removed wicked config file: %q", filePath)
 	}
 
 	return true, nil

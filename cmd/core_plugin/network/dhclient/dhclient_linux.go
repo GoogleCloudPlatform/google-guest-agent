@@ -135,12 +135,13 @@ func (ds *dhclientService) Setup(ctx context.Context, opts *service.Options) err
 		}
 	}
 
+	galog.Info("Finished setting up dhclient interfaces.")
 	return nil
 }
 
 // setupVlan sets up the VLAN interfaces.
 func (ds *dhclientService) setupVlanInterfaces(ctx context.Context, nic *nic.Configuration) error {
-	galog.Debug("Setting up vlan interfaces.")
+	galog.Debugf("Setting up vlan interfaces for NIC %s.", nic.Interface.Name())
 
 	sysInterfaces, err := ethernet.Interfaces()
 	if err != nil {
@@ -210,13 +211,14 @@ func (ds *dhclientService) setupVlanInterfaces(ctx context.Context, nic *nic.Con
 		return fmt.Errorf("failed to remove uninstalled vlan interfaces: %w", err)
 	}
 
+	galog.Debugf("Finished setting up vlan interfaces for NIC %s.", nic.Interface.Name())
 	return nil
 }
 
 // removeVlanInterfaces removes the vlan interfaces that are not in the keepMe
 // list.
 func (ds *dhclientService) removeVlanInterfaces(ctx context.Context, nic *nic.Configuration, keepMe []*ethernet.VlanInterface) error {
-	galog.Debug("Removing installed vlan interfaces.")
+	galog.Debugf("Removing installed vlan interfaces.")
 
 	for _, vlan := range nic.VlanInterfaces {
 		// If the vlan interface is in the keepMe list means the the vlan interfaces
@@ -231,11 +233,13 @@ func (ds *dhclientService) removeVlanInterfaces(ctx context.Context, nic *nic.Co
 		}
 	}
 
+	galog.Debugf("Finished removing vlan interfaces.")
 	return nil
 }
 
 // setupEthernet sets up the Ethernet interfaces.
 func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Options, config *cfg.Sections) error {
+	galog.Debugf("Setting up ethernet interfaces.")
 	// If the dhclient command is configured, run it and return the error.
 	if ok, err := runConfiguredCommand(ctx, config); ok {
 		return err
@@ -247,6 +251,9 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 	}
 
 	// Release IPv6 leases.
+	if len(partitions.releaseIpv6) != 0 {
+		galog.Debugf("Releasing IPv6 leases for interfaces: %v", partitions.releaseIpv6)
+	}
 	for _, nicConfig := range partitions.releaseIpv6 {
 		if err := ds.runDhclient(ctx, nicConfig.Interface.Name(), ipv6, releaseLease); err != nil {
 			return fmt.Errorf("failed to run dhclient: %w", err)
@@ -254,6 +261,9 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 	}
 
 	// Setup IPV4.
+	if len(partitions.obtainIpv4) != 0 {
+		galog.Debugf("Obtaining IPv4 leases for interfaces: %v", partitions.obtainIpv4)
+	}
 	for _, nic := range partitions.obtainIpv4 {
 		if err := ds.runDhclient(ctx, nic.Interface.Name(), ipv4, obtainLease); err != nil {
 			return fmt.Errorf("failed to run dhclient: %w", err)
@@ -262,11 +272,13 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 
 	// Setup IPV6.
 	if len(partitions.obtainIpv6) != 0 {
+		galog.Debugf("Obtaining IPv6 leases for interfaces: %v", partitions.obtainIpv6)
 		if err := ds.setupIPV6Interfaces(ctx, opts, partitions); err != nil {
 			return fmt.Errorf("failed to setup IPv6 interfaces: %w", err)
 		}
 	}
 
+	galog.Debugf("Finished setting up ethernet interfaces.")
 	return nil
 }
 
@@ -339,9 +351,11 @@ func (ds *dhclientService) runDhclient(ctx context.Context, nicName string, ipVe
 	var errMsg string
 	if op == releaseLease {
 		dhclientArgs = append(dhclientArgs, "-r", nicName)
+		galog.Debugf("Releasing %s lease for %s", ipVersion.Desc, nicName)
 		errMsg = fmt.Sprintf("error releasing lease for %s", nicName)
 	} else if op == obtainLease {
 		dhclientArgs = append(dhclientArgs, nicName)
+		galog.Debugf("Obtaining %s lease for %s", ipVersion.Desc, nicName)
 		errMsg = fmt.Sprintf("error obtaining lease for %s", nicName)
 	} else {
 		return fmt.Errorf("invalid operation: %v", op)
@@ -417,7 +431,6 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, 
 			return fmt.Errorf("failed to remove vlan interfaces: %w", err)
 		}
 	}
-
 	return nil
 }
 
