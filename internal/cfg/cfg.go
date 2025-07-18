@@ -23,6 +23,7 @@ import (
 	"sync"
 	"text/template"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/go-ini/ini"
 )
 
@@ -485,6 +486,7 @@ func Load(extraDefaults []byte) error {
 	}
 
 	sources := dataSources(extraDefaults)
+	galog.V(3).Debugf("Loading configuration from sources: %v", sources)
 	cfg, err := ini.LoadSources(opts, buffer.Bytes(), sources...)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %+w", err)
