@@ -23,10 +23,11 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 const (
@@ -112,6 +113,7 @@ func (mod *clockSkew) clockSetup(ctx context.Context, desc *metadata.Descriptor)
 		return true, true, nil
 	}
 
+	galog.Info("Clock drift token has changed, resetting clock skew.")
 	return true, false, platformImpl(ctx)
 }
 
