@@ -48,6 +48,7 @@ func NewModule(context.Context) *manager.Module {
 
 // moduleSetup sets up the firstboot module.
 func moduleSetup(ctx context.Context, data any) error {
+	galog.Debugf("Initializing firstboot module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("firstboot module expects a metadata descriptor in the data pointer")
@@ -61,6 +62,7 @@ func moduleSetup(ctx context.Context, data any) error {
 		return fmt.Errorf("failed to run firstboot: %v", err)
 	}
 
+	galog.Debugf("Finished firstboot module setup.")
 	return nil
 }
 
@@ -72,9 +74,10 @@ func runFirstboot(ctx context.Context, instanceID string, projectID string, conf
 	}
 
 	if !isFirstboot {
-		galog.Debug("Instance id is already set, no update required.")
 		return nil
 	}
+
+	galog.Infof("Running firstboot setup...")
 
 	// InstanceID writing path is common between linux and windows so have it done
 	// before platform specific setup.
@@ -85,7 +88,7 @@ func runFirstboot(ctx context.Context, instanceID string, projectID string, conf
 	if err := platformSetup(ctx, projectID, config); err != nil {
 		return fmt.Errorf("failed to setup instance id: %v", err)
 	}
-
+	galog.Infof("Finished firstboot setup.")
 	return nil
 }
 
@@ -145,5 +148,6 @@ func writeInstanceID(fPath string, newInstanceID string) error {
 		return fmt.Errorf("failed to write instance id file: %w", err)
 	}
 
+	galog.Debugf("Successfully wrote instance id file: %s", instanceIDFilePath)
 	return nil
 }

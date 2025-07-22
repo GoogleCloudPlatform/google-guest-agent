@@ -65,6 +65,7 @@ func platformSetup(ctx context.Context, projectID string, config *cfg.Sections) 
 // writeBotoConfig overwrites the boto config file with the provided project id,
 // sets the default_api_version to 2, and sets the service_account to default.
 func writeBotoConfig(projectID string) error {
+	galog.Debugf("Writing boto config file: %s", botoConfigFile)
 	templatePath := botoConfigFile + ".template"
 
 	botoCfg, err := ini.LooseLoad(botoConfigFile, templatePath)
@@ -80,6 +81,7 @@ func writeBotoConfig(projectID string) error {
 		return fmt.Errorf("failed to save boto config: %w", err)
 	}
 
+	galog.Debugf("Successfully wrote boto config file: %s", botoConfigFile)
 	return nil
 }
 
@@ -90,6 +92,7 @@ func writeSSHKeys(ctx context.Context, instanceSetup *cfg.InstanceSetup) error {
 		return nil
 	}
 
+	galog.Debugf("Generating SSH host keys")
 	hostKeyDir := instanceSetup.HostKeyDir
 	dir, err := os.Open(hostKeyDir)
 	if err != nil {
@@ -133,6 +136,7 @@ func writeSSHKeys(ctx context.Context, instanceSetup *cfg.InstanceSetup) error {
 		tmpKeyFile := keyfile + ".temp"
 		tmpPubKeyFile := keyfile + ".temp.pub"
 
+		galog.Debugf("Generating %s type SSH host key at %q", keytype, tmpKeyFile)
 		cmd := []string{"ssh-keygen", "-t", keytype, "-f", tmpKeyFile, "-N", "", "-q"}
 		opts := run.Options{Name: cmd[0], Args: cmd[1:], OutputType: run.OutputNone}
 		if _, err := run.WithContext(ctx, opts); err != nil {
@@ -177,11 +181,13 @@ func writeSSHKeys(ctx context.Context, instanceSetup *cfg.InstanceSetup) error {
 		if err := client.WriteGuestAttributes(ctx, "hostkeys/"+vals[0], vals[1]); err != nil {
 			galog.Errorf("Failed to upload %s key to guest attributes: %v", keytype, err)
 		}
+		galog.V(1).Debugf("Successfully uploaded %s type public key to guest attributes", keytype)
 	}
 
 	_, err = exec.LookPath("restorecon")
 	if err != nil {
-		galog.Infof("restorecon not found, skipping SELinux context restoration")
+		galog.Debugf("restorecon not found, skipping SELinux context restoration")
+		galog.Debugf("Finished generating SSH host keys")
 		return nil
 	}
 
@@ -190,7 +196,7 @@ func writeSSHKeys(ctx context.Context, instanceSetup *cfg.InstanceSetup) error {
 	if _, err := run.WithContext(ctx, opts); err != nil {
 		return fmt.Errorf("failed to restore SELinux context for: %s, %w", hostKeyDir, err)
 	}
-
+	galog.Debugf("Finished generating SSH host keys")
 	return nil
 }
 
