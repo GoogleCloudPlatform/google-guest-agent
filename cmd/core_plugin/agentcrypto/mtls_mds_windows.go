@@ -28,7 +28,6 @@ import (
 	"unsafe"
 
 	"github.com/GoogleCloudPlatform/galog"
-
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"golang.org/x/sys/windows"
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
@@ -62,6 +61,8 @@ var (
 
 // writeRootCACert writes Root CA cert from UEFI variable to output file.
 func (j *CredsJob) writeRootCACert(ctx context.Context, cacert []byte, outputFile string) error {
+	galog.Debugf("Writing root CA cert to %q", outputFile)
+
 	// Try to fetch previous certificate's serial number before it gets
 	// overwritten.
 	num, err := serialNumber(outputFile)
@@ -72,9 +73,10 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, cacert []byte, outputFil
 	if err := file.SaferWriteFile(ctx, cacert, outputFile, file.Options{Perm: 0644}); err != nil {
 		return err
 	}
+	galog.Debugf("Successfully wrote root CA cert to %q", outputFile)
 
 	if !j.useNativeStore {
-		galog.Debug("Skipping system store update as it is disabled in the configuration")
+		galog.Debugf("Skipping system store update as it is disabled in the configuration")
 		return nil
 	}
 
@@ -84,6 +86,7 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, cacert []byte, outputFil
 	}
 
 	// https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certcreatecertificatecontext
+	galog.V(3).Debug("Creating certificate context for root CA cert")
 	certContext, err := windows.CertCreateCertificateContext(
 		windows.X509_ASN_ENCODING|windows.PKCS_7_ASN_ENCODING,
 		&x509Cert.Raw[0],
@@ -91,6 +94,7 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, cacert []byte, outputFil
 	if err != nil {
 		return fmt.Errorf("CertCreateCertificateContext returned: %w", err)
 	}
+	galog.V(3).Debug("Successfully created certificate context for root CA cert")
 	// https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certfreecertificatecontext
 	defer windows.CertFreeCertificateContext(certContext)
 
@@ -125,7 +129,7 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, cacert []byte, outputFil
 // findCert finds and returns certificate issued by issuer with the serial
 // number in the given the store.
 func findCert(storeName, issuer, certID string) (*windows.CertContext, error) {
-	galog.Infof("Searching for certificate with serial number %s in store %s by issuer %s", certID, storeName, issuer)
+	galog.Debugf("Searching for certificate with serial number %s in store %s by issuer %s", certID, storeName, issuer)
 
 	st, err := windows.CertOpenStore(
 		windows.CERT_STORE_PROV_SYSTEM,
@@ -139,7 +143,7 @@ func findCert(storeName, issuer, certID string) (*windows.CertContext, error) {
 	defer windows.CertCloseStore(st, 0)
 
 	// prev is used for enumerating through all the certificates that matches the
-	// issuer. On the first call to the function this parameter is NULL on all
+	// issuer. On the first call to the function this parameter is NULL. On all
 	// subsequent calls, this parameter is the last CertContext pointer returned
 	// by the CertFindCertificateInStore function.
 	var prev *windows.CertContext
@@ -157,7 +161,6 @@ func findCert(storeName, issuer, certID string) (*windows.CertContext, error) {
 			windows.CERT_FIND_ISSUER_STR,
 			unsafe.Pointer(syscall.StringToUTF16Ptr(issuer)),
 			prev)
-
 		if err != nil {
 			return nil, fmt.Errorf("unable to find certificate: %w", err)
 		}
@@ -171,6 +174,7 @@ func findCert(storeName, issuer, certID string) (*windows.CertContext, error) {
 		}
 
 		if fmt.Sprintf("%x", x509Cert.SerialNumber) == certID {
+			galog.Debugf("Found certificate with serial number %s in store %s by issuer %s", certID, storeName, issuer)
 			return crt, nil
 		}
 
@@ -183,6 +187,8 @@ func findCert(storeName, issuer, certID string) (*windows.CertContext, error) {
 // writeClientCredentials stores client credentials (certificate and private
 // key).
 func (j *CredsJob) writeClientCredentials(ctx context.Context, creds []byte, outputFile string) error {
+	galog.Debugf("Writing client credentials to %q", outputFile)
+
 	num, err := serialNumber(outputFile)
 	if err != nil {
 		galog.Warnf("Could not get previous serial number, will skip cleanup: %v", err)
@@ -191,47 +197,59 @@ func (j *CredsJob) writeClientCredentials(ctx context.Context, creds []byte, out
 	if err := file.SaferWriteFile(ctx, creds, outputFile, file.Options{Perm: 0644}); err != nil {
 		return fmt.Errorf("failed to write client key: %w", err)
 	}
+	galog.Debugf("Successfully wrote client credentials to %q", outputFile)
 
+	galog.V(1).Debug("Generating PFX data from client credentials")
 	pfx, err := generatePFX(creds)
 	if err != nil {
 		return fmt.Errorf("failed to generate PFX data from client credentials: %w", err)
 	}
+	galog.V(1).Debug("Successfully generated PFX data from client credentials")
 
+	galog.V(1).Debugf("Writing PFX file to %q", pfxFile)
 	p := filepath.Join(filepath.Dir(outputFile), pfxFile)
 	if err := file.SaferWriteFile(ctx, pfx, p, file.Options{Perm: 0644}); err != nil {
 		return fmt.Errorf("failed to write PFX file: %w", err)
 	}
+	galog.V(1).Debugf("Successfully wrote PFX file to %q", p)
 
 	if !j.useNativeStore {
-		galog.Debug("Skipping client credentials write to system store update as it is disabled in the configuration")
+		galog.Info("Skipping client credentials write to system store update as it is disabled in the configuration")
 		return nil
 	}
 
+	galog.Debugf("Writing client credentials to system store")
 	blob := windows.CryptDataBlob{
 		Size: uint32(len(pfx)),
 		Data: &pfx[0],
 	}
 
 	// https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-pfximportcertstore
+	galog.V(1).Debug("Importing PFX into cert store")
 	handle, err := windows.PFXImportCertStore(&blob, syscall.StringToUTF16Ptr(""), windows.CRYPT_MACHINE_KEYSET)
 	if err != nil {
 		return fmt.Errorf("failed to import PFX in cert store: %w", err)
 	}
+	galog.V(1).Debug("Successfully imported PFX into cert store")
 	defer windows.CertCloseStore(handle, 0)
 
 	var crtCtx *windows.CertContext
 
 	// https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certenumcertificatesinstore
+	galog.V(1).Debug("Fetching cert context for PFX from store")
 	crtCtx, err = windows.CertEnumCertificatesInStore(handle, crtCtx)
 	if err != nil {
 		return fmt.Errorf("failed to get cert context for PFX from store: %w", err)
 	}
+	galog.V(1).Debug("Successfully fetched cert context for PFX from store")
 	defer windows.CertFreeCertificateContext(crtCtx)
 
 	// Add certificate to personal store.
+	galog.V(1).Debug("Adding PFX cert to local system store")
 	if err := addCtxToLocalSystemStore(my, crtCtx, uint32(windows.CERT_STORE_ADD_NEWER)); err != nil {
 		return fmt.Errorf("failed to store pfx cert context: %w", err)
 	}
+	galog.V(1).Debug("Successfully added PFX cert to local system store")
 
 	// Search for previous certificate if its not already in memory.
 	if prevCtx == nil && num != "" {
@@ -242,11 +260,15 @@ func (j *CredsJob) writeClientCredentials(ctx context.Context, creds []byte, out
 	}
 
 	// Remove previous certificate only after successful refresh.
+	galog.V(1).Debugf("Deleting previous certificate %v from local system store", prevCtx)
 	if err := deleteCert(prevCtx, my); err != nil {
 		galog.Warnf("Failed to delete previous certificate(%s) with error: %v", num, err)
+	} else {
+		galog.V(1).Debugf("Successfully deleted previous certificate %v from local system store", prevCtx)
 	}
 
 	prevCtx = windows.CertDuplicateCertificateContext(crtCtx)
+	galog.Debug("Successfully wrote certificate to system store")
 
 	return nil
 }
@@ -275,10 +297,13 @@ func generatePFX(creds []byte) (pfxData []byte, err error) {
 	return pkcs12.Encode(rand.Reader, ecpvt, x509Cert, nil, "")
 }
 
+// addCtxToLocalSystemStore adds the certificate context to the local system
+// store.
 func addCtxToLocalSystemStore(storeName string, certContext *windows.CertContext, disposition uint32) error {
 	// https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore
 	// https://learn.microsoft.com/en-us/windows-hardware/drivers/install/local-machine-and-current-user-certificate-stores
 	// https://learn.microsoft.com/en-us/windows/win32/seccrypto/system-store-locations#cert_system_store_local_machine
+	galog.V(2).Debugf("Adding certificate context(%v) to store %s", certContext, storeName)
 	st, err := windows.CertOpenStore(
 		windows.CERT_STORE_PROV_SYSTEM,
 		0,
@@ -296,14 +321,17 @@ func addCtxToLocalSystemStore(storeName string, certContext *windows.CertContext
 		return fmt.Errorf("failed to add certificate context to store: %w", err)
 	}
 
+	galog.V(2).Debugf("Successfully added certificate context(%v) to store %s", certContext, storeName)
 	return nil
 }
 
+// deleteCert deletes the certificate from the given store.
 func deleteCert(crtCtx *windows.CertContext, storeName string) error {
 	if crtCtx == nil {
 		return nil
 	}
 
+	galog.V(2).Debugf("Deleting certificate context(%v) from store %s", crtCtx, storeName)
 	st, err := windows.CertOpenStore(
 		windows.CERT_STORE_PROV_SYSTEM,
 		0,
@@ -315,6 +343,7 @@ func deleteCert(crtCtx *windows.CertContext, storeName string) error {
 	}
 	defer windows.CertCloseStore(st, 0)
 
+	galog.V(3).Debugf("Finding certificate context(%v) in store %s", crtCtx, storeName)
 	var dlCtx *windows.CertContext
 	dlCtx, err = windows.CertFindCertificateInStore(
 		st,
@@ -327,6 +356,12 @@ func deleteCert(crtCtx *windows.CertContext, storeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to find the certificate in %q store to delete: %w", storeName, err)
 	}
+	galog.V(3).Debugf("Successfully found certificate context(%v) in store %s", crtCtx, storeName)
 
-	return windows.CertDeleteCertificateFromStore(dlCtx)
+	galog.V(3).Debugf("Deleting certificate context(%v) from store %s", crtCtx, storeName)
+	err = windows.CertDeleteCertificateFromStore(dlCtx)
+	if err == nil {
+		galog.V(2).Debugf("Successfully deleted certificate context(%v) from store %s", crtCtx, storeName)
+	}
+	return err
 }
