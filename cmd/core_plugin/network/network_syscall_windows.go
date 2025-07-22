@@ -204,6 +204,7 @@ func deleteIPAddress(ipAddr *address.IPAddr) error {
 		return err
 	}
 
+	galog.V(2).Debugf("Deleting IP address %+v", ipAddr)
 	for ; ai != nil; ai = ai.Next {
 		for ipl := &ai.IpAddressList; ipl != nil; ipl = ipl.Next {
 			ipb := bytes.Trim(ipl.IpAddress.String[:], "\x00")

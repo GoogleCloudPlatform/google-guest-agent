@@ -108,7 +108,7 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 // implementation fail to check itself or if no manager is managing the network
 // interfaces, an error is returned.
 func activeManager(ctx context.Context, managers []*service.Handle, opts *service.Options) (*service.Handle, error) {
-	galog.Debugf("Checking if any of the linux network management service module is active.")
+	galog.Debugf("Checking for active network manager service.")
 
 	for _, manager := range managers {
 		managing, err := manager.IsManaging(ctx, opts)
@@ -118,7 +118,7 @@ func activeManager(ctx context.Context, managers []*service.Handle, opts *servic
 		}
 
 		if managing {
-			galog.Debugf("Returning active linux network management service module: %q", manager.ID)
+			galog.Debugf("Found active network manager service: %q", manager.ID)
 			return manager, nil
 		}
 	}
@@ -133,14 +133,16 @@ func rollback(ctx context.Context, managers []*service.Handle, skipID string, op
 
 	var rolledBack []string
 	for _, manager := range managers {
+		galog.V(1).Debugf("Rolling back network configuration for %q.", manager.ID)
 		// Rollback network configurations for the manager. Avoid reloading the
 		// active manager as we'll need to reload it anyway after the setup.
 		if err := manager.Rollback(ctx, opts, manager.ID == skipID); err != nil {
 			galog.Debugf("failed to rollback network configuration(%q): %v", manager.ID, err)
+		} else {
+			galog.V(1).Debugf("Successfully rolled back network configuration for %q.", manager.ID)
 		}
 
 		rolledBack = append(rolledBack, manager.ID)
-		galog.V(2).Debugf("Rolled back network configuration for %q.", manager.ID)
 	}
 
 	return rolledBack, nil

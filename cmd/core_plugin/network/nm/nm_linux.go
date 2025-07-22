@@ -144,12 +144,14 @@ func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Option
 		}
 
 		connID := sn.connectionID(nic.Interface.Name())
+		galog.Debugf("Enabling NetworkManager connection(%q).", connID)
 		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"conn", "up", "id", connID}}
 		if _, err := run.WithContext(ctx, opt); err != nil {
 			return fmt.Errorf("error enabling NetworkManager connection(%q): %w", connID, err)
 		}
 	}
 
+	galog.Info("Finished setting up NetworkManager interfaces.")
 	return nil
 }
 
@@ -202,11 +204,13 @@ func (sn *serviceNetworkManager) cleanupVlanConfigs(keepMe []string) error {
 			continue
 		}
 
+		galog.Debugf("Removing NetworkManager vlan interface config(%s).", fileName)
 		if err := os.Remove(filepath.Join(sn.configDir, fileName)); err != nil {
 			return fmt.Errorf("failed to remove vlan interface config(%s): %w", fileName, err)
 		}
 	}
 
+	galog.Debugf("Finished cleaning up NetworkManager vlan interfaces.")
 	return nil
 }
 
@@ -250,13 +254,14 @@ func (sn *serviceNetworkManager) writeVlanConfig(vic *ethernet.VlanInterface, fi
 		return fmt.Errorf("error updating permissions for %s VLAN connection config: %w", iface, err)
 	}
 
+	galog.Debugf("Successfully wrote NetworkManager VLAN config file for %s.", vic.InterfaceName())
 	return nil
 }
 
 // writeEthernetConfig writes the NetworkManager config file for the provided
 // NIC.
 func (sn *serviceNetworkManager) writeEthernetConfig(nic *nic.Configuration, filePath string) error {
-	galog.Debugf("Writing NetworkManager config file: %s", filePath)
+	galog.Debugf("Writing NetworkManager ethernet config file: %s", filePath)
 
 	// Create the ini file.
 	iface := nic.Interface.Name()
@@ -298,6 +303,7 @@ func (sn *serviceNetworkManager) writeEthernetConfig(nic *nic.Configuration, fil
 		return fmt.Errorf("failed to remove previously managed ifcfg file(%s): %w", sn.ifcfgFilePath(iface), err)
 	}
 
+	galog.Debugf("Successfully wrote NetworkManager ethernet config file: %s", filePath)
 	return nil
 }
 
@@ -368,7 +374,7 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 	var reconnectPrimaryNic bool
 	var primaryOp removeOp
 	for _, op := range deleteMe {
-		galog.Debugf("Attempting to remove NetworkManager configuration: %q", op.configFile)
+		galog.Debugf("Removing NetworkManager configuration: %q", op.configFile)
 		err := os.RemoveAll(op.configFile)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("error deleting NetworkManager %s config file(%q): %v", op.configType, op.configFile, err)
@@ -383,7 +389,7 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 	}
 
 	if _, err := execLookPath("nmcli"); err != nil {
-		galog.Debugf("Cannot find nmcli, skipping rollback: %v", err)
+		galog.Debugf("Cannot find nmcli, skipping reload: %v", err)
 		return nil
 	}
 

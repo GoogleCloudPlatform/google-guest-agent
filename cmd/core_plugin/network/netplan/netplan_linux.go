@@ -67,6 +67,7 @@ func isUbuntu1804() bool {
 // IsManaging returns true if the netplan service is managing the network
 // configuration.
 func (sn *serviceNetplan) IsManaging(ctx context.Context, opts *service.Options) (bool, error) {
+	galog.Debugf("Checking if netplan is managing the network interfaces.")
 	sn.defaultConfig()
 
 	// Ubuntu 18.04, while having `netplan` installed, ships a outdated and
@@ -177,6 +178,7 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 		}
 	}
 
+	galog.Info("Finished setting up netplan interfaces.")
 	return nil
 }
 
@@ -212,6 +214,7 @@ func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, erro
 		}
 
 		for _, vlan := range nic.VlanInterfaces {
+			galog.Debugf("Adding vlan %s(parent %s) to drop-in configuration.", vlan.InterfaceName(), vlan.Parent.Name())
 			trueVal := true
 
 			nv := netplanVlan{
@@ -314,6 +317,7 @@ func (sn *serviceNetplan) write(nd netplanDropin, dropinFile string) (bool, erro
 	}
 
 	// Marshal the configuration and write the file.
+	galog.Debugf("Writing netplan drop-in file: %s", dropinFile)
 	data, err := yaml.Marshal(&nd)
 	if err != nil {
 		return false, fmt.Errorf("error marshalling netplan drop-in yaml file: %w", err)
@@ -323,6 +327,7 @@ func (sn *serviceNetplan) write(nd netplanDropin, dropinFile string) (bool, erro
 		return false, err
 	}
 
+	galog.Debugf("Successfully wrote netplan drop-in file: %s", dropinFile)
 	return true, nil
 }
 
@@ -381,6 +386,7 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 	}
 
 	if !active {
+		galog.Debugf("Reloading netplan configuration.")
 		if _, err := execLookPath("netplan"); err != nil {
 			if errors.Is(err, exec.ErrNotFound) {
 				galog.Debugf("Netplan CLI not found, skipping reload.")
