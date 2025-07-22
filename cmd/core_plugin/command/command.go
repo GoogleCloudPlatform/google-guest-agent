@@ -19,6 +19,7 @@ package command
 import (
 	"context"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 )
@@ -40,5 +41,10 @@ func NewModule(context.Context) *manager.Module {
 
 // setup is the command monitor module setup function wrapper.
 func setup(ctx context.Context, _ any) error {
-	return command.Setup(ctx, command.ListenerCorePlugin)
+	galog.Debug("Initializing command monitor module.")
+	err := command.Setup(ctx, command.ListenerCorePlugin)
+	if err == nil {
+		galog.Debug("Successfully initialized command monitor module.")
+	}
+	return err
 }
