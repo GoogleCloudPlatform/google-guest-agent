@@ -27,7 +27,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -35,6 +34,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ssh"
 	"golang.org/x/sys/windows/registry"
+
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 const (
@@ -75,6 +76,7 @@ func NewModule(context.Context) *manager.Module {
 // moduleSetup is the module's Setup callback. It registers a subscriber to
 // metadata's longpoll event.
 func (mod *diagnosticsModule) moduleSetup(ctx context.Context, data any) error {
+	galog.Debugf("Initializing %s module", diagnosticsModuleID)
 	eManager := events.FetchManager()
 
 	desc, ok := data.(*metadata.Descriptor)
@@ -92,6 +94,7 @@ func (mod *diagnosticsModule) moduleSetup(ctx context.Context, data any) error {
 	sub := events.EventSubscriber{Name: diagnosticsModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_DIAGNOSTICS_INITIALIZATION}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
 
+	galog.Debugf("Finished initializing %s module", diagnosticsModuleID)
 	return nil
 }
 
