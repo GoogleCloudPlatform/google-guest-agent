@@ -198,7 +198,7 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 	if err != nil {
 		// Return success when certs are not configured to avoid unnecessary systemd
 		// failed units.
-		galog.Infof("Error getting config status, workload certificates may not be configured: %v", err)
+		galog.Warnf("Error getting config status, workload certificates may not be configured: %v", err)
 		return nil
 	}
 
@@ -208,6 +208,7 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 	}
 
 	// Write config_status first even if remaining endpoints are empty.
+	galog.Debugf("Writing config status to %s", contentDir)
 	if err := os.WriteFile(filepath.Join(contentDir, "config_status"), certConfigStatus, 0644); err != nil {
 		return fmt.Errorf("error writing config_status: %w", err)
 	}
@@ -224,25 +225,30 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 	}
 
 	// Now get the rest of the content.
+	galog.Debugf("Reading workload identities from MDS")
 	wisMd, err := j.readMetadata(ctx, workloadIdentitiesKey)
 	if err != nil {
 		return fmt.Errorf("error getting workload-identities: %w", err)
 	}
 
+	galog.Debugf("Writing workload identities to %s", contentDir)
 	spiffeID, err := writeWorkloadIdentities(contentDir, wisMd)
 	if err != nil {
 		return fmt.Errorf("failed to write workload identities with error: %w", err)
 	}
 
+	galog.Debugf("Reading trust anchors from MDS")
 	wtrcsMd, err := j.readMetadata(ctx, trustAnchorsKey)
 	if err != nil {
 		return fmt.Errorf("error getting workload-trust-anchors: %w", err)
 	}
 
+	galog.Debugf("Writing trust anchors to %s", contentDir)
 	if err := writeTrustAnchors(wtrcsMd, contentDir, spiffeID); err != nil {
 		return fmt.Errorf("failed to write trust anchors: %w", err)
 	}
 
+	galog.Debugf("Creating temporary symlink %s", tempSymlink)
 	if err := os.Symlink(contentDir, tempSymlink); err != nil {
 		return fmt.Errorf("error creating temporary link: %w", err)
 	}

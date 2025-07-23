@@ -91,9 +91,11 @@ func (j *RefresherJob) ShouldEnable(ctx context.Context) bool {
 func (j *RefresherJob) Run(ctx context.Context) (bool, error) {
 	out := outputOpts{contentDirPrefix, tempSymlinkPrefix, symlink}
 
+	galog.Debugf("Refreshing workload certificates")
 	if err := j.refreshCreds(ctx, out, time.Now().Format(time.RFC3339)); err != nil {
 		return true, fmt.Errorf("refresh creds with error: %w", err)
 	}
+	galog.Debug("Finished refreshing workload certificates")
 
 	return true, nil
 }
