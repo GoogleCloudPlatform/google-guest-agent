@@ -86,6 +86,7 @@ func initScriptsMapping() {
 
 // moduleSetup runs the platform scripts on Linux.
 func moduleSetup(ctx context.Context, data any) error {
+	galog.Debugf("Initializing linux platform scripts module.")
 	initScriptsMapping()
 
 	desc, ok := data.(*metadata.Descriptor)
@@ -105,12 +106,14 @@ func moduleSetup(ctx context.Context, data any) error {
 		if _, err := run.WithContext(ctx, opts); err != nil {
 			return fmt.Errorf("failed to run platform script %q: %w", curr.script, err)
 		}
+		galog.Debugf("Finished running platform script: %q", curr.script)
 	}
 
 	if err := overCommitMemory(ctx, desc); err != nil {
 		return fmt.Errorf("failed to run overcommit memory setup: %w", err)
 	}
 
+	galog.Debugf("Finished initializing linux platform scripts module.")
 	return nil
 }
 
@@ -127,6 +130,7 @@ func overCommitMemory(ctx context.Context, desc *metadata.Descriptor) error {
 	if _, err := run.WithContext(ctx, opts); err != nil {
 		return fmt.Errorf("failed to run 'sysctl vm.overcommit_memory=1': %w", err)
 	}
+	galog.Debug("Enabled memory overcommit.")
 
 	return nil
 }
