@@ -89,6 +89,7 @@ func NewModule(context.Context) *manager.Module {
 
 // moduleSetup runs the actual snapshot handler for linux.
 func moduleSetup(ctx context.Context, _ any) error {
+	galog.Debugf("Initializing linux snapshot module.")
 	config := cfg.Retrieve().Snapshots
 
 	opts := clientOptions{
@@ -108,6 +109,7 @@ func moduleSetup(ctx context.Context, _ any) error {
 	// this module will keep running forever.
 	go func() { handler.run(ctx) }()
 
+	galog.Debugf("Finished initializing linux snapshot module.")
 	return nil
 }
 
@@ -133,6 +135,7 @@ func (op clientOptions) fullAddress() string {
 // run runs the snapshot handler.
 func (s *snapshotClient) run(ctx context.Context) error {
 	if !file.Exists(s.options.scriptDir, file.TypeDir) {
+		galog.V(1).Debugf("Creating scripts directory %q.", s.options.scriptDir)
 		if err := os.MkdirAll(s.options.scriptDir, 0700); err != nil {
 			return fmt.Errorf("failed to create scripts directory %q: %w", s.options.scriptDir, err)
 		}
@@ -250,7 +253,7 @@ func (s *snapshotClient) handleRequest(ctx context.Context, request *sspb.Snapsh
 		return fmt.Errorf("failed to send snapshot response: %w", err)
 	}
 
-	galog.Debugf("Successfully handled snapshot request.")
+	galog.Debugf("Successfully handled snapshot request type: %q, operation id: %d.", config.name, request.GetOperationId())
 	return nil
 }
 
@@ -310,6 +313,6 @@ func (s *snapshotClient) runScript(ctx context.Context, scriptPath string, disks
 		return xerr.ExitCode(), sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR
 	}
 
-	galog.Infof("Snpashot script %q succeeded.", scriptPath)
+	galog.Infof("Snapshot script %q succeeded.", scriptPath)
 	return 0, sspb.AgentErrorCode_NO_ERROR
 }
