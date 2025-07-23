@@ -68,6 +68,7 @@ func newPipeEventHandler(subscriberID string, mdsClient metadata.MDSClientInterf
 
 // Close finishes the sshca module.
 func (pe *PipeEventHandler) Close() {
+	galog.Debugf("Closing SSH CA pipe event handler.")
 	events.FetchManager().Unsubscribe(sshcaPipeWatcherOpts.ReadEventID, pe.subscriberID)
 }
 

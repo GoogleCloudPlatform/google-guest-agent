@@ -29,7 +29,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
@@ -38,6 +37,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
 
 const (
@@ -234,6 +235,7 @@ func NewModule(context.Context) *manager.Module {
 
 // moduleSetup is the setup function for the oslogin module.
 func (mod *osloginModule) moduleSetup(ctx context.Context, data any) error {
+	galog.Debugf("Initializing OS Login module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("oslogin module expects a metadata descriptor in the data pointer")
@@ -255,6 +257,7 @@ func (mod *osloginModule) moduleSetup(ctx context.Context, data any) error {
 	sub := events.EventSubscriber{Name: osloginModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_OS_LOGIN_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
 
+	galog.Debugf("Finished initializing OS Login module.")
 	return nil
 }
 
@@ -310,6 +313,8 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		mod.failedConfiguration.Store(false)
 		return true, false, nil
 	}
+
+	galog.Info("Enabling OS Login")
 
 	// Enable/start the ssh trusted ca pipe event handler.
 	if mod.pipeEventHandler == nil {
@@ -381,6 +386,7 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 
 // setupOpenSSH configures the openssh daemon.
 func (mod *osloginModule) setupOpenSSH(desc *metadata.Descriptor) error {
+	galog.Debug("Configuring OpenSSH daemon for OS Login.")
 	sshdCfg := textconfig.New(mod.sshdConfigPath, osloginConfigMode, osloginConfigOpts)
 	block := textconfig.NewBlock(textconfig.Top)
 	sshdCfg.AddBlock(block)
@@ -424,12 +430,18 @@ func (mod *osloginModule) setupOpenSSH(desc *metadata.Descriptor) error {
 	if err := sshdCfg.Apply(); err != nil {
 		return fmt.Errorf("failed to apply openssh config: %w", err)
 	}
+	galog.Debug("Successfully configured OpenSSH daemon for OS Login.")
 	return nil
 }
 
 // setupNSSwitch configures the NSSwitch configuration file. If cleanup is true
 // then the configuration is rolled back, otherwise it is set up.
 func (mod *osloginModule) setupNSSwitch(cleanup bool) error {
+	logMessage := "Setting up"
+	if cleanup {
+		logMessage = "Rolling back"
+	}
+	galog.Debugf("%s NSSwitch configurations for OS Login", logMessage)
 	nsswitch, err := os.ReadFile(mod.nsswitchConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to read nsswitch.conf: %w", err)
@@ -453,11 +465,13 @@ func (mod *osloginModule) setupNSSwitch(cleanup bool) error {
 	if err := os.WriteFile(mod.nsswitchConfigPath, []byte(strings.Join(lines, "\n")), osloginConfigMode); err != nil {
 		return fmt.Errorf("failed to write nsswitch.conf: %w", err)
 	}
+	galog.Debugf("Finished %s OS Login nsswitch configuration.", strings.ToLower(logMessage))
 	return nil
 }
 
 // setupPAM configures the PAM module.
 func (mod *osloginModule) setupPAM() error {
+	galog.Debug("Configuring PAM module for OS Login.")
 	pamConfig := textconfig.New(mod.pamConfigPath, osloginConfigMode, osloginConfigOpts)
 	topBlock := textconfig.NewBlock(textconfig.Top)
 	bottomBlock := textconfig.NewBlock(textconfig.Bottom)
@@ -475,11 +489,13 @@ func (mod *osloginModule) setupPAM() error {
 	if err := pamConfig.Apply(); err != nil {
 		return fmt.Errorf("failed to apply pam config: %w", err)
 	}
+	galog.Debug("Successfully configured PAM module for OS Login.")
 	return nil
 }
 
 // setupGroup configures the group config.
 func (mod *osloginModule) setupGroup() error {
+	galog.Debug("Setting up OS Login group configuration.")
 	groupConf := textconfig.New(mod.groupConfigPath, osloginConfigMode, osloginConfigOpts)
 
 	block := textconfig.NewBlock(textconfig.Bottom)
@@ -491,6 +507,7 @@ func (mod *osloginModule) setupGroup() error {
 	if err := groupConf.Apply(); err != nil {
 		return fmt.Errorf("failed to apply group config: %w", err)
 	}
+	galog.Debug("Successfully set up OS Login group configuration.")
 	return nil
 }
 
@@ -520,11 +537,13 @@ func (mod *osloginModule) removeDeprecatedEntries() error {
 			return fmt.Errorf("failed to cleanup deprecated file %s: %w", f, err)
 		}
 	}
+	galog.Debug("Removed deprecated entries from OS Login configuration.")
 	return nil
 }
 
 // disableOSLogin stop internal "services" and rollback user's configuration.
 func (mod *osloginModule) disableOSLogin(ctx context.Context, evManager *events.Manager) error {
+	galog.Infof("Disabling OS Login.")
 	// Make sure we only stop responding to requests to the ssh trusted ca pipe
 	// when all user's configuration is rolled back.
 	defer func() {
@@ -536,24 +555,30 @@ func (mod *osloginModule) disableOSLogin(ctx context.Context, evManager *events.
 	}()
 
 	// Rollback all the configuration.
+	galog.Debugf("Rolling back OpenSSH config %s", mod.sshdConfigPath)
 	sshdCfg := textconfig.New(mod.sshdConfigPath, osloginConfigMode, osloginConfigOpts)
 	if err := sshdCfg.Cleanup(); err != nil {
 		return fmt.Errorf("failed to rollback openssh config: %w", err)
 	}
+	galog.Debugf("Successfully rolled back OpenSSH config %s", mod.sshdConfigPath)
 
 	if err := mod.setupNSSwitch(true); err != nil {
 		return fmt.Errorf("failed to rollback nsswitch config: %w", err)
 	}
 
+	galog.Debugf("Rolling back PAM config %s", mod.pamConfigPath)
 	pamCfg := textconfig.New(mod.pamConfigPath, osloginConfigMode, osloginConfigOpts)
 	if err := pamCfg.Cleanup(); err != nil {
 		return fmt.Errorf("failed to rollback pam config: %w", err)
 	}
+	galog.Debugf("Successfully rolled back PAM config %s", mod.pamConfigPath)
 
+	galog.Debugf("Rolling back group config %s", mod.groupConfigPath)
 	groupCfg := textconfig.New(mod.groupConfigPath, osloginConfigMode, osloginConfigOpts)
 	if err := groupCfg.Cleanup(); err != nil {
 		return fmt.Errorf("failed to rollback group config: %w", err)
 	}
+	galog.Debugf("Successfully rolled back group config %s", mod.groupConfigPath)
 
 	// Restart the services to reflect the rollback.
 	if err := mod.restartServices(ctx); err != nil {
@@ -596,6 +621,7 @@ func (mod *osloginModule) setupOSLoginSudoers() error {
 	if err := os.WriteFile(mod.sudoers, []byte("#includedir /var/google-sudoers.d\n"), 0440); err != nil {
 		return fmt.Errorf("failed to write sudoers file: %w", err)
 	}
+	galog.Debugf("Wrote OS Login sudoers file %s", mod.sudoers)
 	return nil
 }
 
@@ -641,22 +667,32 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 			// restarted.
 			var passed bool
 			for _, service := range serviceConfig.services {
+				galog.V(2).Debugf("Checking if service %s exists", service)
 				if found, err := daemon.CheckUnitExists(ctx, service); !found {
 					if err != nil {
-						galog.Errorf("failed to check if service %s exists: %v", service, err)
+						galog.V(2).Debugf("Failed to check if service %s exists: %v", service, err)
 					}
 					continue
 				}
 
+				galog.V(2).Debugf("Service %s exists, restarting...", service)
 				if err := daemon.RestartService(ctx, service, method); err != nil {
-					galog.Errorf("failed to restart service %s: %v", service, err)
+					galog.V(2).Debugf("Failed to restart service %s: %v", service, err)
 					continue
 				}
+				galog.V(2).Debugf("Successfully restarted service %s", service)
 				passed = true
 				break
 			}
-			if !passed && serviceConfig.protocol == serviceRestartAtLeastOne {
-				return fmt.Errorf("failed to restart one of %v", serviceConfig.services)
+			if !passed {
+				if serviceConfig.protocol == serviceRestartAtLeastOne {
+					return fmt.Errorf("failed to restart one of %v", serviceConfig.services)
+				}
+				// Only log a warning if the restart is optional.
+				if serviceConfig.protocol != serviceRestartOptional {
+					continue
+				}
+				return fmt.Errorf("failed to restart %v", serviceConfig.services)
 			}
 		}
 	}
