@@ -91,6 +91,7 @@ func NewModule(_ context.Context) *manager.Module {
 
 // moduleSetup initializes the module.
 func (mod *module) moduleSetup(ctx context.Context, data any) error {
+	galog.Debug("Initializing windows password reset module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("winpass module expects a metadata descriptor in the data pointer")
@@ -103,6 +104,7 @@ func (mod *module) moduleSetup(ctx context.Context, data any) error {
 	eManager := events.FetchManager()
 	sub := events.EventSubscriber{Name: winpassModuleID, Callback: mod.eventCallback, MetricName: acmpb.GuestAgentModuleMetric_WINDOWS_PASSWORD_RESET}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
+	galog.Debug("Finished initializing windows password reset module.")
 	return nil
 }
 
@@ -145,7 +147,6 @@ func (mod *module) setupAccounts(ctx context.Context, keys []*metadata.WindowsKe
 	if err != nil && !errors.Is(err, registry.ErrNotExist) {
 		return true, fmt.Errorf("failed to read registry keys: %w", err)
 	}
-	galog.Debugf("Found registry keys: %v", regKeys)
 	diffKeys := modifiedKeys(regKeys, keys)
 
 	// If there are no new keys, skip account setup.
@@ -153,6 +154,7 @@ func (mod *module) setupAccounts(ctx context.Context, keys []*metadata.WindowsKe
 		galog.Info("No new keys found, skipping account setup.")
 		return true, nil
 	}
+	galog.Debugf("Found %d keys to add", len(diffKeys))
 
 	// Create or update the accounts in the machine.
 	for _, key := range diffKeys {
@@ -173,6 +175,7 @@ func (mod *module) setupAccounts(ctx context.Context, keys []*metadata.WindowsKe
 	}
 
 	// Update the registry with the new keys.
+	galog.Debug("Updating registry with new keys")
 	var jsonKeys []string
 	for _, key := range keys {
 		jsonKey, err := key.MarshalJSON()
@@ -182,11 +185,11 @@ func (mod *module) setupAccounts(ctx context.Context, keys []*metadata.WindowsKe
 		jsonKeys = append(jsonKeys, string(jsonKey))
 	}
 
-	galog.Debugf("Writing registry keys: %v", jsonKeys)
 	if err = regWriteMultiString(reg.GCEKeyBase, accountsRegKey, jsonKeys); err != nil {
 		return false, fmt.Errorf("failed to write registry keys: %w", err)
 	}
-	galog.Infof("Successfully set up Windows accounts.")
+	galog.Debug("Successfully updated registry with new keys")
+	galog.Infof("Finished setting up Windows accounts.")
 	return false, nil
 }
 
@@ -256,7 +259,7 @@ func (c *credentials) writeToSerialPort() error {
 		return fmt.Errorf("failed to marshal credsJSON: %v", err)
 	}
 	if _, err = credsWriter.Write(append(data, []byte("\n")...)); err != nil {
-		return fmt.Errorf("failed to write credsJSON: %v", err)
+		return fmt.Errorf("failed to write credsJSON to serial port: %v", err)
 	}
 	return nil
 }
@@ -289,7 +292,6 @@ func defaultModifiedKeys(regKeys []string, newKeys []*metadata.WindowsKey) []*me
 			toAdd = append(toAdd, key)
 		}
 	}
-	galog.Debugf("Found %d keys to add", len(toAdd))
 	return toAdd
 }
 
@@ -301,7 +303,7 @@ func regKeysToWindowsKey(regKeys []string) []*metadata.WindowsKey {
 		key := &metadata.WindowsKey{}
 		if err := key.UnmarshalJSON([]byte(s)); err != nil {
 			if _, found := badReg.Get(s); !found {
-				galog.Errorf("bad windows key from registry: %s", err)
+				galog.Warnf("bad windows key from registry: %s", err)
 				badReg.Put(s, true)
 			}
 			continue
@@ -321,7 +323,7 @@ func defaultResetPassword(ctx context.Context, key *metadata.WindowsKey) (*crede
 
 	u, err := accounts.FindUser(ctx, key.UserName())
 	if err != nil {
-		galog.Infof("User %s does not exist, creating it.", key.UserName())
+		galog.Debugf("User %s does not exist (lookup returned %v), creating it.", key.UserName(), err)
 		// If the user does not exist, we create it.
 		newUser := &accounts.User{
 			Name:     key.UserName(),
@@ -339,7 +341,6 @@ func defaultResetPassword(ctx context.Context, key *metadata.WindowsKey) (*crede
 			if err = accounts.AddUserToGroup(ctx, u, accounts.AdminGroup); err != nil {
 				return nil, fmt.Errorf("failed to add user %s to administrator group: %w", key.UserName(), err)
 			}
-			galog.Debugf("Successfully added user %s to administrator group", key.UserName())
 		}
 		galog.Infof("Successfully created user %s", key.UserName())
 	} else {
@@ -353,7 +354,6 @@ func defaultResetPassword(ctx context.Context, key *metadata.WindowsKey) (*crede
 			if err = accounts.AddUserToGroup(ctx, u, accounts.AdminGroup); err != nil {
 				return nil, fmt.Errorf("failed to add user %s to administrator group: %w", key.UserName(), err)
 			}
-			galog.Debugf("Successfully added user %s to administrator group", key.UserName())
 		}
 		galog.Infof("Successfully updated password for user %s", key.UserName())
 	}
