@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -68,8 +69,13 @@ func teardown(context.Context) {
 
 // moduleSetup schedules a job to collect and publish telemetry data.
 func moduleSetup(ctx context.Context, data any) error {
+	galog.Debugf("Initializing telemetry module.")
 	job := &Job{client: metadata.New(), osInfoReader: osinfo.Read}
-	return scheduler.Instance().ScheduleJob(ctx, job)
+	err := scheduler.Instance().ScheduleJob(ctx, job)
+	if err == nil {
+		galog.Debugf("Successfully initialized telemetry job.")
+	}
+	return err
 }
 
 // ID returns the ID for this job.
