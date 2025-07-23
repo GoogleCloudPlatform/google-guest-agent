@@ -61,8 +61,10 @@ func NewModule(context.Context) *manager.Module {
 // moduleSetup is the initialization function for wsfc module that registers
 // itself to listen MDS events.
 func (wm *wsfcManager) moduleSetup(ctx context.Context, _ any) error {
+	galog.Debugf("Initializing WSFC health check module.")
 	sub := events.EventSubscriber{Name: wsfcModuleID, Callback: wm.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_WSFC_HEALTH_CHECK_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
+	galog.Debugf("Finished initializing WSFC health check module.")
 	return nil
 }
 

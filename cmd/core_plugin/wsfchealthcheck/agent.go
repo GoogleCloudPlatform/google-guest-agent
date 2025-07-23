@@ -95,7 +95,7 @@ func (w *wsfcAgent) run(ctx context.Context) error {
 		return nil
 	}
 
-	galog.Infof("Starting wsfc agent on %+v", w.opts)
+	galog.Infof("Starting WSFC agent on %+v", w.opts)
 
 	var err error
 	w.listener, err = net.Listen(w.opts.protocol, w.opts.addr)
@@ -174,11 +174,11 @@ func (w *wsfcAgent) handleHealthCheckRequest(ctx context.Context, conn net.Conn)
 // stop stops the agent.
 func (w *wsfcAgent) stop(ctx context.Context) error {
 	if !w.isRunning() {
-		galog.Debugf("wsfc agent is already stopped, ignoring stop request")
+		galog.Debugf("WSFC agent is already stopped, ignoring stop request")
 		return nil
 	}
 
-	galog.Infof("Stopping wsfc agent")
+	galog.Infof("Stopping WSFC agent")
 	if w.listener != nil {
 		if err := w.listener.Close(); err != nil {
 			galog.Errorf("Failed to close listener: %v", err)
@@ -189,7 +189,7 @@ func (w *wsfcAgent) stop(ctx context.Context) error {
 	// policy exhausts.
 	err := retry.Run(ctx, policy, func() error {
 		if w.isRunning() {
-			return fmt.Errorf("agent is still running")
+			return fmt.Errorf("WSFC agent is still running")
 		}
 		return nil
 	})
