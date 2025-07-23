@@ -193,7 +193,7 @@ func CreateUser(ctx context.Context, u *User) error {
 	if u == nil {
 		return fmt.Errorf("user is nil")
 	}
-	galog.Debugf("Creating user %s", u.Username)
+	galog.V(1).Debugf("Creating user %s", u.Username)
 	useUID, useGID := u.UnixUID(), u.UnixGID()
 
 	// If the it's not possible to reuse the homedir, the user will be created
@@ -217,7 +217,7 @@ func CreateUser(ctx context.Context, u *User) error {
 	if err := addToGUsers(ctx, u.Username); err != nil {
 		galog.Errorf("user %s was created but not added to google users: %v", u.Username, err)
 	}
-	galog.Debugf("Successfully created user %s", u.Username)
+	galog.V(1).Debugf("Successfully created user %s", u.Username)
 	return nil
 }
 
@@ -239,12 +239,12 @@ func reuseHomeDir(username string, useUID int, useGID int) (int, int) {
 	}
 
 	if useUID != lastUID {
-		galog.Debugf("caller requested to create user %s with uid %d, but ReuseHomedir is enabled and the user's last uid was %d", username, useUID, lastUID)
+		galog.V(1).Debugf("caller requested to create user %s with uid %d, but ReuseHomedir is enabled and the user's last uid was %d", username, useUID, lastUID)
 	}
 	resUID = lastUID
 
 	if useGID != lastGID {
-		galog.Debugf("caller requested to create user %s with gid %d, but ReuseHomedir is enabled and the user's last gid was %d", username, useGID, lastGID)
+		galog.V(1).Debugf("caller requested to create user %s with gid %d, but ReuseHomedir is enabled and the user's last gid was %d", username, useGID, lastGID)
 	}
 	resGID = lastGID
 
@@ -374,12 +374,12 @@ func ListGoogleUsers(ctx context.Context) ([]string, error) {
 // CreateGroup creates a group with the given group name. Returns the wrapped
 // run error if the command failed.
 func CreateGroup(ctx context.Context, groupName string) error {
-	galog.Debugf("Creating group %s", groupName)
+	galog.V(1).Debugf("Creating group %s", groupName)
 	cmd := cfg.Retrieve().Accounts.GroupAddCmd
 	if _, err := runCommandTemplate(ctx, cmd, nil, &Group{Name: groupName}); err != nil {
 		return fmt.Errorf("failed run group add command %s: %w", cmd, err)
 	}
-	galog.Debugf("Successfully created group %s", groupName)
+	galog.V(1).Debugf("Successfully created group %s", groupName)
 	return nil
 }
 
@@ -396,12 +396,12 @@ func AddUserToGroup(ctx context.Context, u *User, g *Group) error {
 		return fmt.Errorf("group is nil")
 	}
 
-	galog.Debugf("Adding user %s to group %s", u.Username, g.Name)
+	galog.V(1).Debugf("Adding user %s to group %s", u.Username, g.Name)
 	cmd := cfg.Retrieve().Accounts.GPasswdAddCmd
 	if _, err := runCommandTemplate(ctx, cmd, u, g); err != nil {
 		return fmt.Errorf("failed to run password add command %s: %w", cmd, err)
 	}
-	galog.Debugf("Successfully added user %s to group %s", u.Username, g.Name)
+	galog.V(1).Debugf("Successfully added user %s to group %s", u.Username, g.Name)
 	return nil
 }
 
@@ -418,12 +418,12 @@ func RemoveUserFromGroup(ctx context.Context, u *User, g *Group) error {
 		return fmt.Errorf("group is nil")
 	}
 
-	galog.Debugf("Removing user %s from group %s", u.Username, g.Name)
+	galog.V(1).Debugf("Removing user %s from group %s", u.Username, g.Name)
 	cmd := cfg.Retrieve().Accounts.GPasswdRemoveCmd
 	if _, err := runCommandTemplate(ctx, cmd, u, g); err != nil {
 		return fmt.Errorf("failed to run gpasswd_remove_cmd %s: %w", cmd, err)
 	}
-	galog.Debugf("Successfully removed user %s from group %s", u.Username, g.Name)
+	galog.V(1).Debugf("Successfully removed user %s from group %s", u.Username, g.Name)
 	return nil
 }
 
@@ -434,7 +434,7 @@ func DelUser(ctx context.Context, u *User) error {
 		return fmt.Errorf("user is nil")
 	}
 
-	galog.Debugf("Deleting user %s", u.Username)
+	galog.V(1).Debugf("Deleting user %s", u.Username)
 	cmd := cfg.Retrieve().Accounts.UserDelCmd
 	if _, err := runCommandTemplate(ctx, cmd, u, nil); err != nil {
 		return fmt.Errorf("failed to run userdel_cmd %s: %w", cmd, err)
@@ -442,7 +442,7 @@ func DelUser(ctx context.Context, u *User) error {
 	if err := removeFromGUsers(ctx, u.Username); err != nil {
 		return err
 	}
-	galog.Debugf("Successfully deleted user %s", u.Username)
+	galog.V(1).Debugf("Successfully deleted user %s", u.Username)
 	return nil
 }
 
