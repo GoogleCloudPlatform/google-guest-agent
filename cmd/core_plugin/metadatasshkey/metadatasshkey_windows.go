@@ -60,7 +60,7 @@ func ensureUserExists(ctx context.Context, username string) (*accounts.User, err
 	if err == nil {
 		return u, nil
 	}
-	galog.V(1).Infof("User %s does not exist (lookup returned %v), creating.", username, err)
+	galog.Debugf("User %s does not exist (lookup returned %v), creating.", username, err)
 	pwd, err := accounts.GeneratePassword(20)
 	if err != nil {
 		return nil, fmt.Errorf("could not generate password for new user %s: %v", username, err)
@@ -82,6 +82,7 @@ func ensureUserExists(ctx context.Context, username string) (*accounts.User, err
 			galog.Errorf("Failed to add user %s to group %s: %v.", u.Name, group.Name, err)
 		}
 	}
+	galog.Infof("Created user %s", username)
 	return u, nil
 }
 

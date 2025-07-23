@@ -174,7 +174,7 @@ func selinuxRestoreCon(ctx context.Context, path string) error {
 	if _, err := run.WithContext(ctx, opts); err != nil {
 		return fmt.Errorf("failed to restore selinux context: %w", err)
 	}
-
+	galog.V(2).Debugf("Finished restoring selinux context for %s", path)
 	return nil
 }
 
@@ -185,7 +185,7 @@ func ensureUserExists(ctx context.Context, username string) (*accounts.User, err
 	if err == nil {
 		return u, nil
 	}
-	galog.V(1).Infof("User %s does not exist (lookup returned %v), creating.", username, err)
+	galog.Debugf("User %s does not exist (lookup returned %v), creating.", username, err)
 	err = accounts.CreateUser(ctx, &accounts.User{Username: username, GID: "-1", UID: "-1"})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user %s: %w", username, err)
@@ -199,6 +199,7 @@ func ensureUserExists(ctx context.Context, username string) (*accounts.User, err
 			galog.Errorf("Failed to add user %s to group %s: %v.", u.Username, group.Name, err)
 		}
 	}
+	galog.Infof("Created user %s", username)
 	return u, nil
 }
 
@@ -213,6 +214,7 @@ func setPlatformConfiguration(ctx context.Context, config *cfg.Sections, _ *meta
 	if err := os.WriteFile(googleSudoersConfig, []byte(fmt.Sprintf("%s\n", configline)), 0440); err != nil {
 		errs = append(errs, fmt.Errorf("could not write sudo configuration for %s: %v", googleSudoersGroup, err))
 	}
+	galog.V(2).Debugf("Wrote sudo configuration for %s to %s", googleSudoersGroup, googleSudoersConfig)
 	// Legacy agent continues on error and attempts to add users to groups even
 	// if they might not exist, this preserves the same behavior while still
 	// reporting errors back to the caller.

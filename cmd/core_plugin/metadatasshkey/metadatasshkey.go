@@ -64,7 +64,7 @@ func ensureGroupExists(ctx context.Context, gname string) error {
 	if err == nil {
 		return nil
 	}
-	galog.V(1).Infof("Group %s does not exist (lookup returned %v), creating.", gname, err)
+	galog.Debugf("Group %s does not exist (lookup returned %v), creating.", gname, err)
 	return accounts.CreateGroup(ctx, gname)
 }
 
@@ -79,6 +79,7 @@ func NewModule(context.Context) *manager.Module {
 }
 
 func moduleSetup(ctx context.Context, data any) error {
+	galog.Debug("Initializing Metadata SSH Key module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("expected metadata descriptor data in moduleSetup call")
@@ -92,6 +93,7 @@ func moduleSetup(ctx context.Context, data any) error {
 	sub := events.EventSubscriber{Name: "metadatasshkey", Callback: handleMetadataChange, MetricName: acmpb.GuestAgentModuleMetric_METADATA_SSH_KEY_INITIALIZATION}
 	events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
 
+	galog.Debug("Finished initializing Metadata SSH Key module.")
 	return nil
 }
 
@@ -124,14 +126,16 @@ func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metada
 	newKeys := findValidKeys(desc)
 	lastUserKeyMap = newKeys
 	if !enabled {
-		galog.V(2).Infof("Accounts management is disabled or oslogin is enabled, disabling metadata ssh key.")
+		galog.Debugf("Accounts management is disabled or oslogin is enabled, disabling metadata ssh key.")
 		return false, deprovisionUnusedUsers(ctx, config, make(userKeyMap))
 	}
 	var errs []error
 	if !onetimePlatformSetupFinished.Load() {
+		galog.Debug("Setting platform configuration")
 		if errs = setPlatformConfiguration(ctx, config, desc); len(errs) == 0 {
 			onetimePlatformSetupFinished.Store(true)
 		}
+		galog.Debug("Finished setting platform configuration")
 	}
 	errs = append(errs, addSystemUsers(ctx, config, newKeys)...)
 	return false, errs
@@ -178,11 +182,11 @@ func findValidKeys(desc *metadata.Descriptor) userKeyMap {
 		}
 		username, keycontent, err := ssh.GetUserKey(key)
 		if err != nil {
-			galog.Errorf("Incorrectly formatted key %q in metadata: %v.", key, err)
+			galog.Warnf("Incorrectly formatted key %q in metadata: %v.", key, err)
 			continue
 		}
 		if err := ssh.ValidateUserKey(username, keycontent); err != nil {
-			galog.Errorf("Invalid user %q or key %q in metadata: %v.", username, keycontent, err)
+			galog.Warnf("Invalid user %q or key %q in metadata: %v.", username, keycontent, err)
 			continue
 		}
 		keyMap[username] = append(keyMap[username], keycontent)
