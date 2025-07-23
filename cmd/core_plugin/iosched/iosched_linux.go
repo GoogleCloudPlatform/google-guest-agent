@@ -50,6 +50,7 @@ func NewModule(_ context.Context) *manager.Module {
 
 // moduleSetup runs the actual io scheduler setup for linux.
 func moduleSetup(ctx context.Context, _ any) error {
+	galog.Debug("Initializing IO scheduler module.")
 	dir, err := os.Open(sysBlockPath)
 	if err != nil {
 		return fmt.Errorf("failed to open %s: %w", sysBlockPath, err)
@@ -70,6 +71,7 @@ func moduleSetup(ctx context.Context, _ any) error {
 		}
 
 		schedPath := filepath.Join(sysBlockPath, dev, "queue", "scheduler")
+		galog.V(1).Debugf("Writing scheduler file for %s to %s", dev, schedPath)
 		f, err := os.OpenFile(schedPath, os.O_WRONLY|os.O_TRUNC, 0700)
 		if err != nil {
 			return fmt.Errorf("failed to open scheduler file: %w", err)
@@ -86,6 +88,6 @@ func moduleSetup(ctx context.Context, _ any) error {
 			return fmt.Errorf("failed to write scheduler file: %d bytes written, want %d", n, len(data))
 		}
 	}
-
+	galog.Debug("Finished initializing IO scheduler module.")
 	return nil
 }
