@@ -48,7 +48,7 @@ const (
 // ReadVariable reads UEFI variable and returns as byte array. Returns an error
 // if variable is invalid or empty.
 func ReadVariable(v VariableName) (*Variable, error) {
-	galog.Debugf("Enabling required %s priviliges for agent process", seSystemEnvironmentName)
+	galog.Debugf("Enabling required %s privileges for agent process", seSystemEnvironmentName)
 	if err := enablePrivilege(seSystemEnvironmentName); err != nil {
 		return nil, err
 	}
