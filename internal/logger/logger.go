@@ -111,10 +111,12 @@ func Init(ctx context.Context, opts Options) error {
 	galog.SetMinVerbosity(opts.Verbosity)
 
 	if opts.LogFile != "" && file.Exists(filepath.Dir(opts.LogFile), file.TypeDir) {
+		galog.V(2).Debugf("Initializing file logger: %s", opts.LogFile)
 		enabledLoggers = append(enabledLoggers, galog.NewFileBackend(opts.LogFile))
 	}
 
 	if opts.LogToStderr {
+		galog.V(2).Debugf("Initializing stderr logger")
 		enabledLoggers = append(enabledLoggers, galog.NewStderrBackend(os.Stderr))
 	}
 
@@ -123,6 +125,7 @@ func Init(ctx context.Context, opts Options) error {
 	}
 
 	if opts.LogToCloudLogging {
+		galog.V(2).Debugf("Initializing cloud logging backend")
 		// We initialize and register the cloud logging backend in a lazy mode,
 		// meaning the cloud logging client will only be initialized when the
 		// metadata longpoll event is handled by initCloudLogging() subscriber.

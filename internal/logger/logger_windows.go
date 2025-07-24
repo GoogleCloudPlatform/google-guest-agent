@@ -39,6 +39,7 @@ func initPlatformLogger(ctx context.Context, ident string, prefix string) ([]gal
 	// TODO: b/379339223 - Move SetPrefix() to common logger initialization.
 	galog.SetPrefix(prefix)
 
+	galog.V(2).Debugf("Initializing event log logger")
 	eventLogger, err := galog.NewEventlogBackend(windowsEventID, ident)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event log: %w", err)
@@ -50,6 +51,7 @@ func initPlatformLogger(ctx context.Context, ident string, prefix string) ([]gal
 		Port: windowsSerialLogPort,
 	}
 
+	galog.V(2).Debugf("Initializing serial logger")
 	serialLogger := galog.NewSerialBackend(ctx, serialOpts)
 	res = append(res, serialLogger)
 
