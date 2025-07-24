@@ -94,7 +94,11 @@ func Setup(ctx context.Context, listener KnownListeners) error {
 		timeout:   timeout,
 		monitor:   cmdMonitor,
 	}
-	return cmdMonitor.srv.start(ctx)
+	err := cmdMonitor.srv.start(ctx)
+	if err == nil {
+		galog.Debugf("Successfully started command monitor for %v", listener)
+	}
+	return err
 }
 
 // Close will close the internally managed command server, if it was
@@ -109,6 +113,7 @@ func Close(_ context.Context) {
 		}
 		cmdMonitor.srv = nil
 	}
+	galog.Debug("Command monitor closed")
 }
 
 // Monitor is the structure which handles command registration and
@@ -210,6 +215,7 @@ func (c *Server) start(ctx context.Context) error {
 					}
 					message = append(message, b...)
 				}
+				galog.V(1).Debugf("Received command request: %s", req.Command)
 				c.monitor.handlersMu.RLock()
 				defer c.monitor.handlersMu.RUnlock()
 				handler, ok := c.monitor.handlers[req.Command]
@@ -230,6 +236,7 @@ func (c *Server) start(ctx context.Context) error {
 						resp = b
 					}
 				}
+				galog.V(1).Debugf("Sending response for request %s: %s", req.Command, string(resp))
 				conn.Write(resp)
 			}(conn)
 		}

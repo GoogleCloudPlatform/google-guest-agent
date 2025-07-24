@@ -144,6 +144,9 @@ func SendCommand(ctx context.Context, req []byte, listener KnownListeners) []byt
 
 // sendCmdPipe sends a command request over a specific pipe.
 func sendCmdPipe(ctx context.Context, pipe string, req []byte) []byte {
+	galog.Debugf("Sending command on pipe %q with request: %s", pipe, string(req))
+
+	galog.V(1).Debugf("Dialing pipe %q", pipe)
 	conn, err := dialPipe(ctx, pipe)
 	if err != nil {
 		galog.Errorf("Failed to dial in %q with error: %v", pipe, err)
@@ -154,6 +157,7 @@ func sendCmdPipe(ctx context.Context, pipe string, req []byte) []byte {
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(parseTimeoutFromCfg()))
+	galog.V(1).Debugf("Writing request %s to pip %q", string(req), pipe)
 	i, err := conn.Write(req)
 	if err != nil || i != len(req) {
 		galog.Errorf("Sending command on pipe failed error: %v, bytes wrote: %d, expected : %d", err, i, len(req))
@@ -162,6 +166,7 @@ func sendCmdPipe(ctx context.Context, pipe string, req []byte) []byte {
 		}
 		return internalError
 	}
+	galog.V(1).Debugf("Reading response from pipe %q", pipe)
 	data, err := io.ReadAll(conn)
 	if err != nil {
 		galog.Errorf("Failed to read data from pipe with error: %v", err)
@@ -170,5 +175,6 @@ func sendCmdPipe(ctx context.Context, pipe string, req []byte) []byte {
 		}
 		return internalError
 	}
+	galog.Debugf("Received response from pipe %q: %s", pipe, string(data))
 	return data
 }
