@@ -18,7 +18,10 @@
 // windows registry values.
 package reg
 
-import "golang.org/x/sys/windows/registry"
+import (
+	"github.com/GoogleCloudPlatform/galog"
+	"golang.org/x/sys/windows/registry"
+)
 
 const (
 	// GCEKeyBase is the gce's base/parent registry key used to store the
@@ -28,6 +31,7 @@ const (
 
 // ReadString reads a single string value from the given registry key.
 func ReadString(key, name string) (string, error) {
+	galog.V(3).Debugf("Reading string value %q from registry key %q", name, key)
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.QUERY_VALUE)
 	if err != nil {
 		return "", err
@@ -40,6 +44,7 @@ func ReadString(key, name string) (string, error) {
 
 // WriteString writes a single string value to the given registry key.
 func WriteString(key, name, value string) error {
+	galog.V(3).Debugf("Writing string value %q to registry key %q", name, key)
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.WRITE)
 	if err != nil {
 		return err
@@ -51,6 +56,7 @@ func WriteString(key, name, value string) error {
 
 // ReadMultiString reads a multi-string value from the given registry key.
 func ReadMultiString(key, name string) ([]string, error) {
+	galog.V(3).Debugf("Reading multi-stringvalue %q from registry key %q", name, key)
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.QUERY_VALUE)
 	if err != nil {
 		return nil, err
@@ -67,6 +73,7 @@ func ReadMultiString(key, name string) ([]string, error) {
 
 // WriteMultiString writes a multi-string value to the given registry key.
 func WriteMultiString(key, name string, value []string) error {
+	galog.V(3).Debugf("Writing multi-string value %q to registry key %q", name, key)
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.WRITE)
 	if err != nil {
 		return err
@@ -78,6 +85,7 @@ func WriteMultiString(key, name string, value []string) error {
 
 // Delete deletes the given registry key.
 func Delete(name string) error {
+	galog.V(3).Debugf("Deleting registry key %q", name)
 	if err := registry.DeleteKey(registry.LOCAL_MACHINE, name); err != nil {
 		return err
 	}
