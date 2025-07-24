@@ -123,8 +123,8 @@ func (p linuxClient) FindRegex(exeMatch string) ([]Process, error) {
 		pid, _ := strconv.Atoi(file.Name())
 
 		process, err := p.readPidDetails(pid)
-		if err != nil {
-			galog.Debugf("Failed to read process(%d), while finding processes matching regex %q: [%v], skipping...", pid, exeMatch, err)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			galog.V(2).Debugf("Failed to read process(%d), while finding processes matching regex %q: [%v], skipping...", pid, exeMatch, err)
 			continue
 		}
 
@@ -192,6 +192,7 @@ func (p linuxClient) Memory(pid int) (int, error) {
 	// Read the smaps file. This is where the memory usage of the process is
 	// stored.
 	for _, fpath := range []string{"smaps", "smaps_rollup"} {
+		galog.V(3).Debugf("Reading %s file for pid %d", fpath, pid)
 		var err error
 		openFile = filepath.Join(baseProcDir, fpath)
 		stats, err = os.ReadFile(openFile) // NOLINT
@@ -228,6 +229,7 @@ func (p linuxClient) Memory(pid int) (int, error) {
 	// Now find the memory line. This line is the RSS line.
 	for _, line := range statsLines {
 		if strings.HasPrefix(line, "Rss") {
+			galog.V(3).Debugf("Found RSS line: %s", line)
 			foundRss = true
 			partial, err := strconv.Atoi(strings.Fields(line)[1])
 			if err != nil {

@@ -214,9 +214,10 @@ func checkAllPids(p int32) (bool, error) {
 		}
 		return false, nil
 	}
-	return false, fmt.Errorf("failed to get all PIDs exhausted all retries")
+	return false, fmt.Errorf("failed to get all PIDs: exhausted all retries")
 }
 
+// FindPid returns the process with the given PID.
 func (p windowsClient) FindPid(pid int) (Process, error) {
 	var process Process
 
@@ -237,6 +238,8 @@ func (p windowsClient) FindPid(pid int) (Process, error) {
 	return process, nil
 }
 
+// findProcessExecutablePath returns the executable path of the process with the
+// given handle.
 func (p windowsClient) findProcessExecutablePath(handle windows.Handle) (string, error) {
 	bufferSize := uint32(256)
 
