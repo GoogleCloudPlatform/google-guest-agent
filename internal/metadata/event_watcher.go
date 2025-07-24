@@ -79,7 +79,7 @@ func (mp *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
 				}
 			}
 			if errors.Is(err, context.Canceled) {
-				galog.V(2).Warnf("Metadata watcher context canceled.")
+				galog.Warnf("Metadata watcher context canceled.")
 			} else {
 				galog.Errorf("Error watching metadata: %s", err)
 			}

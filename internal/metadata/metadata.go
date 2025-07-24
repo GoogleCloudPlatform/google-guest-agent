@@ -130,6 +130,7 @@ func shouldRetry(err error) bool {
 
 func (c *Client) retry(ctx context.Context, cfg requestConfig) (string, error) {
 	policy := retry.Policy{MaxAttempts: backoffAttempts, Jitter: backoffDuration, BackoffFactor: 1, ShouldRetry: shouldRetry}
+	galog.V(4).Debugf("Trying MDS request with config: %+v", cfg)
 
 	fn := func() (string, error) {
 		resp, err := c.do(ctx, cfg)
