@@ -149,7 +149,7 @@ func (acs *acsHelper) close(ctx context.Context) {
 	}
 
 	if err := acs.client.Close(); err != nil {
-		galog.V(2).Warnf("Failed to close ACS client: %v", err)
+		galog.Debugf("Failed to close ACS client: %v", err)
 	}
 }
 

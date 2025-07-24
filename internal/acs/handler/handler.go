@@ -65,6 +65,7 @@ func Init(ver string) {
 	d := &dataFetchers{clientVersion: ver, osInfoReader: osinfo.Read, pluginManager: manager.Instance()}
 	sub := events.EventSubscriber{Name: subscriberID, Data: nil, Callback: d.handleMessage}
 	events.FetchManager().Subscribe(watcher.MessageReceiver, sub)
+	galog.Debugf("Initialized ACS handler")
 }
 
 // dataFetchers wraps the fetchers required for collecting information and
