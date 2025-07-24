@@ -69,7 +69,7 @@ func (w *oomWatcher) Events() []string {
 // To avoid any potential syscall overloads, a polling interval is set to
 // prevent busy looping.
 func (w *oomWatcher) Run(ctx context.Context, evType string) (bool, any, error) {
-	galog.V(2).Infof("Running watcher for process %s", w.name)
+	galog.V(2).Debugf("Running watcher for process %s", w.name)
 	var timestamp time.Time
 
 	// Poll the process memory info to see if it has exceeded the limit.
@@ -97,6 +97,7 @@ func (w *oomWatcher) Run(ctx context.Context, evType string) (bool, any, error) 
 
 		// This means the process has, at some point, exceeded the memory limit.
 		if int64(mem.PeakWorkingSetSize) > w.maxMemory {
+			galog.V(2).Debugf("Detected oom event for process %s", w.name)
 			timestamp = time.Now()
 			break
 		}

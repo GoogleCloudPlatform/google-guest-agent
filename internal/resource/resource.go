@@ -19,6 +19,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 )
 
@@ -74,6 +75,7 @@ type OOMEvent struct {
 // the PID and name. If a constraint is missing, then that constraint is simply
 // skipped.
 func Apply(constraint Constraint) error {
+	galog.Debugf("Applying resource constraint for process: %s", constraint.Name)
 	return Client.Apply(constraint)
 }
 
@@ -83,11 +85,13 @@ func Apply(constraint Constraint) error {
 // state of the process. This is mainly used by the windows implementation for
 // saving the JobObject handles.
 func RemoveConstraint(ctx context.Context, name string) error {
+	galog.Debugf("Removing resource constraint for process: %s", name)
 	return Client.RemoveConstraint(ctx, name)
 }
 
 // NewOOMWatcher sets a new OOM watcher for the given process. This will
 // trigger events when the process is killed due to OOM.
 func NewOOMWatcher(ctx context.Context, constraint Constraint, interval time.Duration) (events.Watcher, error) {
+	galog.Debugf("Creating new OOM watcher for process: %s", constraint.Name)
 	return Client.NewOOMWatcher(ctx, constraint, interval)
 }

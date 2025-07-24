@@ -217,14 +217,14 @@ func (c *oomV2Watcher) close() {
 // still exists and whether we should continue monitoring it. All file
 // descriptors are automatically closed when the watcher is removed.
 func (c *oomV2Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
-	galog.Debugf("Running watcher for cgroup: %s, process: %s", c.memoryEventsFile, c.name)
+	galog.V(2).Debugf("Running watcher for cgroup: %s, process: %s", c.memoryEventsFile, c.name)
 
 	// Return from watcher only when there is a new oom kill event.
 	for ctx.Err() == nil {
 		// If cgroup is removed, stop watching and return error. This can happen
 		// when the plugin is removed.
 		if !file.Exists(c.memoryEventsFile, file.TypeFile) {
-			galog.Debugf("Cgroup %s is removed, removing watcher", c.memoryEventsFile)
+			galog.V(2).Debugf("Cgroup %s is removed, removing watcher", c.memoryEventsFile)
 			c.close()
 			return false, nil, fmt.Errorf("cgroup %s is removed, removing watcher", c.memoryEventsFile)
 		}
@@ -241,14 +241,14 @@ func (c *oomV2Watcher) Run(ctx context.Context, evType string) (bool, any, error
 		}
 
 		if n == 0 {
-			galog.V(2).Debugf("Timedout, no epoll event found, continue waiting")
+			galog.V(2).Debugf("Timed out, no epoll event found, continue waiting")
 			continue
 		}
 
 		// We shouldn't get any other events than what we are watching for. This
 		// is just a safety check to avoid blocking reads and any unexpected errors.
 		if events[0].Fd != int32(c.inotifyFd) {
-			galog.Debugf("Ignoring unknown epoll event: %+v", events[0])
+			galog.V(2).Debugf("Ignoring unknown epoll event: %+v", events[0])
 			continue
 		}
 
@@ -258,7 +258,7 @@ func (c *oomV2Watcher) Run(ctx context.Context, evType string) (bool, any, error
 		// `events` array for the file descriptor that we are interested in.
 		isOOM, err := c.readInotifyEvent()
 		if err != nil {
-			galog.Debugf("Failed to check oom event: %v", err)
+			galog.V(2).Debugf("Failed to check oom event: %v", err)
 			continue
 		}
 
