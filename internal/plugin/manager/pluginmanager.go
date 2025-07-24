@@ -310,7 +310,7 @@ func (m *PluginManager) RemoveAllDynamicPlugins(ctx context.Context) error {
 			defer wg.Done()
 
 			if err = m.StopPlugin(ctx, p.Name); err != nil {
-				galog.Infof("Remove plugin %q completed with error: [%v]", p.FullName(), err)
+				galog.Warnf("Remove plugin %q completed with error: [%v]", p.FullName(), err)
 				errChan <- err
 			}
 

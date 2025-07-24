@@ -84,7 +84,7 @@ func IsCorePluginEnabled() bool {
 
 	enableCorePlugin, err := strconv.ParseBool(matches[1])
 	if err != nil {
-		galog.Warnf("Failed to parse boolean [%q] from config file [%q]: %v, defaulting IsCorePluginEnabled to %t", matches[1], CorePluginEnabledConfigFile, err, DefaultIsCorePluginEnabled)
+		galog.Warnf("Invalid boolean [%q] in config file [%q]: %v, defaulting IsCorePluginEnabled to %t", matches[1], CorePluginEnabledConfigFile, err, DefaultIsCorePluginEnabled)
 		return DefaultIsCorePluginEnabled
 	}
 

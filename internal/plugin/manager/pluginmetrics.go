@@ -87,6 +87,7 @@ func (p *PluginMetrics) Run(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("plugin %q is being stopped/removed, got pid 0, skipping metric collection", p.plugin.FullName())
 	}
 
+	galog.V(2).Debugf("Getting CPU and memory usage for plugin %s", p.plugin.FullName())
 	currentCPUUsage, err := ps.CPUUsage(ctx, pid)
 	if err != nil {
 		galog.Warnf("Failed to get CPU usage for plugin %s: %v", p.plugin.FullName(), err)
@@ -95,6 +96,8 @@ func (p *PluginMetrics) Run(ctx context.Context) (bool, error) {
 	if err != nil {
 		galog.Warnf("Failed to get memory usage for plugin %s: %v", p.plugin.FullName(), err)
 	}
+	galog.V(3).Debugf("CPU usage for plugin %s: %f%%", p.plugin.FullName(), currentCPUUsage)
+	galog.V(3).Debugf("Memory usage for plugin %s: %d bytes", p.plugin.FullName(), currentMemoryUsage)
 
 	p.plugin.RuntimeInfo.metricsMu.Lock()
 	defer p.plugin.RuntimeInfo.metricsMu.Unlock()

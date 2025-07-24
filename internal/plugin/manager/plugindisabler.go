@@ -103,7 +103,7 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 	if err := ss.stopPlugin(ctx, p); err != nil {
 		// Its unlikely for kill to fail as process is running as root and is a best
 		// effort. Just log the error for debugging in-case it happens.
-		galog.Infof("Kill %s plugin process completed with: %v", p.FullName(), err)
+		galog.Warnf("Kill %s plugin process completed with: %v", p.FullName(), err)
 	}
 
 	if p.client != nil {

@@ -45,6 +45,10 @@ type PluginMonitor struct {
 	plugin *Plugin
 	// interval is the interval for scheduler to run a health check.
 	interval time.Duration
+	// alreadyStopped is a boolean to track if the plugin has already been stopped.
+	// or is already stopping. This is to prevent log spam in case of plugin
+	// crash/stop.
+	alreadyStopped bool
 }
 
 // NewPluginMonitor creates a new plugin monitor.
@@ -111,9 +115,13 @@ func (m *PluginMonitor) healthCheck(ctx context.Context) *pcpb.Status {
 		// Plugin is explicitly being stopped. Do not perform health check as it
 		// would fail and try to restart the plugin. Health check runs in a separate
 		// goroutine and could race with stop request.
-		galog.Infof("Plugin %s is stopping or stopped, skipping health check", m.plugin.FullName())
+		if !m.alreadyStopped {
+			galog.Infof("Plugin %s is stopping or stopped, skipping health check", m.plugin.FullName())
+			m.alreadyStopped = true
+		}
 		return nil
 	}
+	m.alreadyStopped = false
 
 	s, err := m.plugin.GetStatus(ctx, healthCheckRequest)
 	if err == nil {
