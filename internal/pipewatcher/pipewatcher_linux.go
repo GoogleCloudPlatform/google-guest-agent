@@ -44,17 +44,18 @@ func createNamedPipe(ctx context.Context, pipePath string, mode uint32) error {
 
 	if _, err := os.Stat(pipePath); err != nil {
 		if os.IsNotExist(err) {
+			galog.V(2).Debugf("Creating named pipe: %s", pipePath)
 			if err := syscall.Mkfifo(pipePath, mode); err != nil {
 				return fmt.Errorf("failed to create named pipe: %+v", err)
 			}
 		} else {
-			return fmt.Errorf("failed to stat file: " + pipePath)
+			return fmt.Errorf("failed to stat file: %v", pipePath)
 		}
 	}
 
 	restorecon, err := exec.LookPath("restorecon")
 	if err != nil {
-		galog.Infof("No restorecon available, not restoring SELinux context of: %s", pipePath)
+		galog.Debugf("No restorecon available, not restoring SELinux context of: %s", pipePath)
 		return nil
 	}
 
@@ -108,8 +109,6 @@ func (hdl *Handle) Run(ctx context.Context, evType string) (bool, any, error) {
 		case <-ctx.Done():
 			canceled.Store(true)
 
-			galog.V(2).Errorf("Context canceled, closing pipe: %s", hdl.options.PipePath)
-
 			// Open the pipe as O_RDONLY to release the blocking open O_WRONLY.
 			pipeFile, err := os.OpenFile(hdl.options.PipePath, os.O_RDONLY, 0644)
 			if err != nil {
@@ -118,6 +117,7 @@ func (hdl *Handle) Run(ctx context.Context, evType string) (bool, any, error) {
 			}
 
 			defer func() {
+				galog.V(2).Debugf("Closing pipe %s", hdl.options.PipePath)
 				if err := pipeFile.Close(); err != nil {
 					galog.Errorf("Failed to close readonly pipe: %+v", err)
 				}
