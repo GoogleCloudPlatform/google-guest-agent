@@ -104,7 +104,8 @@ var (
 
 	// defaultServices are the services to restart after configuration changes.
 	// Each sub-array of the map indicates that only one of those services need to
-	// be successfully restarted.
+	// be successfully restarted. The services are grouped by services that are
+	// mutually exclusive, or exist to provide the same functionality.
 	defaultServices = map[daemon.RestartMethod][]serviceRestartConfig{
 		daemon.ReloadOrRestart: []serviceRestartConfig{
 			{
@@ -114,14 +115,18 @@ var (
 		},
 		daemon.TryRestart: []serviceRestartConfig{
 			{
+				// nscd and unscd are optional because they don't come by default on some
+				// platforms (like Debian or RHEL).
 				protocol: serviceRestartOptional,
 				services: []string{"nscd", "unscd"},
 			},
 			{
+				// systemd-logind is on all Linux distributions.
 				protocol: serviceRestartAtLeastOne,
 				services: []string{"systemd-logind"},
 			},
 			{
+				// One of cron or crond exists on all Linux distributions.
 				protocol: serviceRestartAtLeastOne,
 				services: []string{"cron", "crond"},
 			},
