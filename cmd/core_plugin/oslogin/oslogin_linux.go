@@ -689,10 +689,7 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 					return fmt.Errorf("failed to restart one of %v", serviceConfig.services)
 				}
 				// Only log a warning if the restart is optional.
-				if serviceConfig.protocol != serviceRestartOptional {
-					continue
-				}
-				return fmt.Errorf("failed to restart %v", serviceConfig.services)
+				galog.Debugf("Failed to restart optional services: %v", serviceConfig.services)
 			}
 		}
 	}
