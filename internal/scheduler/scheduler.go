@@ -22,11 +22,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	tpb "google.golang.org/protobuf/types/known/timestamppb"
-
 	"github.com/GoogleCloudPlatform/galog"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metricregistry"
+
+	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	tpb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Job defines the interface between the schedule manager and the actual job.
@@ -163,7 +163,7 @@ func (s *Scheduler) ScheduleJob(ctx context.Context, job Job) error {
 	}
 
 	interval, startNow := job.Interval()
-	galog.Debugf("Adding job %q, to run at every %f seconds", job.ID(), interval.Seconds())
+	galog.Debugf("Scheduling job %q to run at every %f seconds", job.ID(), interval.Seconds())
 
 	if startNow && !s.run(ctx, job) {
 		galog.Debugf("Job %q first execution returned false, won't be scheduled", job.ID())
@@ -174,7 +174,7 @@ func (s *Scheduler) ScheduleJob(ctx context.Context, job Job) error {
 	s.add(task)
 
 	go s.runOnSchedule(ctx, task)
-
+	galog.Debugf("Scheduled job %s", job.ID())
 	return nil
 }
 
@@ -237,6 +237,7 @@ func (s *Scheduler) Stop() {
 // ScheduleJobs schedules required jobs and waits for it to finish if
 // Interval() returned startImmediately and synchronous both are true.
 func ScheduleJobs(ctx context.Context, jobs []Job, synchronous bool) {
+	galog.Debugf("Scheduling %d jobs", len(jobs))
 	wg := sync.WaitGroup{}
 	sched := Instance()
 	var ids []string
@@ -248,8 +249,6 @@ func ScheduleJobs(ctx context.Context, jobs []Job, synchronous bool) {
 			defer wg.Done()
 			if err := sched.ScheduleJob(ctx, job); err != nil {
 				galog.Errorf("Failed to schedule job %s with error: %v", job.ID(), err)
-			} else {
-				galog.Infof("Successfully scheduled job %s", job.ID())
 			}
 		}(job)
 	}
