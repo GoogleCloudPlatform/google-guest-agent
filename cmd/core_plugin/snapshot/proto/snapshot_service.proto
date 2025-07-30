@@ -38,6 +38,10 @@ message SnapshotRequest {
 
   // The operation type.
   OperationType type = 3;
+
+  // A list of comma separated NGUIDs for NVMe disks. If a NVMe disk does not
+  // have an NGUID, an empty string will be used.
+  string nguid_list = 4;
 }
 
 message ServerInfo {
