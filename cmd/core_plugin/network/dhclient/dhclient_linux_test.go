@@ -156,41 +156,82 @@ func TestDhclientProcessExists(t *testing.T) {
 	tests := []struct {
 		// name is the name of the test.
 		name string
-
 		// ipVersion is the ipVersion to use in this test.
 		ipVersion ipVersion
-
-		// existFlag determines what the findProcess mock should return.
-		existFlag bool
-
+		// processes are the processes to return from the findProcess mock.
+		processes []ps.Process
 		// returnError determines if findProcess should return an error.
 		returnError bool
-
 		// expectBool is the expected return value of dhclientProcessExists()
 		expectBool bool
-
 		// expectErr dictates whether an error is expected.
 		expectErr bool
 	}{
 		// Process exists ipv4.
 		{
-			name:       "ipv4",
-			ipVersion:  ipv4,
-			existFlag:  true,
+			name:      "ipv4",
+			ipVersion: ipv4,
+			processes: []ps.Process{
+				ps.Process{
+					PID: 2,
+					Exe: "/random/path",
+					CommandLine: []string{
+						"dhclient",
+						"-4",
+						"iface",
+					},
+				},
+			},
 			expectBool: true,
 		},
 		// Process exists ipv6.
 		{
-			name:       "ipv6",
-			ipVersion:  ipv6,
-			existFlag:  true,
+			name:      "ipv6",
+			ipVersion: ipv6,
+			processes: []ps.Process{
+				ps.Process{
+					PID: 2,
+					Exe: "/random/path",
+					CommandLine: []string{
+						"dhclient",
+						"-6",
+						"iface",
+					},
+				},
+			},
+			expectBool: true,
+		},
+		// Process exists ipv6 with multiple processes.
+		{
+			name:      "ipv6-multiple-processes",
+			ipVersion: ipv6,
+			processes: []ps.Process{
+				ps.Process{
+					PID: 2,
+					Exe: "/random/path",
+					CommandLine: []string{
+						"dhclient",
+						"-4",
+						"iface",
+					},
+				},
+				ps.Process{
+					PID: 2,
+					Exe: "/random/path",
+					CommandLine: []string{
+						"dhclient",
+						"-6",
+						"iface",
+					},
+				},
+			},
 			expectBool: true,
 		},
 		// Process not exist.
 		{
 			name:       "not-exist",
 			ipVersion:  ipv4,
-			existFlag:  false,
+			processes:  []ps.Process{},
 			expectBool: false,
 		},
 		// Error finding process.
@@ -211,25 +252,11 @@ func TestDhclientProcessExists(t *testing.T) {
 
 			ps.Client = &dhclientMockPs{
 				FindRegexCallback: func(exematch string) ([]ps.Process, error) {
-					var result []ps.Process
-
 					if tc.returnError {
-						return result, fmt.Errorf("mock error")
+						return nil, fmt.Errorf("mock error")
 					}
 
-					if tc.existFlag {
-						result = append(result, ps.Process{
-							PID: 2,
-							Exe: "/random/path",
-							CommandLine: []string{
-								"dhclient",
-								tc.ipVersion.Flag,
-								"iface",
-							},
-						})
-					}
-
-					return result, nil
+					return tc.processes, nil
 				},
 			}
 

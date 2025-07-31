@@ -501,29 +501,40 @@ func newInterfacePartitions(nics []*nic.Configuration) (*interfacePartitions, er
 // dhclientProcessExists checks if a dhclient process for the provided interface
 // and IP version exists.
 func dhclientProcessExists(nicConfig *nic.Configuration, ipVersion ipVersion) (bool, error) {
+	galog.V(2).Debugf("Checking for dhclient process for interface: %s, ipVersion: %s", nicConfig.Interface.Name(), ipVersion.Desc)
 	processes, err := ps.FindRegex(".*dhclient.*")
 	if err != nil {
 		return false, fmt.Errorf("error finding dhclient process: %w", err)
 	}
+	galog.V(3).Debugf("Found %d dhclient processes: %+v", len(processes), processes)
 
 	// Check for any dhclient process that contains the iface and IP version
-	// provided.
+	// provided. Make sure to look through all processes to find one that
+	// matches both the interface and IP version.
+	var found bool
 	for _, process := range processes {
+		galog.V(3).Debugf("Process: %+v", process)
 		commandLine := process.CommandLine
 
 		containsInterface := slices.Contains(commandLine, nicConfig.Interface.Name())
 		containsProtocolArg := slices.Contains(commandLine, ipVersion.Flag)
-
+		galog.V(3).Debugf("Contains Interface: %t, Contains Protocol Arg: %t", containsInterface, containsProtocolArg)
 		if containsInterface {
 			if ipVersion == ipv6 {
-				return containsProtocolArg, nil
+				found = found || containsProtocolArg
 			}
 			// IPv4 DHClient calls don't necessarily have the '-4' flag set.
+			// This can return early if the IPv4 process is found.
 			if ipVersion == ipv4 && !slices.Contains(commandLine, ipv6.Flag) {
-				return true, nil
+				found = true
+			}
+			// We can break early if a matching process is found.
+			if found {
+				break
 			}
 		}
 	}
 
-	return false, nil
+	galog.V(2).Debugf("Found %s dhclient process for interface %q: %t", ipVersion.Desc, nicConfig.Interface.Name(), found)
+	return found, nil
 }
