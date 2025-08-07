@@ -229,5 +229,6 @@ func (mod *diagnosticsModule) diagnosticsEnabled(desc *metadata.Descriptor, conf
 		return *desc.Project().Attributes().EnableDiagnostics()
 	}
 
-	return false
+	// By default, diagnostics are enabled.
+	return true
 }

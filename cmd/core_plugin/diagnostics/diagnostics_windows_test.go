@@ -136,7 +136,7 @@ func TestDiagnosticsEnabled(t *testing.T) {
 		{
 			name:    "no_config",
 			config:  &cfg.Sections{},
-			want:    false,
+			want:    true,
 			mdsJSON: `{"project": {"attributes": {}}}`,
 		},
 	}
