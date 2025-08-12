@@ -145,7 +145,13 @@ func (mod *diagnosticsModule) handleDiagnosticsRequest(ctx context.Context, conf
 		return true, nil
 	}
 
-	galog.Infof("Diagnostics: logs export requested.")
+	// Check if we've dealt with this entry already.
+	metadataNewEntry := desc.Instance().Attributes().Diagnostics()
+
+	if metadataNewEntry == "" {
+		galog.Debugf("Diagnostics: request is empty, ignoring.")
+		return true, nil
+	}
 
 	// Fetch from the registry the list of the existing/seen request entries.
 	regEntries, err := reg.ReadMultiString(diagnosticsRegKey, diagnosticsRegKey)
@@ -153,12 +159,12 @@ func (mod *diagnosticsModule) handleDiagnosticsRequest(ctx context.Context, conf
 		return false, fmt.Errorf("failed to read diagnostics registry key: %v", err)
 	}
 
-	// Check if we've dealt with this entry already.
-	metadataNewEntry := desc.Instance().Attributes().Diagnostics()
 	if slices.Contains(regEntries, metadataNewEntry) {
 		galog.Debugf("Diagnostics: request already seen %q, ignoring.", metadataNewEntry)
 		return false, nil
 	}
+
+	galog.Infof("Diagnostics: logs export requested.")
 
 	// Unmarshall the new entry to extract the request details.
 	var entry diagnosticsEntry

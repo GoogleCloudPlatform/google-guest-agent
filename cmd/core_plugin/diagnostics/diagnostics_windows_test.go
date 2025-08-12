@@ -225,6 +225,7 @@ func TestHandleRequest(t *testing.T) {
 		name          string
 		mdsJSON       string
 		expectedError any
+		wantNoop      bool
 	}{
 		{
 			name: "invalid_diagnostics_json",
@@ -277,6 +278,18 @@ func TestHandleRequest(t *testing.T) {
 				}
 			}`,
 		},
+		{
+			name:     "empty_diagnostics",
+			wantNoop: true,
+			mdsJSON: `
+			{
+				"instance":  {
+					"attributes": {
+						"diagnostics": ""
+					}
+				}
+			}`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -300,8 +313,8 @@ func TestHandleRequest(t *testing.T) {
 					t.Errorf("handleDiagnosticsRequest(context.Background(), %v, %v) failed: %v", config, desc, err)
 				}
 			}
-			if noop {
-				t.Errorf("handleDiagnosticsRequest(context.Background(), %v, %v) returned noop = true, want false", config, desc)
+			if noop != tc.wantNoop {
+				t.Errorf("handleDiagnosticsRequest(context.Background(), %v, %v) returned noop = %t, want %t", config, desc, noop, tc.wantNoop)
 			}
 		})
 	}
