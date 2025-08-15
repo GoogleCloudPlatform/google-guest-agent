@@ -22,6 +22,7 @@ type User struct {
 	// Password is the password of the user, it's meant to be used only for
 	// windows - specifically for the windows password reset feature.
 	Password string
+	// UID, GID and HomeDir are set only for linux.
 	// UID is the user id of the user.
 	UID string
 	// GID is the group id of the user.

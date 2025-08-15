@@ -103,16 +103,18 @@ func createTestGroup(t *testing.T, groupname string) *Group {
 }
 
 func accountsTestSetup(t *testing.T, opts accountsTestOpts) {
+	// This is a generic UID for all users.
+	sid, err := syscall.StringToSid("S-1-1-0")
+	if err != nil {
+		t.Fatalf("Error converting SID S-1-1-0 to string: %v", err)
+	}
+
 	if opts.overrideLookupUser {
-		lookupUser = func(username string) (*user.User, error) {
+		lookupSID = func(system, username string) (*syscall.SID, string, uint32, error) {
 			if opts.lookupUserErr {
-				return nil, fmt.Errorf("lookupUser error")
+				return nil, "", 0, fmt.Errorf("lookupUser error")
 			}
-			return &user.User{
-				// This is a generic UID for all users.
-				Uid:      "S-1-1-0",
-				Username: username,
-			}, nil
+			return sid, "", 0, nil
 		}
 	}
 	if opts.overrideLookupGroup {
@@ -174,7 +176,7 @@ func accountsTestSetup(t *testing.T, opts accountsTestOpts) {
 	}
 
 	t.Cleanup(func() {
-		lookupUser = user.Lookup
+		lookupSID = syscall.LookupSID
 		lookupGroup = user.LookupGroup
 		netUserAdd = defaultNetUserAdd
 		netUserDel = defaultNetUserDel

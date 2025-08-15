@@ -42,7 +42,7 @@ var (
 	AdminGroup = &Group{Name: "Administrators"}
 
 	// The following has been stubbed out for error injection testing.
-	lookupUser  = user.Lookup
+	lookupSID   = syscall.LookupSID
 	lookupGroup = user.LookupGroup
 
 	netUserAdd         = defaultNetUserAdd
@@ -64,21 +64,15 @@ func (u *User) SetPassword(_ context.Context, password string) error {
 // FindUser returns the user with the given username. If the user does not
 // exist, it returns an error.
 func FindUser(_ context.Context, username string) (*User, error) {
-	user, err := lookupUser(username)
+	sid, _, _, err := lookupSID("", username)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find user: %w", err)
+		return nil, fmt.Errorf("failed to lookup sid for user %q: %w", username, err)
 	}
 
 	// Get the user's info.
 	userInfo, err := netUserGetInfo(username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user info: %w", err)
-	}
-
-	// Parse the user's SID.
-	sid, err := syscall.StringToSid(user.Uid)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse user sid: %w", err)
 	}
 
 	// Create the user info struct and return it.
@@ -91,9 +85,6 @@ func FindUser(_ context.Context, username string) (*User, error) {
 	return &User{
 		Username:   username,
 		Name:       username,
-		HomeDir:    user.HomeDir,
-		UID:        user.Uid,
-		GID:        user.Gid,
 		osSpecific: osSpecific,
 	}, nil
 }
