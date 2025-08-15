@@ -271,8 +271,10 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 	}
 
 	// Setup IPV6.
-	if len(partitions.obtainIpv6) != 0 {
-		galog.Debugf("Obtaining IPv6 leases for interfaces: %v", partitions.obtainIpv6)
+	if len(partitions.ipv6Interfaces) != 0 {
+		if len(partitions.obtainIpv6) != 0 {
+			galog.Debugf("Obtaining IPv6 leases for interfaces: %v", partitions.obtainIpv6)
+		}
 		if err := ds.setupIPV6Interfaces(ctx, opts, partitions); err != nil {
 			return fmt.Errorf("failed to setup IPv6 interfaces: %w", err)
 		}
@@ -307,19 +309,19 @@ func (ds *dhclientService) setupIPV6Interfaces(ctx context.Context, opts *servic
 		return fmt.Errorf("tentative IP setup for interface: %q; error: %w", primaryInterface, err)
 	}
 
-	// Setup IPv6.
-	for _, iface := range partitions.obtainIpv6 {
-		ifaceName := iface.Interface.Name()
-
-		// Set appropriate system values.
-		val := fmt.Sprintf("net.ipv6.conf.%s.accept_ra_rt_info_max_plen=128", ifaceName)
+	// Set sysctl values for all interfaces that support IPv6.
+	for _, iface := range partitions.ipv6Interfaces {
+		val := fmt.Sprintf("net.ipv6.conf.%s.accept_ra_rt_info_max_plen=128", iface.Interface.Name())
 		opts := run.Options{OutputType: run.OutputNone, Name: "sysctl", Args: []string{val}, ExecMode: run.ExecModeSync}
-
 		if _, err := run.WithContext(ctx, opts); err != nil {
 			return err
 		}
-
-		if err := ds.runDhclient(ctx, iface.Interface.Name(), ipv6, obtainLease); err != nil {
+	}
+	// Obtain leases for all interfaces that support IPv6 and don't already have
+	// a lease.
+	for _, iface := range partitions.obtainIpv6 {
+		ifaceName := iface.Interface.Name()
+		if err := ds.runDhclient(ctx, ifaceName, ipv6, obtainLease); err != nil {
 			return fmt.Errorf("failed to obtain lease for %s: %w", ifaceName, err)
 		}
 	}
@@ -455,6 +457,8 @@ type interfacePartitions struct {
 	obtainIpv6 []*nic.Configuration
 	// releaseIpv6 contains interfaces for which to release their IPv6 lease.
 	releaseIpv6 []*nic.Configuration
+	// ipv6Interfaces contains interfaces that support IPv6.
+	ipv6Interfaces []*nic.Configuration
 }
 
 // paritionInterfaces returns a list of interfaces for which to obtain an IPv4
@@ -463,6 +467,7 @@ func newInterfacePartitions(nics []*nic.Configuration) (*interfacePartitions, er
 	var obtainIpv4 []*nic.Configuration
 	var obtainIpv6 []*nic.Configuration
 	var releaseIpv6 []*nic.Configuration
+	var ipv6Interfaces []*nic.Configuration
 
 	for _, nicConfig := range nics {
 		if !nicConfig.ShouldManage() {
@@ -485,6 +490,10 @@ func newInterfacePartitions(nics []*nic.Configuration) (*interfacePartitions, er
 			return nil, err
 		}
 
+		if nicConfig.SupportsIPv6 {
+			ipv6Interfaces = append(ipv6Interfaces, nicConfig)
+		}
+
 		if nicConfig.SupportsIPv6 && !processExists {
 			// Obtain a lease and spin up the DHClient process.
 			obtainIpv6 = append(obtainIpv6, nicConfig)
@@ -495,7 +504,7 @@ func newInterfacePartitions(nics []*nic.Configuration) (*interfacePartitions, er
 		}
 	}
 
-	return &interfacePartitions{obtainIpv4, obtainIpv6, releaseIpv6}, nil
+	return &interfacePartitions{obtainIpv4, obtainIpv6, releaseIpv6, ipv6Interfaces}, nil
 }
 
 // dhclientProcessExists checks if a dhclient process for the provided interface
