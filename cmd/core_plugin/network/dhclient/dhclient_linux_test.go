@@ -570,6 +570,7 @@ func TestNewInterfacePartitions(t *testing.T) {
 		wantObtainIpv4  bool
 		wantObtainIpv6  bool
 		wantReleaseIpv6 bool
+		wantIpv6        bool
 		wantError       bool
 	}{
 		{ // No interface is defined, should return empty interfacePartitions.
@@ -607,6 +608,7 @@ func TestNewInterfacePartitions(t *testing.T) {
 			findRegexErrors: []error{nil, nil},
 			wantObtainIpv4:  false,
 			wantObtainIpv6:  true,
+			wantIpv6:        true,
 			wantError:       false,
 		},
 	}
@@ -682,6 +684,16 @@ func TestNewInterfacePartitions(t *testing.T) {
 
 				if got.releaseIpv6[0].Interface.Name() != nics[0].Interface.Name() {
 					t.Fatalf("newInterfacePartitions(%v) returned %v, want %v", nics, got.releaseIpv6, nics)
+				}
+			}
+
+			if tc.wantIpv6 {
+				if len(got.ipv6Interfaces) == 0 {
+					t.Fatalf("newInterfacePartitions(%v) returned %v, want 1 nic", nics, got.ipv6Interfaces)
+				}
+
+				if got.ipv6Interfaces[0].Interface.Name() != nics[0].Interface.Name() {
+					t.Fatalf("newInterfacePartitions(%v) returned %v, want %v", nics, got.ipv6Interfaces, nics)
 				}
 			}
 		})
@@ -882,7 +894,8 @@ func TestSetupIPV6Interfaces(t *testing.T) {
 			})
 
 			partitions := &interfacePartitions{
-				obtainIpv6: nics,
+				obtainIpv6:     nics,
+				ipv6Interfaces: nics,
 			}
 
 			ds := &dhclientService{}
