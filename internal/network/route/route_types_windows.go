@@ -76,7 +76,8 @@ func (addr *RawSockaddrInet) SetAddrPort(addrPort netip.AddrPort) error {
 			addr4.Zero[i] = 0
 		}
 		return nil
-	} else if addrPort.Addr().Is6() {
+	}
+	if addrPort.Addr().Is6() {
 		addr6 := (*windows.RawSockaddrInet6)(unsafe.Pointer(addr))
 		addr6.Family = windows.AF_INET6
 		addr6.Addr = addrPort.Addr().As16()

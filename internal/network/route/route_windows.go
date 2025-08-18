@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/netip"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"golang.org/x/sys/windows"
@@ -42,11 +43,13 @@ func (route Handle) toWindows() (MibIPforwardRow2, error) {
 	if err != nil {
 		return MibIPforwardRow2{}, fmt.Errorf("failed to parse destination address: %w", err)
 	}
+	galog.V(3).Debugf("Destination address: %s", destAddr.String())
 
 	prefix, err := destAddr.Prefix(destAddr.BitLen())
 	if err != nil {
 		return MibIPforwardRow2{}, fmt.Errorf("failed to get destination prefix: %w", err)
 	}
+	galog.V(3).Debugf("Destination prefix: %s", prefix.String())
 
 	if err := dest.SetPrefix(prefix); err != nil {
 		return MibIPforwardRow2{}, fmt.Errorf("failed to set destination prefix: %w", err)
@@ -58,17 +61,20 @@ func (route Handle) toWindows() (MibIPforwardRow2, error) {
 	if err != nil {
 		return MibIPforwardRow2{}, fmt.Errorf("failed to parse gateway address: %w", err)
 	}
+	galog.V(3).Debugf("Gateway address: %s", gatewayAddr.String())
 
 	if err := gateway.SetAddr(gatewayAddr); err != nil {
 		return MibIPforwardRow2{}, fmt.Errorf("failed to set gateway: %w", err)
 	}
 
-	return MibIPforwardRow2{
+	result := MibIPforwardRow2{
 		DestinationPrefix: dest,
 		NextHop:           gateway,
 		Metric:            route.Metric,
 		InterfaceIndex:    route.InterfaceIndex,
-	}, nil
+	}
+	galog.V(3).Debugf("Converted route to windows: %+v", result)
+	return result, nil
 }
 
 // Delete deletes a route from the route table.

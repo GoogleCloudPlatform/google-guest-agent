@@ -46,6 +46,7 @@ func platformEarlyInit(ctx context.Context, data any) error {
 	if err != nil {
 		return fmt.Errorf("failed to get default route: %w", err)
 	}
+	galog.V(3).Debugf("Default route: %+v", defRoute)
 
 	dest, err := address.ParseIP(route.MetadataRouteDestination)
 	if err != nil {
@@ -72,6 +73,7 @@ func platformEarlyInit(ctx context.Context, data any) error {
 	})
 
 	if !contains {
+		galog.V(2).Debugf("Adding route for metadata server: %+v", mdsRoute)
 		if err := route.Add(ctx, mdsRoute); err != nil {
 			return fmt.Errorf("failed to add route for metadata server: %w", err)
 		}

@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"golang.org/x/sys/windows"
 )
 
@@ -45,7 +46,8 @@ func freeMibTable(table *mibIPforwardTable2) {
 func syscallError(r0 uintptr, errNo syscall.Errno, msg string) error {
 	if r0 == 0 && errNo != 0 {
 		return fmt.Errorf("%s: %s", msg, errNo.Error())
-	} else if r0 != 0 {
+	}
+	if r0 != 0 {
 		return syscall.Errno(r0)
 	}
 	return nil
@@ -53,6 +55,7 @@ func syscallError(r0 uintptr, errNo syscall.Errno, msg string) error {
 
 // getIPForwardTable2 returns the IP forward table.
 func getIPForwardTable2(family AddressFamily) ([]MibIPforwardRow2, error) {
+	galog.V(4).Debugf("Getting IP forward table2")
 	var table *mibIPforwardTable2
 
 	r0, _, errNo := syscall.SyscallN(procGetIPForwardTable2.Addr(), uintptr(family), uintptr(unsafe.Pointer(&table)))
@@ -68,6 +71,7 @@ func getIPForwardTable2(family AddressFamily) ([]MibIPforwardRow2, error) {
 
 // createIPForwardEntry2 creates an IP forward entry.
 func createIPForwardEntry2(route *MibIPforwardRow2) error {
+	galog.V(4).Debugf("Creating IP forward entry: %+v", route)
 	r0, _, errNo := syscall.SyscallN(procCreateIPForwardEntry2.Addr(), uintptr(unsafe.Pointer(route)))
 	if err := syscallError(r0, errNo, "CreateIPForwardEntry2"); err != nil {
 		return err
@@ -77,6 +81,7 @@ func createIPForwardEntry2(route *MibIPforwardRow2) error {
 
 // deleteIPForwardEntry2 deletes an IP forward entry.
 func deleteIPForwardEntry2(route *MibIPforwardRow2) error {
+	galog.V(4).Debugf("Deleting IP forward entry: %+v", route)
 	r0, _, errNo := syscall.SyscallN(procDeleteIPForwardEntry2.Addr(), uintptr(unsafe.Pointer(route)))
 	if err := syscallError(r0, errNo, "DeleteIPForwardEntry2"); err != nil {
 		return err
