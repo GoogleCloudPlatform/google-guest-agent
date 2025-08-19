@@ -72,7 +72,7 @@ func main() {
 
 	// Get the username from the first parameter to the program.
 	if username, err = usernameCliArg(os.Args); err != nil {
-		galog.Fatalf(err.Error())
+		galog.Fatal(err.Error())
 	}
 
 	mdsClient := metadata.New()

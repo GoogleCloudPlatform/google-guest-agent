@@ -203,7 +203,7 @@ func (mod *diagnosticsModule) handleDiagnosticsRequest(ctx context.Context, conf
 			galog.Errorf("Error collecting logs: %v", err)
 			return
 		}
-		galog.Infof(res.Output)
+		galog.Info(res.Output)
 	}()
 
 	regEntries = append(regEntries, metadataNewEntry)

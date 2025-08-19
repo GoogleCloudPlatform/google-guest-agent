@@ -87,7 +87,7 @@ func captureLogs(ctx context.Context, s *testserver.Server) {
 			msgs := s.AgentSentMessages()
 			write := msgs[read:]
 			for _, msg := range write {
-				galog.Infof(msg.String())
+				galog.Info(msg.String())
 			}
 			read = len(msgs)
 		}

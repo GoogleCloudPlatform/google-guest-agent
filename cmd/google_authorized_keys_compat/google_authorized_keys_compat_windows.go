@@ -61,6 +61,6 @@ func launchAuthorizedKeys(ctx context.Context, mdsClient metadata.MDSClientInter
 		return fmt.Errorf("failed to run authorized keys: %v", err)
 	}
 
-	fmt.Fprintf(os.Stdout, res.Output)
+	fmt.Fprint(os.Stdout, res.Output)
 	return nil
 }
