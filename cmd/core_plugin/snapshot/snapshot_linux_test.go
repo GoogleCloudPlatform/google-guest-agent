@@ -186,8 +186,8 @@ func newSnapshotServer() *snapshotServer {
 // testOptions is a struct that contains the options for running the client and
 // server.
 type testOptions struct {
-	// clientOpts is the options for the client.
-	clientOpts clientOptions
+	// client is the client that is used for testing.
+	client *snapshotClient
 	// server is the server that is used for testing.
 	server *snapshotServer
 }
@@ -199,7 +199,7 @@ func runClientAndServer(ctx context.Context, t *testing.T, testOpts testOptions)
 	// Run the server in a separate goroutine and keep it running until the test
 	// finishes and sends the abort signal.
 	go func() {
-		if err := runServer(testOpts.server, testOpts.clientOpts.address); err != nil {
+		if err := runServer(testOpts.server, testOpts.client.options.address); err != nil {
 			t.Errorf("Failed to run server: %v", err)
 		}
 	}()
@@ -219,14 +219,9 @@ func runClientAndServer(ctx context.Context, t *testing.T, testOpts testOptions)
 	}
 
 	// After attesting the server is running we can start the client.
-	client, err := newClient(testOpts.clientOpts)
-	if err != nil {
-		t.Fatalf("Failed to create handler: %v", err)
-	}
-
 	// Keep the client running until the context is cancelled.
 	go func() {
-		if err := client.run(ctx); err != nil {
+		if err := testOpts.client.run(ctx); err != nil {
 			t.Errorf("Failed to run handler: %v", err)
 		}
 	}()
@@ -243,6 +238,32 @@ func newRequest(operationID int32, diskList string, opType sspb.OperationType) *
 			},
 		},
 	}
+}
+
+// newRequestWithNguid creates a new snapshot request message with nguid list.
+func newRequestWithNguid(operationID int32, diskList string, opType sspb.OperationType, nguidList string) *sspb.GuestMessage {
+	return &sspb.GuestMessage{
+		Msg: &sspb.GuestMessage_SnapshotRequest{
+			SnapshotRequest: &sspb.SnapshotRequest{
+				OperationId: operationID,
+				DiskList:    diskList,
+				NguidList:   nguidList,
+				Type:        opType,
+			},
+		},
+	}
+}
+
+// Fake findDeviceByNguid that successfully finds devices
+func fakeFindDeviceByNguid(targetNguid string) (string, error) {
+	nguidMap := map[string]string{
+		"deadbeef": "/dev/nvme0n1",
+		"1badf00d": "/dev/nvme1n1",
+	}
+	if devName, ok := nguidMap[targetNguid]; ok {
+		return devName, nil
+	}
+	return "", fmt.Errorf("fakeFindDeviceSuccess: nguid %s not found", targetNguid)
 }
 
 func writeScript(t *testing.T, op sspb.OperationType, scriptDir string, content string) {
@@ -281,9 +302,14 @@ func TestSuccess(t *testing.T) {
 		scriptDir:        scriptDir,
 	}
 
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
 	testOpts := testOptions{
-		clientOpts: clientOpts,
-		server:     server,
+		client: client,
+		server: server,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -355,6 +381,341 @@ func TestSuccess(t *testing.T) {
 	}
 }
 
+func TestSuccessWithNguid(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	clientOpts := clientOptions{
+		protocol:         testProtocol,
+		address:          socket,
+		timeoutInSeconds: time.Duration(10) * time.Second,
+		scriptDir:        scriptDir,
+	}
+
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
+	client.findDeviceByNguidFunc = fakeFindDeviceByNguid
+
+	testOpts := testOptions{
+		client: client,
+		server: server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	tests := []struct {
+		name    string
+		output  string
+		command string
+		script  string
+		op      sspb.OperationType
+		want    string
+	}{
+		{
+			name:    "pre",
+			output:  "pre.out",
+			command: "echo \"pre script $1\" > %s",
+			script:  "pre.sh",
+			op:      sspb.OperationType_PRE_SNAPSHOT,
+			want:    "pre script /dev/nvme0n1,/dev/nvme1n1\n",
+		},
+		{
+			name:    "post",
+			output:  "post.out",
+			command: "echo \"post script $1\" > %s",
+			script:  "post.sh",
+			op:      sspb.OperationType_POST_SNAPSHOT,
+			want:    "post script /dev/nvme0n1,/dev/nvme1n1\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			outputFile := filepath.Join(scriptDir, tc.output)
+			writeScript(t, tc.op, scriptDir, fmt.Sprintf(tc.command, outputFile)) // NOLINT
+
+			reqID := server.requestID()
+			msg := newRequestWithNguid(reqID, "disklist", tc.op, "deadbeef,1badf00d")
+			server.messageBus <- msg
+
+			resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+			if err != nil {
+				t.Fatalf("Failed to get response: %v, expected success", err)
+			}
+
+			if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+				t.Fatalf("Response.ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+			}
+
+			if !file.Exists(outputFile, file.TypeFile) {
+				t.Fatalf("Script output file (%q) not written, expected to be written", outputFile)
+			}
+
+			data, err := os.ReadFile(outputFile)
+			if err != nil {
+				t.Fatalf("Failed to read %s script output file: %v", tc.name, err)
+			}
+
+			if string(data) != tc.want {
+				t.Fatalf("Script output (%q) file content = %q, want %q", outputFile, string(data), tc.want)
+			}
+		})
+	}
+}
+
+func TestPartialSuccessWithNguid(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	clientOpts := clientOptions{
+		protocol:         testProtocol,
+		address:          socket,
+		timeoutInSeconds: time.Duration(10) * time.Second,
+		scriptDir:        scriptDir,
+	}
+
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
+	client.findDeviceByNguidFunc = fakeFindDeviceByNguid
+
+	testOpts := testOptions{
+		client: client,
+		server: server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	tests := []struct {
+		name    string
+		output  string
+		command string
+		script  string
+		op      sspb.OperationType
+		want    string
+	}{
+		{
+			name:    "pre",
+			output:  "pre.out",
+			command: "echo \"pre script $1\" > %s",
+			script:  "pre.sh",
+			op:      sspb.OperationType_PRE_SNAPSHOT,
+			want:    "pre script /dev/nvme0n1\n",
+		},
+		{
+			name:    "post",
+			output:  "post.out",
+			command: "echo \"post script $1\" > %s",
+			script:  "post.sh",
+			op:      sspb.OperationType_POST_SNAPSHOT,
+			want:    "post script /dev/nvme0n1\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			outputFile := filepath.Join(scriptDir, tc.output)
+			writeScript(t, tc.op, scriptDir, fmt.Sprintf(tc.command, outputFile)) // NOLINT
+
+			reqID := server.requestID()
+			msg := newRequestWithNguid(reqID, "disklist", tc.op, "deadbeef,01abcdef")
+			server.messageBus <- msg
+
+			resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+			if err != nil {
+				t.Fatalf("Failed to get response: %v, expected success", err)
+			}
+
+			if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+				t.Fatalf("Response.ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+			}
+
+			if !file.Exists(outputFile, file.TypeFile) {
+				t.Fatalf("Script output file (%q) not written, expected to be written", outputFile)
+			}
+
+			data, err := os.ReadFile(outputFile)
+			if err != nil {
+				t.Fatalf("Failed to read %s script output file: %v", tc.name, err)
+			}
+
+			if string(data) != tc.want {
+				t.Fatalf("Script output (%q) file content = %q, want %q", outputFile, string(data), tc.want)
+			}
+		})
+	}
+}
+
+func TestNoMatchedDeviceWithNguid(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	clientOpts := clientOptions{
+		protocol:         testProtocol,
+		address:          socket,
+		timeoutInSeconds: time.Duration(10) * time.Second,
+		scriptDir:        scriptDir,
+	}
+
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
+	client.findDeviceByNguidFunc = fakeFindDeviceByNguid
+
+	testOpts := testOptions{
+		client: client,
+		server: server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	tests := []struct {
+		name     string
+		op       sspb.OperationType
+		exitCode int32
+	}{
+		{
+			name:     "pre",
+			op:       sspb.OperationType_PRE_SNAPSHOT,
+			exitCode: -1,
+		},
+		{
+			name:     "post",
+			op:       sspb.OperationType_POST_SNAPSHOT,
+			exitCode: -1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scriptContent := fmt.Sprintf("exit %d", 0) // NOLINT
+			writeScript(t, tc.op, scriptDir, scriptContent)
+
+			reqID := server.requestID()
+			msg := newRequestWithNguid(reqID, "disklist", tc.op, "01abcdef")
+			server.messageBus <- msg
+
+			resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+			if err != nil {
+				t.Errorf("Failed to get response: %v, expected success", err)
+			}
+
+			if resp.GetAgentReturnCode() != sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR {
+				t.Errorf("Response.ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR)
+			}
+
+			if resp.GetScriptsReturnCode() != tc.exitCode {
+				t.Errorf("Response.ExitCode = %v, want %v", resp.GetScriptsReturnCode(), tc.exitCode)
+			}
+		})
+	}
+}
+
+func TestFindNguidSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	// Example device structure: /tmpDir/nvme0n1/nguid
+	devDir := filepath.Join(tmp, "nvme0n1")
+	if err := os.MkdirAll(devDir, 0755); err != nil {
+		t.Fatalf("Failed to create test dir: %v", err)
+	}
+
+	nguidFile := filepath.Join(devDir, "nguid")
+	nguidContent := "deadbeef-1234-5678-90ab-cdef12345678"
+	if err := os.WriteFile(nguidFile, []byte(nguidContent), 0644); err != nil {
+		t.Fatalf("Failed to write test nguid file: %v", err)
+	}
+
+	testPattern := filepath.Join(tmp, "nvme*n*/nguid")
+	targetNguid := "deadbeef1234567890abcdef12345678"
+
+	// Call the refactored function with the test pattern
+	deviceName, err := findDeviceByNguidWithPattern(targetNguid, testPattern)
+	if err != nil {
+		t.Errorf("findDeviceByNguidWithPattern(...) failed: %v", err)
+	}
+
+	expectedDeviceName := "/dev/nvme0n1"
+	if deviceName != expectedDeviceName {
+		t.Errorf("findDeviceByNguidWithPattern(...) = %q, want %q", deviceName, expectedDeviceName)
+	}
+}
+
+func TestFindNguidNoDevice(t *testing.T) {
+	tmp := t.TempDir()
+
+	testPattern := filepath.Join(tmp, "nvme*n*/nguid")
+	targetNguid := "deadbeef1234567890abcdef12345678"
+
+	// Call the refactored function with the test pattern
+	_, err := findDeviceByNguidWithPattern(targetNguid, testPattern)
+	if err == nil {
+		t.Errorf("Expected error from findDeviceByNguidWithPattern with no devices")
+	}
+}
+
+func TestFindNguidNoMatch(t *testing.T) {
+	tmp := t.TempDir()
+	// Example device structure: /tmpDir/nvme0n1/nguid
+	devDir := filepath.Join(tmp, "nvme0n1")
+	if err := os.MkdirAll(devDir, 0755); err != nil {
+		t.Fatalf("Failed to create test dir: %v", err)
+	}
+
+	nguidFile := filepath.Join(devDir, "nguid")
+	nguidContent := "deadbeef-deadbeef-deadbeef-deadbeef"
+	if err := os.WriteFile(nguidFile, []byte(nguidContent), 0644); err != nil {
+		t.Fatalf("Failed to write test nguid file: %v", err)
+	}
+
+	testPattern := filepath.Join(tmp, "nvme*n*/nguid")
+	targetNguid := "1badf00d"
+
+	_, err := findDeviceByNguidWithPattern(targetNguid, testPattern)
+	if err == nil {
+		t.Errorf("findDeviceByNguidWithPattern(...) succeeded unexpectedly, want error")
+	}
+}
+
 func TestNoSuchScript(t *testing.T) {
 	tmp := t.TempDir()
 	socket := filepath.Join(tmp, "test.sock")
@@ -370,9 +731,14 @@ func TestNoSuchScript(t *testing.T) {
 		scriptDir:        scriptDir,
 	}
 
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
 	testOpts := testOptions{
-		clientOpts: clientOpts,
-		server:     server,
+		client: client,
+		server: server,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -426,10 +792,14 @@ func TestDuplicateRequest(t *testing.T) {
 		timeoutInSeconds: time.Duration(10) * time.Second,
 		scriptDir:        scriptDir,
 	}
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
 
 	testOpts := testOptions{
-		clientOpts: clientOpts,
-		server:     server,
+		client: client,
+		server: server,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -490,9 +860,14 @@ func TestTimedoutScript(t *testing.T) {
 		scriptDir:        scriptDir,
 	}
 
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
 	testOpts := testOptions{
-		clientOpts: clientOpts,
-		server:     server,
+		client: client,
+		server: server,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -554,9 +929,14 @@ func TestScriptExitCode(t *testing.T) {
 		scriptDir:        scriptDir,
 	}
 
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
 	testOpts := testOptions{
-		clientOpts: clientOpts,
-		server:     server,
+		client: client,
+		server: server,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
