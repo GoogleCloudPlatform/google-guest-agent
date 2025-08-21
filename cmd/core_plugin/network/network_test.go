@@ -250,7 +250,7 @@ func TestMetadataSubscriberSuccess(t *testing.T) {
 	}
 }
 
-func TestMetadataChanged(t *testing.T) {
+func TestNetworkMetadataChanged(t *testing.T) {
 	tests := []struct {
 		name            string
 		prevMDSJSON     string
@@ -332,7 +332,7 @@ func TestMetadataChanged(t *testing.T) {
 			}
 
 			mod := &lateModule{prevMetadata: prevDesc, wsfcEnabled: tc.prevWSFCEnabled}
-			got := mod.metadataChanged(newDesc, config)
+			got := mod.networkMetadataChanged(newDesc, config)
 			if got != tc.want {
 				t.Errorf("metadataChanged(%v) = %t, want %t", newDesc, got, tc.want)
 			}

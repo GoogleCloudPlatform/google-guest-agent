@@ -46,12 +46,20 @@ var (
 )
 
 // managerSetup sets up the network interfaces for linux.
-func managerSetup(ctx context.Context, nics []*nic.Configuration) error {
+func managerSetup(ctx context.Context, nics []*nic.Configuration, networkChanged networkChanged) error {
 	galog.Infof("Running linux network management module setup.")
 	opts := service.NewOptions(defaultLinuxManagers, nics)
 
-	if err := runManagerSetup(ctx, opts); err != nil {
-		return fmt.Errorf("failed to setup network configuration: %w", err)
+	if networkChanged.networkInterfaces {
+		if err := runManagerSetup(ctx, opts); err != nil {
+			return fmt.Errorf("failed to setup network configuration: %w", err)
+		}
+	}
+	if networkChanged.routes {
+		// Attempt to setup the routes.
+		if err := route.Setup(ctx, opts); err != nil {
+			return fmt.Errorf("failed to setup routes: %w", err)
+		}
 	}
 
 	galog.Infof("Finished linux network management module setup.")
@@ -87,11 +95,6 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 	// Attempt to setup the network configuration for the active manager.
 	if err := active.Setup(ctx, opts); err != nil {
 		return fmt.Errorf("failed to setup network configuration(%q): %w", active.ID, err)
-	}
-
-	// Attempt to setup the routes.
-	if err := route.Setup(ctx, opts); err != nil {
-		return fmt.Errorf("failed to setup routes: %w", err)
 	}
 
 	go func() {

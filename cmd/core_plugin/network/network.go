@@ -28,6 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
@@ -131,17 +132,10 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 		mod.failedConfiguration = failedSetup
 	}()
 
-	// If the metadata has not changed then we return early to avoid unnecessary
-	// work.
-	if !mod.metadataChanged(mds, config) && !mod.failedConfiguration {
-		return true, nil
-	}
-
-	galog.V(1).Debugf("Network metadata has changed or failed configuration, setting up network interfaces.")
-	var ignoreAddressMap address.IPAddressMap
 	// If WSFC is enabled, map the configured IP addresses to WSFC configurations
 	// and use the mapping to ignore the matching addresses on the IPForwarding,
 	// IPAliases and other network configurations.
+	var ignoreAddressMap address.IPAddressMap
 	if wsfc.Enabled(mds, config) {
 		ignoreAddressMap = wsfc.AddressMap(mds, config)
 		mod.wsfcEnabled = true
@@ -152,8 +146,18 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 		return false, fmt.Errorf("failed to create nic configs: %v", err)
 	}
 
+	// If the metadata has not changed then we return early to avoid unnecessary
+	// work.
+	metadataChanged := mod.networkMetadataChanged(mds, config)
+	routeChanged := mod.routeChanged(ctx, nicConfigs)
+	if !metadataChanged && !routeChanged && !mod.failedConfiguration {
+		return true, nil
+	}
+
+	galog.V(1).Debugf("Network metadata has changed or failed configuration, setting up network interfaces.")
+
 	// Forward the network configuration to the platform's network manager.
-	if err := managerSetup(ctx, nicConfigs); err != nil {
+	if err := managerSetup(ctx, nicConfigs, networkChanged{networkInterfaces: metadataChanged, routes: routeChanged}); err != nil {
 		failedSetup = true
 		return false, fmt.Errorf("failed to setup network interfaces: %v", err)
 	}
@@ -162,9 +166,17 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 	return false, nil
 }
 
-// metadataChanged returns true if the metadata has changed or if it's being
+// networkChanged indicates if the network interfaces or routes have changed.
+type networkChanged struct {
+	// networkInterfaces indicates if the network interfaces have changed.
+	networkInterfaces bool
+	// routes indicates if the routes have changed.
+	routes bool
+}
+
+// networkMetadataChanged returns true if the metadata has changed or if it's being
 // called on behalf of the first handler's execution.
-func (mod *lateModule) metadataChanged(mds *metadata.Descriptor, config *cfg.Sections) bool {
+func (mod *lateModule) networkMetadataChanged(mds *metadata.Descriptor, config *cfg.Sections) bool {
 	// If the module has not been initialized yet then we return true to force
 	// the first execution of the setup.
 	if mod.prevMetadata == nil {
@@ -189,5 +201,32 @@ func (mod *lateModule) metadataChanged(mds *metadata.Descriptor, config *cfg.Sec
 		return true
 	}
 
+	return false
+}
+
+// routeChanged returns true if the route metadata has changed, or if the routes
+// present on the system have changed from what is expected based on the network
+// interfaces configuration.
+func (mod *lateModule) routeChanged(ctx context.Context, nicConfigs []*nic.Configuration) bool {
+	for _, nic := range nicConfigs {
+		if nic.Invalid || nic.Interface == nil {
+			continue
+		}
+		wantedRoutes := nic.ExtraAddresses.MergedMap()
+
+		if missing, err := route.MissingRoutes(ctx, nic.Interface.Name(), wantedRoutes); err != nil {
+			galog.V(2).Debugf("Failed to get missing routes for interface %q: %v", nic.Interface.Name(), err)
+			continue
+		} else if len(missing) > 0 {
+			return true
+		}
+
+		if extra, err := route.ExtraRoutes(ctx, nic.Interface.Name(), wantedRoutes); err != nil {
+			galog.V(2).Debugf("Failed to get extra routes for interface %q: %v", nic.Interface.Name(), err)
+			continue
+		} else if len(extra) > 0 {
+			return true
+		}
+	}
 	return false
 }

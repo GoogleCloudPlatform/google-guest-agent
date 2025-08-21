@@ -38,7 +38,7 @@ const (
 )
 
 // managerSetup is the windows entry point for the network management.
-func managerSetup(_ context.Context, nics []*nic.Configuration) error {
+func managerSetup(_ context.Context, nics []*nic.Configuration, _ networkChanged) error {
 	for _, nicConfig := range nics {
 		if err := nicSetup(nicConfig); err != nil {
 			galog.Errorf("Failed to setup NIC %d: %v", nicConfig.Index, err)
