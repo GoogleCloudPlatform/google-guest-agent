@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
@@ -94,18 +95,11 @@ func defaultRouteFromTable(table []route.Handle) (*route.Handle, error) {
 		return nil, fmt.Errorf("failed to parse default route destination: %w", err)
 	}
 
+	sort.Slice(table, func(i, j int) bool { return table[i].InterfaceIndex < table[j].InterfaceIndex })
 	for _, route := range table {
-		if route.InterfaceIndex == 0 {
-			primaryRoute = &route
-		}
-
 		if route.Destination.String() == defaultRouteDestination.String() {
 			return &route, nil
 		}
-	}
-
-	if primaryRoute != nil {
-		return primaryRoute, nil
 	}
 
 	return nil, fmt.Errorf("no default route to %s found in route table %+v", defaultRouteDestination.String(), table)
