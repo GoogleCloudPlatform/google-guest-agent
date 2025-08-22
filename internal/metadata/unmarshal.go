@@ -29,6 +29,7 @@ import (
 type descriptor struct {
 	Instance instance
 	Project  project
+	Universe gcpUniverse
 }
 
 // UnmarshalDescriptor unmarshals a jason into Descriptor.
@@ -60,6 +61,13 @@ func (m *descriptor) UnmarshalJSON(b []byte) error {
 // formatted output of metadata server.
 type virtualClock struct {
 	DriftToken string
+}
+
+// gcpUniverse describes the metadata's universe attributes/keys. This is the
+// internal representation used to parse the json formatted output of metadata
+// server.
+type gcpUniverse struct {
+	UniverseDomain string `json:"universe-domain"`
 }
 
 // instance describes the metadata's instance attributes/keys. This is the
