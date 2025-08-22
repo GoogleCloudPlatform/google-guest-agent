@@ -445,3 +445,8 @@ func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
 	galog.Debugf("Finished ip route setup.")
 	return nil
 }
+
+// Init is no-op for Linux.
+func (lc *linuxClient) Init(ctx context.Context) error {
+	return nil
+}

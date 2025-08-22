@@ -81,3 +81,67 @@ func TestRouteTable(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultRouteTableSuccess(t *testing.T) {
+	ipAddr, err := address.ParseIP("0.0.0.0")
+	if err != nil {
+		t.Errorf("address.ParseIP(%v) = %v, want nil", "0.0.0.0", err)
+	}
+
+	data := []Handle{
+		{Destination: ipAddr, InterfaceIndex: 1},
+	}
+
+	route, err := defaultRouteFromTable(data)
+	if err != nil {
+		t.Errorf("defaultRouteFromTable(%v) = %v, want nil", data, err)
+	}
+
+	if route.Destination.String() != "0.0.0.0" {
+		t.Errorf("defaultRouteFromTable(%v) = %v, want 0.0.0.0", data, route.Destination)
+	}
+
+	if route.InterfaceIndex != 1 {
+		t.Errorf("defaultRouteFromTable(%v) = %v, want 1", data, route.InterfaceIndex)
+	}
+}
+
+func TestDefaultRouteTableBasedOnIndexSuccess(t *testing.T) {
+	ipAddr, err := address.ParseIP("10.0.0.1")
+	if err != nil {
+		t.Errorf("address.ParseIP(%v) = %v, want nil", "10.0.0.1", err)
+	}
+
+	data := []Handle{
+		{Destination: ipAddr, InterfaceIndex: 0},
+	}
+
+	route, err := defaultRouteFromTable(data)
+	if err != nil {
+		t.Errorf("defaultRouteFromTable(%v) = %v, want nil", data, err)
+	}
+
+	if route.Destination.String() != "10.0.0.1" {
+		t.Errorf("defaultRouteFromTable(%v) = %v, want 0.0.0.0", data, route.Destination)
+	}
+
+	if route.InterfaceIndex != 0 {
+		t.Errorf("defaultRouteFromTable(%v) = %v, want 0", data, route.InterfaceIndex)
+	}
+}
+
+func TestDefaultRouteTableFailure(t *testing.T) {
+	ipAddr, err := address.ParseIP("10.0.0.1")
+	if err != nil {
+		t.Errorf("address.ParseIP(%v) = %v, want nil", "10.0.0.1", err)
+	}
+
+	data := []Handle{
+		{Destination: ipAddr, InterfaceIndex: 1},
+	}
+
+	route, err := defaultRouteFromTable(data)
+	if err == nil {
+		t.Errorf("defaultRouteFromTable(%v) = %v, want error", data, route)
+	}
+}

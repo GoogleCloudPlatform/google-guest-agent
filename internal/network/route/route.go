@@ -104,6 +104,13 @@ type routeOperations interface {
 	RemoveRoutes(ctx context.Context, iface string) error
 	// Setup sets up the routes for the network interfaces.
 	Setup(ctx context.Context, opts *service.Options) error
+	// Init does some pre-configurations for the VM.
+	Init(ctx context.Context) error
+}
+
+// Init does some route pre-configurations for the VM.
+func Init(ctx context.Context) error {
+	return client.Init(ctx)
 }
 
 // Add adds a route to the system.

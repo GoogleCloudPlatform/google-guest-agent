@@ -27,6 +27,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
@@ -183,6 +184,10 @@ func fetchRuntimeConfig(ctx context.Context, mds metadata.MDSClientInterface) (r
 // Run orchestrates the minimum required steps for initializing Guest Agent
 // with core plugin.
 func Run(ctx context.Context, c Config) error {
+	if err := route.Init(ctx); err != nil {
+		galog.Errorf("failed to initialize routes: %v", err)
+	}
+
 	conf, err := fetchRuntimeConfig(ctx, metadata.New())
 	if err != nil {
 		return fmt.Errorf("failed to get instance ID: %w", err)
