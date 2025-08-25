@@ -183,6 +183,8 @@ func fetchRuntimeConfig(ctx context.Context, mds metadata.MDSClientInterface) (r
 // Run orchestrates the minimum required steps for initializing Guest Agent
 // with core plugin.
 func Run(ctx context.Context, c Config) error {
+	// Try adding MDS route before attempting any other setup steps.
+	addMDSRoute(ctx)
 	conf, err := fetchRuntimeConfig(ctx, metadata.New())
 	if err != nil {
 		return fmt.Errorf("failed to get instance ID: %w", err)
