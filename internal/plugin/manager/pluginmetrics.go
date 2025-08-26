@@ -30,9 +30,9 @@ import (
 type Metric struct {
 	// timestamp is the time when the metric is recorded.
 	timestamp *tpb.Timestamp
-	// memoryUsage is the memory usage of the plugin at the timestamp.
+	// memoryUsage is the memory usage of the plugin at the timestamp in kB.
 	memoryUsage int64
-	// cpuUsage is the CPU usage of the plugin at the timestamp.
+	// cpuUsage is the percent CPU usage of the plugin at the timestamp.
 	cpuUsage float32
 }
 
@@ -97,7 +97,7 @@ func (p *PluginMetrics) Run(ctx context.Context) (bool, error) {
 		galog.Warnf("Failed to get memory usage for plugin %s: %v", p.plugin.FullName(), err)
 	}
 	galog.V(3).Debugf("CPU usage for plugin %s: %f%%", p.plugin.FullName(), currentCPUUsage)
-	galog.V(3).Debugf("Memory usage for plugin %s: %d bytes", p.plugin.FullName(), currentMemoryUsage)
+	galog.V(3).Debugf("Memory usage for plugin %s: %d kB", p.plugin.FullName(), currentMemoryUsage)
 
 	p.plugin.RuntimeInfo.metricsMu.Lock()
 	defer p.plugin.RuntimeInfo.metricsMu.Unlock()

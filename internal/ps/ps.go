@@ -82,7 +82,7 @@ func FindRegex(exeMatch string) ([]Process, error) {
 	return Client.FindRegex(exeMatch)
 }
 
-// Memory gets the memory usage in kB. of the process with the provided PID.
+// Memory gets the memory usage in kB of the process with the provided PID.
 func Memory(pid int) (int, error) {
 	return Client.Memory(pid)
 }
