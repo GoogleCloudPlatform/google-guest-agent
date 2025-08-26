@@ -46,6 +46,39 @@ func NewModule(context.Context) *manager.Module {
 	}
 }
 
+// NewEarlyModule returns the first boot module for early stage registration.
+func NewEarlyModule(context.Context) *manager.Module {
+	return &manager.Module{
+		ID:          firstbootModuleID,
+		BlockSetup:  moduleSetupEarly,
+		Description: "Set up instance id, generates host ssh keys and generates boto config file",
+	}
+}
+
+// moduleSetupEarly attempts to setup the firstboot module in the early stage.
+// If the metadata descriptor is not available, it will attempt to get it from
+// the metadata client. This is done to ensure hostkeys are generated as early
+// as possible to minimize the ssh downtime because of missing hostkeys. If this
+// succeeds, the late module will be noop and if it fails we just log the error
+// to retry in the late stage.
+func moduleSetupEarly(ctx context.Context, data any) error {
+	galog.Debugf("Attempting to setup firstboot module in early stage.")
+	var err error
+	desc, ok := data.(*metadata.Descriptor)
+	if !ok {
+		desc, err = metadata.New().Get(ctx)
+		if err != nil {
+			galog.Errorf("Failed to get metadata descriptor: %v, skipping firstboot module setup", err)
+			return nil
+		}
+	}
+	if err := moduleSetup(ctx, desc); err != nil {
+		galog.Errorf("Failed to setup firstboot module in early stage: %v", err)
+	}
+
+	return nil
+}
+
 // moduleSetup sets up the firstboot module.
 func moduleSetup(ctx context.Context, data any) error {
 	galog.Debugf("Initializing firstboot module.")

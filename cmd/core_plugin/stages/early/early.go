@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/agentcrypto"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/firstboot"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/iosched"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network"
@@ -46,6 +47,7 @@ var (
 	// In early initialization we want to have control of sequence in which the
 	// modules are registered so the well crafted slice here.
 	modsFcs = []stages.ModuleFc{
+		firstboot.NewEarlyModule,
 		network.NewEarlyModule,
 		iosched.NewModule,
 		agentcrypto.NewModule,

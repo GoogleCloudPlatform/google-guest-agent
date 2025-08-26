@@ -19,8 +19,10 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )
 
@@ -93,9 +95,17 @@ func (systemdClient) CheckUnitExists(ctx context.Context, unit string) (bool, er
 		Name:       "systemctl",
 		Args:       []string{"status", unit},
 	})
-	if err != nil {
-		return false, err
+	if err == nil {
+		return true, nil
 	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		// https://man7.org/linux/man-pages/man1/systemctl.1.html#EXIT_STATUS
+		// Check for the specific exit code (4) which means "no such unit"
+		if exitErr.ExitCode() == 4 {
+			return false, nil
+		}
+	}
+	galog.Infof("Status check for unit %q completed with: %v, defaulting to true", unit, err)
 	return true, nil
 }
 

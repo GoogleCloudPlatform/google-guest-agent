@@ -19,6 +19,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
@@ -26,24 +28,38 @@ import (
 )
 
 type testRunner struct {
-	returnErr   bool
+	returnErr bool
+	// returnCode is the exit code of the command. If returnErr is false,
+	// this is ignored.
+	returnCode  int
 	resOutput   string
 	seenCommand map[string][][]string
+}
+
+func generateRealExitError(code int) error {
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("exit %d", code))
+	return cmd.Run()
 }
 
 func (t *testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
 	t.seenCommand[opts.Name] = append(t.seenCommand[opts.Name], opts.Args)
 
 	if t.returnErr {
+		if t.returnCode != 0 {
+			var err error
+			err = generateRealExitError(t.returnCode)
+			return nil, err
+		}
 		return nil, errors.New("error")
 	}
 	return &run.Result{Output: t.resOutput}, nil
 }
 
-func setupTestRunner(t *testing.T, returnErr bool, resOutput string) *testRunner {
+func setupTestRunner(t *testing.T, returnErr bool, resOutput string, exitCode int) *testRunner {
 	testRunner := &testRunner{
 		returnErr:   returnErr,
 		resOutput:   resOutput,
+		returnCode:  exitCode,
 		seenCommand: make(map[string][][]string),
 	}
 
@@ -106,7 +122,7 @@ func TestRestartService(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, "")
+			testRunner := setupTestRunner(t, test.wantErr, "", 0)
 			err := RestartService(context.Background(), "test", test.method)
 			if (err == nil) == test.wantErr {
 				t.Fatalf("RestartService(ctx, \"test\", %s) = %v, want %v", test.name, err, test.wantErr)
@@ -150,7 +166,7 @@ func TestReloadDaemon(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, "")
+			testRunner := setupTestRunner(t, test.wantErr, "", 0)
 			err := ReloadDaemon(context.Background(), "test")
 			if (err == nil) == test.wantErr {
 				t.Fatalf("ReloadDaemon(ctx, \"test\") = %v, want %v", err, test.wantErr)
@@ -181,6 +197,8 @@ func TestCheckUnitExists(t *testing.T) {
 		expectedArgs []string
 		wantBool     bool
 		wantErr      bool
+		wantTestErr  bool
+		exitCode     int
 	}{
 		{
 			name:         "exists",
@@ -190,13 +208,24 @@ func TestCheckUnitExists(t *testing.T) {
 		{
 			name:         "does-not-exist",
 			expectedArgs: []string{"status", "test.service"},
-			wantErr:      true,
+			exitCode:     4,
+			wantTestErr:  true,
+			wantErr:      false,
+			wantBool:     false,
+		},
+		{
+			name:         "exists-inactive",
+			expectedArgs: []string{"status", "test.service"},
+			exitCode:     3,
+			wantTestErr:  true,
+			wantErr:      false,
+			wantBool:     true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, "")
+			testRunner := setupTestRunner(t, test.wantTestErr, "", test.exitCode)
 			found, err := CheckUnitExists(context.Background(), "test")
 			if (err != nil) != test.wantErr {
 				t.Fatalf("CheckUnitExists(ctx, \"test\") = %v, want nil", err)
@@ -266,7 +295,7 @@ func TestUnitStatus(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, test.outputRes)
+			testRunner := setupTestRunner(t, test.wantErr, test.outputRes, 0)
 			status, err := UnitStatus(context.Background(), "test")
 			if (err == nil) == test.wantErr {
 				t.Fatalf("UnitStatus(ctx, \"test\") = %v, want %v", err, test.wantErr)
@@ -314,7 +343,7 @@ func TestStopDaemon(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, "")
+			testRunner := setupTestRunner(t, test.wantErr, "", 0)
 			client := systemdClient{}
 			err := client.StopDaemon(context.Background(), "test")
 			if (err == nil) == test.wantErr {
@@ -359,7 +388,7 @@ func TestStartDaemon(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, "")
+			testRunner := setupTestRunner(t, test.wantErr, "", 0)
 			client := systemdClient{}
 			err := client.StartDaemon(context.Background(), "test")
 			if (err == nil) == test.wantErr {
@@ -405,7 +434,7 @@ func TestEnableService(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, "")
+			testRunner := setupTestRunner(t, test.wantErr, "", 0)
 			client := systemdClient{}
 			err := client.EnableService(ctx, "test")
 			if (err == nil) == test.wantErr {
@@ -451,7 +480,7 @@ func TestDisableService(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testRunner := setupTestRunner(t, test.wantErr, "")
+			testRunner := setupTestRunner(t, test.wantErr, "", 0)
 			client := systemdClient{}
 			err := client.DisableService(ctx, "test")
 			if (err == nil) == test.wantErr {
