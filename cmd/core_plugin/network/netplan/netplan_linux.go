@@ -394,7 +394,12 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 			}
 			return fmt.Errorf("error looking up netplan path: %w", err)
 		}
-
+		if sn.backend == nil {
+			// This could happen if backend is not found during setup or its Ubuntu
+			// 18.04 where we have exception.
+			galog.Debugf("No backend found, skipping netplan rollback.")
+			return nil
+		}
 		if err := sn.generateConfigs(ctx); err != nil {
 			return fmt.Errorf("error reloading netplan changes: %w", err)
 		}
