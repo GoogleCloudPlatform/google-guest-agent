@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 )
 
 var (
@@ -60,8 +61,23 @@ func (c *Configuration) VlanNames() []string {
 	return res
 }
 
+func isUbuntu1804() bool {
+	info := osinfo.Read()
+	if info.OS == "ubuntu" && info.VersionID == "18.04" {
+		return true
+	}
+	return false
+}
+
 // ShouldManage returns true if the NIC should be managed by the network manager.
 func (c *Configuration) ShouldManage() bool {
+	// Ubuntu 18.04 uses dhclient to manage the network interfaces as networkd
+	// version it comes with is too old and doesn't support features like
+	// networkctl reload. However, default config OS writes does manage the
+	// primary NIC so we need to account for that here.
+	if isUbuntu1804() {
+		return c.Index != 0
+	}
 	return c.Index != 0 || cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC
 }
 
