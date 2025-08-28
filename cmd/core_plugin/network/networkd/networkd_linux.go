@@ -28,6 +28,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -68,12 +69,32 @@ func (sn *Module) IsManaging(ctx context.Context, opts *service.Options) (bool, 
 	}
 	iface := ifaceNIC.Interface.Name()
 
-	// Check the version.
+	// Check if networkctl is installed.
 	if _, err := execLookPath("networkctl"); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return false, nil
 		}
 		return false, fmt.Errorf("error looking up networkctl path: %w", err)
+	}
+
+	// Check the systemd-networkd version.
+	res, err := run.WithContext(ctx, run.Options{
+		Name:       "networkctl",
+		Args:       []string{"--version"},
+		OutputType: run.OutputStdout,
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to get networkctl version: %w", err)
+	}
+	// The version is the second field of the first line.
+	versionString := strings.Split(strings.Split(res.Output, "\n")[0], " ")[1]
+	version, err := strconv.Atoi(versionString)
+	if err != nil {
+		return false, fmt.Errorf("error parsing systemd version: %v", err)
+	}
+	if version < minSupportedVersion {
+		galog.Debugf("systemd-networkd version %v not supported: minimum %v required", version, minSupportedVersion)
+		return false, nil
 	}
 
 	// First check if the service is running.

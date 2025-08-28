@@ -25,6 +25,11 @@ const (
 	// requires us to roll it back.
 	deprecatedPriority = 1
 
+	// minSupportedVersion is the minimum supported version of systemd-networkd.
+	// If the version is too old, some vital operations like `networkctl reload`
+	// are not yet supported/available.
+	minSupportedVersion = 252
+
 	// ServiceID is the service ID for systemd-networkd.
 	ServiceID = "systemd-networkd"
 

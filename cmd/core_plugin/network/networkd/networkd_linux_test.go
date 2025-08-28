@@ -302,6 +302,22 @@ func TestSystemdNetworkdIsManaging(t *testing.T) {
 			expectedRes: false,
 			expectErr:   true,
 		},
+		// networkctl version not supported.
+		{
+			name: "systemd-version-not-supported",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{
+					returnValue: true,
+				},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{
+						version: 237,
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
 		// networkctl is-active error.
 		{
 			name: "networkctl-is-active-error",
