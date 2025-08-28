@@ -153,7 +153,7 @@ func (lc *linuxClient) Find(ctx context.Context, opts Options) ([]Handle, error)
 		args.add("dev", opts.Device)
 	}
 
-	res, err := lc.listRoutes(ctx, opts.Device, args.slice)
+	res, err := lc.listRoutes(ctx, opts, args.slice)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routes: %w", err)
 	}
@@ -162,7 +162,7 @@ func (lc *linuxClient) Find(ctx context.Context, opts Options) ([]Handle, error)
 }
 
 // listRoutes lists accordingly to the provided command.
-func (lc *linuxClient) listRoutes(ctx context.Context, dev string, args []string) ([]Handle, error) {
+func (lc *linuxClient) listRoutes(ctx context.Context, cmdOpts Options, args []string) ([]Handle, error) {
 	opts := run.Options{OutputType: run.OutputStdout, Name: "ip", Args: args}
 	res, err := run.WithContext(ctx, opts)
 	if err != nil {
@@ -177,7 +177,7 @@ func (lc *linuxClient) listRoutes(ctx context.Context, dev string, args []string
 			continue
 		}
 
-		fields, err := parseRouteEntry(line)
+		fields, err := parseRouteEntry(line, cmdOpts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse route entry: %w", err)
 		}
@@ -187,7 +187,7 @@ func (lc *linuxClient) listRoutes(ctx context.Context, dev string, args []string
 			// InterfaceName will be overridden if the route entry has a dev field to
 			// deal with interface aliases - the query may return a different name
 			// than the one provided.
-			InterfaceName: dev,
+			InterfaceName: cmdOpts.Device,
 			Scope:         fields["scope"],
 		}
 
@@ -226,7 +226,7 @@ func (lc *linuxClient) listRoutes(ctx context.Context, dev string, args []string
 
 // parseRouteEntry parses a route entry, it transforms the input data to a map
 // of key-value pairs.
-func parseRouteEntry(data string) (map[string]string, error) {
+func parseRouteEntry(data string, cmdOpts Options) (map[string]string, error) {
 	if data == "" {
 		return nil, nil
 	}
@@ -237,10 +237,22 @@ func parseRouteEntry(data string) (map[string]string, error) {
 		return nil, fmt.Errorf("invalid number of fields in route entry: %v", fields)
 	}
 
-	res["table"] = fields[0]
-	res["destination"] = fields[1]
+	table := strings.TrimSpace(fields[0])
+	if table == cmdOpts.Table {
+		res["table"] = table
+		res["destination"] = fields[1]
+		fields = fields[2:]
+	} else {
+		// If table is not in the output.
+		res["table"] = cmdOpts.Table
+		res["destination"] = fields[0]
+		fields = fields[1:]
+	}
 
-	fields = fields[2:]
+	if len(fields)%2 != 0 {
+		return nil, fmt.Errorf("invalid number of fields in route entry: %v", fields)
+	}
+
 	for i := 0; i < len(fields); i += 2 {
 		key, value := fields[i], fields[i+1]
 		res[key] = value

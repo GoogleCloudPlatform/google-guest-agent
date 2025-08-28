@@ -310,6 +310,19 @@ func TestParseRouteEntry(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "without-table",
+			data: "10.138.15.222 dev eth0 proto kernel scope host src 10.138.15.222",
+			want: map[string]string{
+				"table":       "local",
+				"destination": "10.138.15.222",
+				"dev":         "eth0",
+				"proto":       "kernel",
+				"scope":       "host",
+				"src":         "10.138.15.222",
+			},
+			wantErr: false,
+		},
+		{
 			name: "table-and-destination",
 			data: "local 10.138.15.222",
 			want: map[string]string{
@@ -334,7 +347,7 @@ func TestParseRouteEntry(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseRouteEntry(tc.data)
+			got, err := parseRouteEntry(tc.data, Options{Table: "local"})
 			if (err == nil) == tc.wantErr {
 				t.Errorf("parseRouteEntry(%q) = %v, want %v", tc.data, err, tc.wantErr)
 			}
