@@ -75,6 +75,10 @@ const (
 
 	// defaultSudoersPath is the default path to the sudoers file.
 	defaultSudoersPath = "/etc/sudoers.d/google-sudoers"
+
+	// defaultMaxRetryCount is the default maximum number of times to retry
+	// configuration in case of retryable errors.
+	defaultMaxRetryCount = 5
 )
 
 var (
@@ -115,9 +119,9 @@ var (
 		},
 		daemon.TryRestart: []serviceRestartConfig{
 			{
-				// nscd and unscd are optional because they don't come by default on some
-				// platforms (like Debian or RHEL). Restarting this refreshes the caches
-				// for `password`, `group`, and `hosts` databases
+				// nscd and unscd are optional because they don't come by default on
+				// some platforms (like Debian or RHEL). Restarting this refreshes the
+				// caches for `password`, `group`, and `hosts` databases.
 				protocol: serviceRestartOptional,
 				services: []string{"nscd", "unscd"},
 			},
@@ -125,14 +129,14 @@ var (
 				// systemd-logind is on all Linux distributions. Restarting this force
 				// stops existing user sessions so users can start a new session with
 				// the updated configuration.
-				protocol: serviceRestartAtLeastOne,
+				protocol: serviceRestartOptional,
 				services: []string{"systemd-logind"},
 			},
 			{
 				// One of cron or crond exists on all Linux distributions. Restarting
 				// this forces cron to reload user information from NSS. This forces
 				// cron to avoid running jobs for a user that may no longer exist.
-				protocol: serviceRestartAtLeastOne,
+				protocol: serviceRestartOptional,
 				services: []string{"cron", "crond"},
 			},
 		},
@@ -177,6 +181,11 @@ type osloginModule struct {
 	enabled atomic.Bool
 	// failedConfiguration indicates if configuration setup has failed.
 	failedConfiguration atomic.Bool
+	// retryCount is the number of times the module has failed to configure.
+	retryCount atomic.Int32
+	// permanentFailure indicates if the module has failed to configure due to a
+	// permanent error and should not be retried.
+	permanentFailure atomic.Bool
 	// sshdConfigPath is the path to the openssh daemon configuration file.
 	sshdConfigPath string
 	// nsswitchConfigPath is the path to the NSSwitch configuration file.
@@ -293,12 +302,26 @@ func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string,
 
 // osloginSetup is the actual oslogin's configuration entry point.
 func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descriptor) (bool, bool, error) {
-	defer func() { mod.prevMetadata = desc }()
+	defer func() {
+		mod.prevMetadata = desc
+		mod.decrementRetryCount()
+	}()
 
-	// If the metadata has not changed, we return early.
+	// If the module has failed due to a permanent error, we return early and
+	// don't retry.
+	if mod.permanentFailure.Load() {
+		return true, true, nil
+	}
+
+	// If the we are not forcing a retry and the metadata has not changed, we
+	// return early.
+	//
+	// The only case where we are forcefully retrying is if a systemd unit/service
+	// is required to be restarted and has previously failed.
+	//
 	// We don't need to clean up the files here because the textconfig library
 	// rolls back its previous changes before applying new ones.
-	if !mod.metadataChanged(desc) && !mod.failedConfiguration.Load() {
+	if !mod.forcedRetrying() && !mod.metadataChanged(desc) && !mod.failedConfiguration.Load() {
 		return true, true, nil
 	}
 
@@ -668,6 +691,24 @@ func (mod *osloginModule) metadataChanged(desc *metadata.Descriptor) bool {
 	return false
 }
 
+// forcedRetrying returns true if the module should retry setup even if the
+// metadata has not changed. Cases where this is true are when the module is
+// failing to restart dependent systemd units/services.
+func (mod *osloginModule) forcedRetrying() bool {
+	if mod.retryCount.Load() > 0 {
+		return true
+	}
+	return false
+}
+
+// decrementRetryCount decrements the retry count by 1.
+func (mod *osloginModule) decrementRetryCount() {
+	if mod.retryCount.Load() == 0 {
+		return
+	}
+	mod.retryCount.Store(mod.retryCount.Load() - 1)
+}
+
 // restartServices restarts the provided services with the provided methods.
 func (mod *osloginModule) restartServices(ctx context.Context) error {
 	for method, serviceConfigs := range mod.services {
@@ -696,9 +737,19 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 			}
 			if !passed {
 				if serviceConfig.protocol == serviceRestartAtLeastOne {
-					return fmt.Errorf("failed to restart one of %v", serviceConfig.services)
+					if mod.retryCount.Load() > 1 {
+						galog.V(2).Warnf("Failed to restart one of %v, it will be retried", serviceConfig.services)
+						return nil
+					}
+
+					// We are on last attempt and failed - mark it as permanent failure.
+					if mod.retryCount.Load() == 1 {
+						mod.permanentFailure.Store(true)
+					}
+
+					return fmt.Errorf("Failed to restart one of: %v", serviceConfig.services)
 				}
-				// Only log a warning if the restart is optional.
+				// Only log a debug message if the restart is optional.
 				galog.Debugf("Failed to restart optional services: %v", serviceConfig.services)
 			}
 		}
