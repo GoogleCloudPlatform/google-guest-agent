@@ -20,7 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -166,7 +167,33 @@ func addSystemUsers(ctx context.Context, config *cfg.Sections, newKeys userKeyMa
 // metadataChanged reports whether the state of metadata ssh key enablement or
 // keys have changed and should be reconfigured.
 func metadataChanged(config *cfg.Sections, desc *metadata.Descriptor, lastValidKeys userKeyMap, lastEnabled bool) bool {
-	return enableMetadataSSHKey(config, desc) != lastEnabled || !reflect.DeepEqual(findValidKeys(desc), lastValidKeys)
+	return enableMetadataSSHKey(config, desc) != lastEnabled || !isUserKeysMapEqual(findValidKeys(desc), lastValidKeys)
+}
+
+func isUserKeysMapEqual(m1, m2 userKeyMap) bool {
+	if len(m1) != len(m2) {
+		return false
+	}
+
+	for userName, userKeys := range m1 {
+		slice2, ok := m2[userName]
+		if !ok {
+			return false
+		}
+
+		// Clone the slices to avoid modifying the original slices in case of sort.
+		clonedSlice1 := slices.Clone(userKeys)
+		clonedSlice2 := slices.Clone(slice2)
+
+		sort.Strings(clonedSlice1)
+		sort.Strings(clonedSlice2)
+
+		if !slices.Equal(clonedSlice1, clonedSlice2) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func findValidKeys(desc *metadata.Descriptor) userKeyMap {

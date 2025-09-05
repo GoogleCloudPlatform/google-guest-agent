@@ -374,3 +374,109 @@ func TestFindValidKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestIsUserKeysMapEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		m1   userKeyMap
+		m2   userKeyMap
+		want bool
+	}{
+		{
+			name: "equal_maps",
+			m1: userKeyMap{
+				"user1": {"key1", "key2"},
+				"user2": {"key3"},
+			},
+			m2: userKeyMap{
+				"user1": {"key1", "key2"},
+				"user2": {"key3"},
+			},
+			want: true,
+		},
+		{
+			name: "equal_maps_different_value_order",
+			m1: userKeyMap{
+				"user1": {"key2", "key1"},
+				"user2": {"key3"},
+			},
+			m2: userKeyMap{
+				"user1": {"key1", "key2"},
+				"user2": {"key3"},
+			},
+			want: true,
+		},
+		{
+			name: "different_lengths",
+			m1: userKeyMap{
+				"user1": {"key1"},
+			},
+			m2: userKeyMap{
+				"user1": {"key1"},
+				"user2": {"key2"},
+			},
+			want: false,
+		},
+		{
+			name: "different_keys",
+			m1: userKeyMap{
+				"user1": {"key1"},
+			},
+			m2: userKeyMap{
+				"user2": {"key1"},
+			},
+			want: false,
+		},
+		{
+			name: "different_values",
+			m1: userKeyMap{
+				"user1": {"key1"},
+			},
+			m2: userKeyMap{
+				"user1": {"key2"},
+			},
+			want: false,
+		},
+		{
+			name: "one_empty_map",
+			m1:   userKeyMap{},
+			m2: userKeyMap{
+				"user1": {"key1"},
+			},
+			want: false,
+		},
+		{
+			name: "both_empty_maps",
+			m1:   userKeyMap{},
+			m2:   userKeyMap{},
+			want: true,
+		},
+		{
+			name: "one_map_nil",
+			m1:   nil,
+			m2:   userKeyMap{},
+			want: true,
+		},
+		{
+			name: "both_maps_are_nil",
+			m1:   nil,
+			m2:   nil,
+			want: true,
+		},
+		{
+			name: "one_map_is_nil_other_is_not",
+			m1:   nil,
+			m2: userKeyMap{
+				"user1": {"key1"},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isUserKeysMapEqual(tt.m1, tt.m2); got != tt.want {
+				t.Errorf("isUserKeysMapEqual(%v, %v) = %v, want %v", tt.m1, tt.m2, got, tt.want)
+			}
+		})
+	}
+}
