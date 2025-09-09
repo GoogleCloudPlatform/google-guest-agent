@@ -18,9 +18,14 @@ package workloadcertrefresh
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"testing"
 
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestNewModule(t *testing.T) {
@@ -67,7 +72,13 @@ func TestRefresherJobAPI(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	mdsClient := &mdsTestClient{throwErrOn: configStatusKey}
-	j := &RefresherJob{mdsClient: mdsClient}
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	testDir := t.TempDir()
+	j := &RefresherJob{mdsClient: mdsClient, outputOpts: outputOpts{testDir, testDir, testDir}}
+
 	keepRunning, err := j.Run(context.Background())
 	if err != nil {
 		t.Errorf("Run(ctx) = error %v, want nil", err)
@@ -79,33 +90,83 @@ func TestRun(t *testing.T) {
 
 func TestShouldEnable(t *testing.T) {
 	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	config := cfg.Retrieve()
 
 	tests := []struct {
-		desc    string
-		enabled string
-		want    bool
-		err     string
+		desc        string
+		mdsEnabled  string
+		mdsErr      string
+		grpcEnabled bool
+		grpcErr     error
+		want        bool
 	}{
 		{
-			desc:    "attr_correctly_added",
-			enabled: "true",
-			want:    true,
+			desc:       "MDS_Enabled",
+			mdsEnabled: "true",
+			want:       true,
 		},
 		{
-			desc:    "attr_incorrectly_added",
-			enabled: "blaah",
-			want:    false,
+			desc:       "MDS_WrongValue",
+			mdsEnabled: "blaah",
+			want:       false,
 		},
 		{
-			desc: "attr_not_added",
-			want: false,
-			err:  enableWorkloadCertsKey,
+			desc:   "MDS_AttributeNotPresent",
+			mdsErr: enableWorkloadCertsKey,
+			want:   false,
+		},
+		{
+			desc:        "GRPC_Enabled_Success",
+			grpcEnabled: true,
+			grpcErr:     nil,
+			want:        true,
+		},
+		{
+			desc:        "GRPC_Enabled_FailedPrecondition_MDS_Enabled",
+			grpcEnabled: true,
+			grpcErr:     status.Error(codes.FailedPrecondition, "test error"),
+			mdsEnabled:  "true",
+			want:        true,
+		},
+		{
+			desc:        "GRPC_Enabled_FailedPrecondition_MDS_Disabled",
+			grpcEnabled: true,
+			grpcErr:     status.Error(codes.FailedPrecondition, "test error"),
+			mdsEnabled:  "false",
+			want:        false,
+		},
+		{
+			desc:        "GRPC_Enabled_DeadlineExceeded",
+			grpcEnabled: true,
+			grpcErr:     status.Error(codes.DeadlineExceeded, "test error"),
+			want:        true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
-			mdsClient := &mdsTestClient{enabled: test.enabled, throwErrOn: test.err}
+			config.MWLID.Enabled = test.grpcEnabled
+
+			if test.grpcEnabled {
+				testServer := &mockWorkloadIdentityServer{getWorkloadCertificatesErr: test.grpcErr}
+				addr, stop := startTestGRPCServer(t, testServer)
+				defer stop()
+				host, portStr, err := net.SplitHostPort(addr)
+				if err != nil {
+					t.Fatalf("failed to parse address: %v", err)
+				}
+				port, err := strconv.Atoi(portStr)
+				if err != nil {
+					t.Fatalf("failed to parse port: %v", err)
+				}
+				config.MWLID.ServiceIP = host
+				config.MWLID.ServicePort = port
+			}
+
+			mdsClient := &mdsTestClient{enabled: test.mdsEnabled, throwErrOn: test.mdsErr}
 			j := &RefresherJob{mdsClient: mdsClient}
 			if got := j.ShouldEnable(ctx); got != test.want {
 				t.Errorf("ShouldEnable(ctx) = %t, want %t", got, test.want)
