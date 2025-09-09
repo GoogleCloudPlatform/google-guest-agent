@@ -20,12 +20,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
+	wipb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/workloadcertrefresh/proto/mwlid"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/google/go-cmp/cmp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -270,6 +277,10 @@ func TestRefreshCreds(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
 
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
 	// Templates to use in iterations.
 	spiffeTpl := "spiffe://12345.global.67890.workload.id.goog.%d/ns/NAMESPACE_ID/sa/MANAGED_IDENTITY_ID"
 	domain1Tpl := "12345.global.67890.workload.id.goog.%d"
@@ -303,6 +314,7 @@ func TestRefreshCreds(t *testing.T) {
 			pem1:    pem1,
 			domain2: domain2,
 			pem2:    pem2,
+			enabled: "true",
 		}
 		j := &RefresherJob{mdsClient: mdsClient}
 
@@ -369,6 +381,9 @@ func TestRefreshCreds(t *testing.T) {
 func TestRefreshCredsError(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
 
 	// Templates to use in iterations.
 	spiffe := "spiffe://12345.global.67890.workload.id.goog/ns/NAMESPACE_ID/sa/MANAGED_IDENTITY_ID"
@@ -392,6 +407,7 @@ func TestRefreshCredsError(t *testing.T) {
 		pem1:    pem1,
 		domain2: domain2,
 		pem2:    pem2,
+		enabled: "true",
 	}
 
 	j := &RefresherJob{mdsClient: client}
@@ -459,5 +475,237 @@ func TestRefreshCredsError(t *testing.T) {
 		if got != want {
 			t.Errorf("os.Readlink(%s) = %s, want %s", link, got, want)
 		}
+	}
+}
+
+// mockWorkloadIdentityServer is a mock implementation of the WorkloadIdentityServer.
+type mockWorkloadIdentityServer struct {
+	wipb.UnimplementedWorkloadIdentityServer
+	getWorkloadCertificatesErr      error
+	getWorkloadTrustBundlesErr      error
+	reqCount                        int
+	getWorkloadCertificatesResponse *wipb.GetWorkloadCertificatesResponse
+	getWorkloadTrustBundlesResponse *wipb.GetWorkloadTrustBundlesResponse
+}
+
+func (s *mockWorkloadIdentityServer) GetWorkloadCertificates(ctx context.Context, req *wipb.GetWorkloadCertificatesRequest) (*wipb.GetWorkloadCertificatesResponse, error) {
+	s.reqCount++
+	if s.getWorkloadCertificatesErr != nil {
+		return nil, s.getWorkloadCertificatesErr
+	}
+	return s.getWorkloadCertificatesResponse, nil
+}
+
+func (s *mockWorkloadIdentityServer) GetWorkloadTrustBundles(ctx context.Context, req *wipb.GetWorkloadTrustBundlesRequest) (*wipb.GetWorkloadTrustBundlesResponse, error) {
+	if s.getWorkloadTrustBundlesErr != nil {
+		return nil, s.getWorkloadTrustBundlesErr
+	}
+	return s.getWorkloadTrustBundlesResponse, nil
+}
+
+func startTestGRPCServer(t *testing.T, ms *mockWorkloadIdentityServer) (string, func()) {
+	t.Helper()
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+
+	s := grpc.NewServer()
+	wipb.RegisterWorkloadIdentityServer(s, ms)
+
+	go func() {
+		s.Serve(lis)
+	}()
+
+	return lis.Addr().String(), func() {
+		s.Stop()
+	}
+}
+
+func TestIsGRPCServiceEnabled(t *testing.T) {
+	ctx := context.Background()
+	j := &RefresherJob{}
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	// Default behavior should be false as per config.
+	if j.isGRPCServiceEnabled(ctx) {
+		t.Errorf("isGRPCServiceEnabled(ctx) = true, want false")
+	}
+
+	config := cfg.Retrieve()
+	config.MWLID.Enabled = true
+
+	tests := []struct {
+		name           string
+		grpcErr        error
+		wantEnabled    bool
+		expectedStatus Status
+	}{
+		{
+			name:           "GRPCSuccess",
+			grpcErr:        nil,
+			wantEnabled:    true,
+			expectedStatus: ServiceAvailable,
+		},
+		{
+			name:           "GRPCFailedPrecondition",
+			grpcErr:        status.Error(codes.FailedPrecondition, "test error"),
+			wantEnabled:    false,
+			expectedStatus: ServiceUnavailable,
+		},
+		{
+			name:           "GRPCDeadlineExceeded",
+			grpcErr:        status.Error(codes.DeadlineExceeded, "test error"),
+			wantEnabled:    true,
+			expectedStatus: ServiceUnknown,
+		},
+		{
+			name:           "GRPCInternalError",
+			grpcErr:        status.Error(codes.Internal, "test error"),
+			wantEnabled:    true,
+			expectedStatus: ServiceUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			job := &RefresherJob{}
+			testServer := &mockWorkloadIdentityServer{getWorkloadCertificatesErr: tt.grpcErr}
+			addr, stop := startTestGRPCServer(t, testServer)
+			defer stop()
+			host, portStr, err := net.SplitHostPort(addr)
+			if err != nil {
+				t.Fatalf("failed to parse address: %v", err)
+			}
+			port, err := strconv.Atoi(portStr)
+			if err != nil {
+				t.Fatalf("failed to parse port: %v", err)
+			}
+			config.MWLID.ServiceIP = host
+			config.MWLID.ServicePort = port
+
+			got := job.isGRPCServiceEnabled(ctx)
+			if got != tt.wantEnabled {
+				t.Errorf("isGRPCServiceEnabled() = %v, want %v", got, tt.wantEnabled)
+			}
+
+			if gotStatus := job.serverStatus(); gotStatus != tt.expectedStatus {
+				t.Errorf("serverStatus() = %v, want %v", gotStatus, tt.expectedStatus)
+			}
+
+			if tt.expectedStatus != ServiceUnknown {
+				// Verify that subsequent calls return without needing to re-establish
+				// connection.
+				if got := job.isGRPCServiceEnabled(ctx); got != tt.wantEnabled {
+					t.Errorf("isGRPCServiceEnabled() = %v, want %v", got, tt.wantEnabled)
+				}
+				if testServer.reqCount != 1 {
+					t.Errorf("testServer.reqCount = %d, want 1", testServer.reqCount)
+				}
+			}
+		})
+	}
+}
+
+func TestRefreshCredsWithGRPC(t *testing.T) {
+	ctx := context.Background()
+	testPrivateKey := []byte("test-private-key")
+	testCertChain := []byte("test-cert-chain")
+	testTrustBundles := []byte("test-trust-bundles")
+
+	certResp := &wipb.GetWorkloadCertificatesResponse{
+		CertificateChainPem: testCertChain, PrivateKeyPem: testPrivateKey,
+	}
+
+	trustBundlesResp := &wipb.GetWorkloadTrustBundlesResponse{
+		SpiffeTrustBundlesMapJson: testTrustBundles,
+	}
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	config := cfg.Retrieve()
+	config.MWLID.Enabled = true
+
+	tests := []struct {
+		name          string
+		mockServer    *mockWorkloadIdentityServer
+		expectErr     bool
+		expectedFiles map[string][]byte
+	}{
+		{
+			name: "Success",
+			mockServer: &mockWorkloadIdentityServer{
+				getWorkloadCertificatesResponse: certResp,
+				getWorkloadTrustBundlesResponse: trustBundlesResp,
+			},
+			expectErr: false,
+			expectedFiles: map[string][]byte{
+				"private_key.pem":    testPrivateKey,
+				"certificates.pem":   testCertChain,
+				"trust_bundles.json": testTrustBundles,
+			},
+		},
+		{
+			name: "GetWorkloadCertificatesError",
+			mockServer: &mockWorkloadIdentityServer{
+				getWorkloadCertificatesErr: status.Error(codes.Internal, "internal server error"),
+			},
+			expectErr: true,
+		},
+		{
+			name: "GetWorkloadTrustBundlesError",
+			mockServer: &mockWorkloadIdentityServer{
+				getWorkloadTrustBundlesErr: status.Error(codes.Internal, "internal server error"),
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr, stop := startTestGRPCServer(t, tt.mockServer)
+			defer stop()
+
+			host, portStr, err := net.SplitHostPort(addr)
+			if err != nil {
+				t.Fatalf("failed to parse address: %v", err)
+			}
+			port, err := strconv.Atoi(portStr)
+			if err != nil {
+				t.Fatalf("failed to parse port: %v", err)
+			}
+
+			config.MWLID.ServiceIP = host
+			config.MWLID.ServicePort = port
+
+			contentDir := t.TempDir()
+			job := &RefresherJob{}
+
+			err = job.refreshCredsWithGRPC(ctx, contentDir)
+
+			if (err != nil) != tt.expectErr {
+				t.Errorf("refreshCredsWithGRPC(%s) error = %v, expectErr %v", contentDir, err, tt.expectErr)
+				return
+			}
+
+			if !tt.expectErr {
+				for filename, expectedContent := range tt.expectedFiles {
+					filePath := filepath.Join(contentDir, filename)
+					gotContent, err := os.ReadFile(filePath)
+					if err != nil {
+						t.Errorf("os.ReadFile(%s) failed unexpectedly with error: %v", filePath, err)
+						continue
+					}
+					if string(gotContent) != string(expectedContent) {
+						t.Errorf("os.ReadFile(%s) = %s, want %s", filePath, string(gotContent), string(expectedContent))
+					}
+				}
+			}
+		})
 	}
 }
