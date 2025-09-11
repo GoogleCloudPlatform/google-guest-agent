@@ -255,6 +255,10 @@ message ConfigurePluginStates {
       // like JSON or yaml.
       google.protobuf.Struct struct_config = 11;
     }
+    // The exponential backoff factor for retrying a failed action.
+    // If the value is 2, then the first retry will be 1 second, the second
+    // retry will be 2 seconds, the third retry will be 4 seconds, etc.
+    int32 start_exp_backoff_factor = 12;
   }
 }
 
