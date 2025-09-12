@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 func TestNewModule(t *testing.T) {
@@ -67,7 +68,13 @@ func TestRefresherJobAPI(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	mdsClient := &mdsTestClient{throwErrOn: configStatusKey}
-	j := &RefresherJob{mdsClient: mdsClient}
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	testDir := t.TempDir()
+	j := &RefresherJob{mdsClient: mdsClient, outputOpts: outputOpts{testDir, testDir, testDir}}
+
 	keepRunning, err := j.Run(context.Background())
 	if err != nil {
 		t.Errorf("Run(ctx) = error %v, want nil", err)
@@ -79,6 +86,9 @@ func TestRun(t *testing.T) {
 
 func TestShouldEnable(t *testing.T) {
 	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
 
 	tests := []struct {
 		desc    string
