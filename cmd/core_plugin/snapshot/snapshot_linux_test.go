@@ -245,6 +245,20 @@ func newRequest(operationID int32, diskList string, opType sspb.OperationType) *
 	}
 }
 
+// newRequestWithNguid creates a new snapshot request message with nguid list.
+func newRequestWithNguid(operationID int32, diskList string, opType sspb.OperationType, nguidList string) *sspb.GuestMessage {
+	return &sspb.GuestMessage{
+		Msg: &sspb.GuestMessage_SnapshotRequest{
+			SnapshotRequest: &sspb.SnapshotRequest{
+				OperationId: operationID,
+				DiskList:    diskList,
+				NguidList:   nguidList,
+				Type:        opType,
+			},
+		},
+	}
+}
+
 func writeScript(t *testing.T, op sspb.OperationType, scriptDir string, content string) {
 	t.Helper()
 	scriptName := ""
@@ -352,6 +366,131 @@ func TestSuccess(t *testing.T) {
 				t.Fatalf("Script output (%q) file content = %q, want %q", outputFile, string(data), tc.want)
 			}
 		})
+	}
+}
+
+func TestRequestWithNguid(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	clientOpts := clientOptions{
+		protocol:         testProtocol,
+		address:          socket,
+		timeoutInSeconds: time.Duration(10) * time.Second,
+		scriptDir:        scriptDir,
+	}
+
+	testOpts := testOptions{
+		clientOpts: clientOpts,
+		server:     server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	tests := []struct {
+		name     string
+		op       sspb.OperationType
+		exitCode int32
+	}{
+		{
+			name:     "pre",
+			op:       sspb.OperationType_PRE_SNAPSHOT,
+			exitCode: -1,
+		},
+		{
+			name:     "post",
+			op:       sspb.OperationType_POST_SNAPSHOT,
+			exitCode: -1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scriptContent := fmt.Sprintf("exit %d", 0) // NOLINT
+			writeScript(t, tc.op, scriptDir, scriptContent)
+
+			reqID := server.requestID()
+			// Since we don't expect to find disks with matched NGUIDs, the script
+			// should always return -1 with UNHANDLED_SCRIPT_ERROR.
+			msg := newRequestWithNguid(reqID, "disklist", tc.op, "deadbeef,1badf00d")
+			server.messageBus <- msg
+
+			resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+			if err != nil {
+				t.Errorf("Failed to get response: %v, expected success", err)
+			}
+
+			if resp.GetAgentReturnCode() != sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR {
+				t.Errorf("Response.ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR)
+			}
+
+			if resp.GetScriptsReturnCode() != tc.exitCode {
+				t.Errorf("Response.ExitCode = %v, want %v", resp.GetScriptsReturnCode(), tc.exitCode)
+			}
+		})
+	}
+}
+
+func TestFindNguidSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	// Example device structure: /tmpDir/nvme0n1/nguid
+	devDir := filepath.Join(tmp, "nvme0n1")
+	if err := os.MkdirAll(devDir, 0755); err != nil {
+		t.Fatalf("Failed to create test dir: %v", err)
+	}
+
+	nguidFile := filepath.Join(devDir, "nguid")
+	nguidContent := "deadbeef-1234-5678-90ab-cdef12345678"
+	if err := os.WriteFile(nguidFile, []byte(nguidContent), 0644); err != nil {
+		t.Fatalf("Failed to write test nguid file: %v", err)
+	}
+
+	testPattern := filepath.Join(tmp, "nvme*n*/nguid")
+	targetNGUID := "deadbeef1234567890abcdef12345678"
+
+	// Call the refactored function with the test pattern
+	deviceName, err := findDeviceByNGUIDWithPattern(targetNGUID, testPattern)
+	if err != nil {
+		t.Errorf("findDeviceByNGUIDWithPattern(...) failed: %v", err)
+	}
+
+	expectedDeviceName := "/dev/nvme0n1"
+	if deviceName != expectedDeviceName {
+		t.Errorf("findDeviceByNGUIDWithPattern(...) = %q, want %q", deviceName, expectedDeviceName)
+	}
+}
+
+func TestFindNguidNoMatch(t *testing.T) {
+	tmp := t.TempDir()
+	// Example device structure: /tmpDir/nvme0n1/nguid
+	devDir := filepath.Join(tmp, "nvme0n1")
+	if err := os.MkdirAll(devDir, 0755); err != nil {
+		t.Fatalf("Failed to create test dir: %v", err)
+	}
+
+	nguidFile := filepath.Join(devDir, "nguid")
+	nguidContent := "deadbeef-deadbeef-deadbeef-deadbeef"
+	if err := os.WriteFile(nguidFile, []byte(nguidContent), 0644); err != nil {
+		t.Fatalf("Failed to write test nguid file: %v", err)
+	}
+
+	testPattern := filepath.Join(tmp, "nvme*n*/nguid")
+	targetNGUID := "1badf00d"
+
+	_, err := findDeviceByNGUIDWithPattern(targetNGUID, testPattern)
+	if err == nil {
+		t.Errorf("findDeviceByNGUIDWithPattern(...) succeeded unexpectedly, want error")
 	}
 }
 

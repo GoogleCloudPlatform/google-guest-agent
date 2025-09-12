@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -50,6 +51,8 @@ const (
 	responseMaxAttempts = 10
 	// snapshotModuleID is the ID of the snapshot module.
 	snapshotModuleID = "snapshot"
+	// defaultNguidGlobPattern is the default glob pattern to find all nguid files for NVMe devices.
+	defaultNguidGlobPattern = "/sys/class/block/nvme*n*/nguid"
 )
 
 // clientOptions contains the options for the snapshot handler.
@@ -199,6 +202,51 @@ func (s *snapshotClient) listen(ctx context.Context) error {
 	return nil
 }
 
+// findDeviceByNGUID searches for an NVMe device matching the given NGUID using the default pattern.
+func findDeviceByNGUID(targetNGUID string) (string, error) {
+	return findDeviceByNGUIDWithPattern(targetNGUID, defaultNguidGlobPattern)
+}
+
+// findDeviceByNGUIDWithPattern searches for an NVMe device matching the given NGUID using a specified glob pattern.
+func findDeviceByNGUIDWithPattern(targetNGUID string, pattern string) (string, error) {
+	// Find files matching the pattern
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", fmt.Errorf("error globbing pattern %s: %w", pattern, err)
+	}
+
+	// No devices found
+	if len(matches) == 0 {
+		galog.Infof("No files found matching pattern: %s\n", pattern)
+		return "", fmt.Errorf("no nvme devices found")
+	}
+
+	for _, match := range matches {
+		galog.Infof("Checking: %s\n", match)
+
+		content, err := os.ReadFile(match)
+		if err != nil {
+			galog.Warnf("Could not read file %s: %v\n", match, err)
+			continue
+		}
+
+		nguidFromFile := strings.TrimSpace(string(content))
+		// Remove hyphens from the NGUID read from the file
+		currentNGUID := strings.ReplaceAll(nguidFromFile, "-", "")
+		galog.Infof("NGUID in file: %s\n", currentNGUID)
+
+		// Compare with the target NGUID
+		if currentNGUID == targetNGUID {
+			galog.Infof("Match found!\n")
+			deviceName := "/dev/" + filepath.Base(filepath.Dir(match))
+			return deviceName, nil
+		}
+	}
+
+	// No match found after checking all files
+	return "", fmt.Errorf("no device found with NGUID: %s", targetNGUID)
+}
+
 // handleRequest handles a single snapshot request. It runs the appropriate
 // script and sends the response back to the snapshot service.
 func (s *snapshotClient) handleRequest(ctx context.Context, request *sspb.SnapshotRequest) error {
@@ -239,7 +287,13 @@ func (s *snapshotClient) handleRequest(ctx context.Context, request *sspb.Snapsh
 	scriptPath := filepath.Join(s.options.scriptDir, config.scriptFileName)
 
 	// Trigger the execution of the script.
-	exitCode, errCode := s.runScript(ctx, scriptPath, request.GetDiskList())
+	var exitCode int
+	var errCode sspb.AgentErrorCode
+	if request.GetNguidList() != "" {
+		exitCode, errCode = s.runScriptWithNGUID(ctx, scriptPath, request.GetNguidList())
+	} else {
+		exitCode, errCode = s.runScript(ctx, scriptPath, request.GetDiskList())
+	}
 
 	response := &sspb.SnapshotResponse{
 		OperationId:       request.GetOperationId(),
@@ -300,6 +354,48 @@ func (s *snapshotClient) runScript(ctx context.Context, scriptPath string, disks
 	}
 
 	cmd := []string{scriptPath, disks}
+	opts := run.Options{Name: cmd[0], Args: cmd[1:], OutputType: run.OutputNone, Timeout: s.options.timeoutInSeconds}
+	_, err := run.WithContext(ctx, opts)
+
+	// Handle timeout error.
+	if _, ok := run.AsTimeoutError(err); ok {
+		return -1, sspb.AgentErrorCode_SCRIPT_TIMED_OUT
+	}
+
+	// Handle "unknown" exit error.
+	if xerr, ok := run.AsExitError(err); ok {
+		return xerr.ExitCode(), sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR
+	}
+
+	galog.Infof("Snapshot script %q succeeded.", scriptPath)
+	return 0, sspb.AgentErrorCode_NO_ERROR
+}
+
+// runScriptWithNGUID runs the script at the given path with the given NGUIDs as
+// arguments and returns the process' exit code and the snapshot service error
+// code.
+func (s *snapshotClient) runScriptWithNGUID(ctx context.Context, scriptPath string, nguids string) (int, sspb.AgentErrorCode) {
+	galog.Infof("Running guest consistent snapshot script: %s, nguids: %s.", scriptPath, nguids)
+
+	if !file.Exists(scriptPath, file.TypeFile) {
+		return -1, sspb.AgentErrorCode_SCRIPT_NOT_FOUND
+	}
+
+	// Translate nguids to disk names
+	// e.g., "deadbeef" -> '/dev/nvme0n1'
+	var diskNames []string
+	for _, nguid := range strings.Split(nguids, ",") {
+		diskName, err := findDeviceByNGUID(nguid)
+		if err != nil {
+			galog.Errorf("Failed to find device by NGUID: %v", err)
+			return -1, sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR
+		}
+		diskNames = append(diskNames, diskName)
+	}
+
+	diskNamesString := strings.Join(diskNames, ",")
+
+	cmd := []string{scriptPath, diskNamesString}
 	opts := run.Options{Name: cmd[0], Args: cmd[1:], OutputType: run.OutputNone, Timeout: s.options.timeoutInSeconds}
 	_, err := run.WithContext(ctx, opts)
 
