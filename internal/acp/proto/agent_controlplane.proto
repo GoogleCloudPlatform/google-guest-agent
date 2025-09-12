@@ -113,6 +113,14 @@ message CurrentPluginStates {
     Status pending_plugin_status = 5;
     // The metrics of the current plugin.
     repeated Metric current_plugin_metrics = 6;
+    // A hash of the plugin config, pinned version, and plugin revision.
+    string current_plugin_state_revision = 7;
+    // The pending plugin state revision. If this pending revision is installed
+    // and running, the field value should be empty and
+    // current_plugin_state_revision should be updated and status set to
+    // RUNNING. If there's an error during the process, this value should remain
+    // as is and the pending_plugin_status should update to an error status.
+    string pending_plugin_state_revision = 8;
 
     // Detailed plugin status on the resource.
     //
