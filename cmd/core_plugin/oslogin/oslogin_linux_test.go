@@ -865,20 +865,63 @@ func TestSetupNSSwitch(t *testing.T) {
 }
 
 func TestSetupPAM(t *testing.T) {
-	module := createTestModule(t)
-	createTestFiles(t, module, osloginTestFileOpts{testPAM: true})
-
-	if err := module.setupPAM(); err != nil {
-		t.Fatalf("setupPAM() = %v, want nil", err)
+	tests := []struct {
+		name          string
+		desc          string
+		expectedLines []string
+	}{
+		{
+			name: "default",
+			desc: `
+			{
+				"instance": {
+					"attributes": {
+						"enable-oslogin": "true"
+					}
+				}
+			}
+			`,
+			expectedLines: []string{
+				"auth [default=ignore] pam_group.so",
+				"session [success=ok default=ignore] pam_mkhomedir.so",
+			},
+		},
+		{
+			name: "two-factor",
+			desc: `
+			{
+				"instance": {
+					"attributes": {
+						"enable-oslogin": "true",
+						"enable-oslogin-2fa": "true"
+					}
+				}
+			}
+			`,
+			expectedLines: []string{
+				"auth [success=done perm_denied=die default=ignore] pam_oslogin_login.so",
+				"auth [default=ignore] pam_group.so",
+				"session [success=ok default=ignore] pam_mkhomedir.so",
+			},
+		},
 	}
 
-	// Read file for expected contents.
-	expectedLines := []string{
-		"auth [success=done perm_denied=die default=ignore] pam_oslogin_login.so",
-		"auth [default=ignore] pam_group.so",
-		"session [success=ok default=ignore] pam_mkhomedir.so",
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			module := createTestModule(t)
+			desc, err := metadata.UnmarshalDescriptor(test.desc)
+			if err != nil {
+				t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", test.desc, err)
+			}
+			createTestFiles(t, module, osloginTestFileOpts{testPAM: true})
+
+			if err := module.setupPAM(desc); err != nil {
+				t.Fatalf("setupPAM() = %v, want nil", err)
+			}
+
+			checkTestFile(t, module.pamConfigPath, test.expectedLines)
+		})
 	}
-	checkTestFile(t, module.pamConfigPath, expectedLines)
 }
 
 func TestSetupGroup(t *testing.T) {
@@ -1198,7 +1241,6 @@ func TestRetryFailConfiguration(t *testing.T) {
 				"group: files cache_oslogin oslogin",
 			})
 			checkTestFile(t, module.pamConfigPath, []string{
-				"auth [success=done perm_denied=die default=ignore] pam_oslogin_login.so",
 				"auth [default=ignore] pam_group.so",
 				"session [success=ok default=ignore] pam_mkhomedir.so",
 			})
