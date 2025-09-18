@@ -147,6 +147,7 @@ func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metada
 func addSystemUsers(ctx context.Context, config *cfg.Sections, newKeys userKeyMap) []error {
 	var errs []error
 	for username, keys := range newKeys {
+		galog.V(1).Debugf("Adding user %s", username)
 		userAccount, err := ensureUserExists(ctx, username)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("giving up on ssh keys for %s, failed to find or create user: %v", username, err))

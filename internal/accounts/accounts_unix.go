@@ -439,6 +439,7 @@ func DelUser(ctx context.Context, u *User) error {
 	if _, err := runCommandTemplate(ctx, cmd, u, nil); err != nil {
 		return fmt.Errorf("failed to run userdel_cmd %s: %w", cmd, err)
 	}
+	galog.V(1).Debugf("Attepmting to remove user %s from google users file", u.Username)
 	if err := removeFromGUsers(ctx, u.Username); err != nil {
 		return err
 	}

@@ -391,6 +391,12 @@ func TestUpdateSSHKeys(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	g := &accounts.Group{Name: googleSudoersGroup}
+	supplementalGroups[g.Name] = g
+
+	cfg.Load(nil)
+	cfg.Retrieve().Accounts.GroupAddCmd = "echo {group} > /dev/null"
+	cfg.Retrieve().Accounts.GPasswdAddCmd = "echo {user} {group} > /dev/null"
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -68,12 +68,18 @@ func defaultDeprovisionUnusedUsers(ctx context.Context, config *cfg.Sections, ac
 			errs = append(errs, fmt.Errorf("not deprovisioning unused user %q, could not find local account: %w", guser, err))
 			continue
 		}
+
+		// A user is only effectively removed when the configuration has the
+		// deprovision_remove flag set to true. If the flag is not set, we only
+		// remove the user from the sudoers group and remove the ssh keys.
 		if config.Accounts.DeprovisionRemove {
+			galog.Debugf("Deprovisioning user %s", guser)
 			if err := accounts.DelUser(ctx, guserAccount); err != nil {
 				errs = append(errs, fmt.Errorf("error removing user account %s from system: %w", guser, err))
 			}
 			continue
 		}
+
 		if err := updateSSHKeys(ctx, guserAccount, nil); err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove user %s's ssh keys: %w", guser, err))
 			continue
@@ -153,8 +159,20 @@ func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) erro
 		},
 	}
 
+	galog.V(2).Debugf("Writing authorized_keys file for user %s", user.Username)
 	if err := file.SaferWriteFile(ctx, []byte(authorizedKeysOutput), authorizedKeysPath, writeOpts); err != nil {
 		return fmt.Errorf("failed to write authorized_keys file: %w", err)
+	}
+
+	// Always ensure we have the user added to google-sudoers group, that ensures
+	// that even a user being "re-enabled" will have the sudoers permission.
+	//
+	// A re-enabled user is the one who only got their ssh keys removed from the
+	// authorized_keys file and google-sudoers group removed due to configuration
+	// key drepovision_remove being set to false.
+	galog.V(2).Debugf("Adding user %s to %s", user.Username, googleSudoersGroup)
+	if err := accounts.AddUserToGroup(ctx, user, supplementalGroups[googleSudoersGroup]); err != nil {
+		return fmt.Errorf("failed to add user %s to %s: %w", user.Username, googleSudoersGroup, err)
 	}
 
 	return selinuxRestoreCon(ctx, authorizedKeysPath)
