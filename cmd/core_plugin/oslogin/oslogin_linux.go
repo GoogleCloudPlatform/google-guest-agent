@@ -375,7 +375,7 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 	}
 
 	// Write PAM config.
-	if err := mod.setupPAM(); err != nil {
+	if err := mod.setupPAM(desc); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("Failed to setup pam: %w", err))
 		failed = true
 	}
@@ -503,7 +503,7 @@ func (mod *osloginModule) setupNSSwitch(cleanup bool) error {
 }
 
 // setupPAM configures the PAM module.
-func (mod *osloginModule) setupPAM() error {
+func (mod *osloginModule) setupPAM(desc *metadata.Descriptor) error {
 	galog.Debug("Configuring PAM module for OS Login.")
 	pamConfig := textconfig.New(mod.pamConfigPath, osloginConfigMode, osloginConfigOpts)
 	topBlock := textconfig.NewBlock(textconfig.Top)
@@ -515,7 +515,9 @@ func (mod *osloginModule) setupPAM() error {
 	pamGroup := "[default=ignore]"
 	session := "[success=ok default=ignore]"
 
-	topBlock.Append("auth", fmt.Sprintf("%s pam_oslogin_login.so", pamOSLogin))
+	if desc.TwoFactorEnabled() {
+		topBlock.Append("auth", fmt.Sprintf("%s pam_oslogin_login.so", pamOSLogin))
+	}
 	topBlock.Append("auth", fmt.Sprintf("%s pam_group.so", pamGroup))
 	bottomBlock.Append("session", fmt.Sprintf("%s pam_mkhomedir.so", session))
 
