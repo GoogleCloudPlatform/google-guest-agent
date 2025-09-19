@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
