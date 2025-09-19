@@ -138,6 +138,12 @@ channel_id =
 host =
 client_debug_logging = false
 
+[MWLID]
+enabled = false
+credential_refresh_minutes = 10
+service_ip = 169.254.169.254
+service_port = 8083
+
 [Unstable]
 command_monitor_enabled = false
 command_pipe_mode = 0770
@@ -233,6 +239,25 @@ type Sections struct {
 	// ACS defines the ACS configuration options. These options are overrides
 	// for creating client connection.
 	ACS *ACS `ini:"ACS,omitempty"`
+
+	// MWLID defines the Managed Workload Identity configuration options.
+	MWLID *MWLID `ini:"MWLID,omitempty"`
+}
+
+// MWLID contains the configurations of MWLID section.
+type MWLID struct {
+	// Enabled configures whether Managed Workload Identity Credential Refresh is
+	// enabled.
+	Enabled bool `ini:"enabled,omitempty"`
+	// CredentialRefreshMinutes configures the frequency of credential refresh.
+	// If not set, the default value is 10 minutes.
+	CredentialRefreshMinutes int `ini:"credential_refresh_minutes,omitempty"`
+	// ServiceIP is the IP address of the MWLID service. Its not expected to be
+	// changed in production, overrides are only for testing.
+	ServiceIP string `ini:"service_ip,omitempty"`
+	// ServicePort is the port of the MWLID service. Its not expected to be
+	// changed in production, overrides are only for testing.
+	ServicePort int `ini:"service_port,omitempty"`
 }
 
 // ACS contains the configurations of ACS section. Following options overrides

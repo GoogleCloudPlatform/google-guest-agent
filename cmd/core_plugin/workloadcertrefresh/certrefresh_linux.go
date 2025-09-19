@@ -20,6 +20,7 @@ package workloadcertrefresh
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -27,6 +28,7 @@ import (
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -55,14 +57,60 @@ func NewModule(context.Context) *manager.Module {
 	}
 }
 
+// Status represents the state of gRPC service.
+type Status int
+
+const (
+	// ServiceUnknown means the gRPC service availability is unknown. This is
+	// used when we've attempted to connect to the service but it failed with a
+	// non-permanent error.
+	ServiceUnknown Status = iota
+	// ServiceUnavailable means the gRPC service is unavailable. This is set when
+	// we successfully connect to the service but it responds with a non-OK
+	// FAILED_PRECONDITION error.
+	ServiceUnavailable
+	// ServiceAvailable means the gRPC service is available.
+	ServiceAvailable
+)
+
+type grpcServerStatus struct {
+	mutex sync.Mutex
+	// status is the status of the gRPC service.
+	status Status
+}
+
+func (gs *grpcServerStatus) setStatus(s Status) {
+	gs.mutex.Lock()
+	defer gs.mutex.Unlock()
+	gs.status = s
+}
+
+func (gs *grpcServerStatus) serverStatus() Status {
+	gs.mutex.Lock()
+	defer gs.mutex.Unlock()
+	return gs.status
+}
+
 // RefresherJob implements scheduler interface for cert refresher.
 type RefresherJob struct {
-	mdsClient metadata.MDSClientInterface
+	// outputOpts is the output directory name and symlink templates.
+	outputOpts outputOpts
+	mdsClient  metadata.MDSClientInterface
+	// grpcServerStatus is used to track if the grpc server is available. This
+	// server is not an instance startup dependency and can become available
+	// later. It is used to track if we've already detected server existence
+	// successfully and if not, retry.
+	grpcServerStatus
+	// clientMutex is used to synchronize access to the grpcClient.
+	clientMutex sync.Mutex
+	// grpcClient is the client connection to the grpc server. This is used to
+	// cache the connection so it doesn't need to be recreated every time.
+	grpcClient *grpc.ClientConn
 }
 
 // NewCertRefresher returns a new refresher job instance.
 func NewCertRefresher() *RefresherJob {
-	return &RefresherJob{mdsClient: metadata.New()}
+	return &RefresherJob{mdsClient: metadata.New(), outputOpts: outputOpts{contentDirPrefix, tempSymlinkPrefix, symlink}}
 }
 
 // ID returns the job id.
@@ -89,10 +137,8 @@ func (j *RefresherJob) ShouldEnable(ctx context.Context) bool {
 // Run triggers the job for single execution. It returns error if any
 // and a bool stating if scheduler should continue or stop scheduling.
 func (j *RefresherJob) Run(ctx context.Context) (bool, error) {
-	out := outputOpts{contentDirPrefix, tempSymlinkPrefix, symlink}
-
 	galog.Debugf("Refreshing workload certificates")
-	if err := j.refreshCreds(ctx, out, time.Now().Format(time.RFC3339)); err != nil {
+	if err := j.refreshCreds(ctx, j.outputOpts, time.Now().Format(time.RFC3339)); err != nil {
 		return true, fmt.Errorf("refresh creds with error: %w", err)
 	}
 	galog.Debug("Finished refreshing workload certificates")
