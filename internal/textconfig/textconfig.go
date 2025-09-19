@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 // Position is the position of a block in the file.
@@ -230,8 +232,20 @@ func (h *Handle) matchLine(line string) bool {
 
 // Apply applies the changes to the file.
 func (h *Handle) Apply() error {
-	if err := h.Cleanup(); err != nil {
-		return fmt.Errorf("failed to cleanup file %q: %v", h.file, err)
+	var cleanedup []string
+
+	if file.Exists(h.file, file.TypeFile) {
+		if err := h.Cleanup(); err != nil {
+			return fmt.Errorf("failed to cleanup file %q: %v", h.file, err)
+		}
+
+		data, err := os.ReadFile(h.file)
+		if err != nil {
+			return fmt.Errorf("failed to read file %q: %v", h.file, err)
+		}
+
+		lines := strings.Split(string(data), "\n")
+		cleanedup = h.cleanup(lines)
 	}
 
 	var topBlocks []*Block
@@ -246,13 +260,6 @@ func (h *Handle) Apply() error {
 		}
 	}
 
-	data, err := os.ReadFile(h.file)
-	if err != nil {
-		return fmt.Errorf("failed to read file %q: %v", h.file, err)
-	}
-
-	lines := strings.Split(string(data), "\n")
-	cleanedup := h.cleanup(lines)
 	var output []string
 
 	for _, block := range topBlocks {
