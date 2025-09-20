@@ -23,7 +23,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/testing/protocmp"
 
-	pcpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
+	pcpb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 )
 
 func TestInitWatcher(t *testing.T) {

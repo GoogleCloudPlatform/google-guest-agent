@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 
 	apb "google.golang.org/protobuf/types/known/anypb"
 )

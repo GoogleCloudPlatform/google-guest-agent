@@ -23,7 +23,7 @@
 // Additionally, Agent will also monitor Plugin process for CPU/Memory usage
 // and set limits if provided by the service.
 //
-// [interface]: third_party/guest_agent/dev/internal/plugin_comm/proto/plugin_comm.proto
+// [interface]: third_party/guest_agent/dev/pkg/proto/plugin_comm.proto
 package main
 
 import (
@@ -32,7 +32,7 @@ import (
 	"net"
 	"os"
 
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 	"google.golang.org/grpc"
 )
 

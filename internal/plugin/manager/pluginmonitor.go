@@ -23,8 +23,8 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	pcpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/proto/google_guest_agent/plugin"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	pcpb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 )
 
 const (
