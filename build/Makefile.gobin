@@ -1,7 +1,8 @@
 PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
-	internal/acp/proto/agent_controlplane.pb.go
+	internal/acp/proto/agent_controlplane.pb.go \
+	internal/plugin/proto/plugin_comm.pb.go
 
 GO_BINARIES = \
 	cmd/core_plugin/core_plugin \
