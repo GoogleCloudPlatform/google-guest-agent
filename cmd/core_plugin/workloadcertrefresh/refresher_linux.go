@@ -24,8 +24,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
+	wipb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/workloadcertrefresh/proto/mwlid"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -42,18 +49,22 @@ const (
 	// enableWorkloadCertsKey is set to true as custom metadata to enable
 	// automatic provisioning of credentials.
 	enableWorkloadCertsKey = "instance/attributes/enable-workload-certificate"
+	// defaultGRPCTimeout is the default timeout for grpc calls.
+	defaultGRPCTimeout = 10 * time.Second
 )
 
 // isEnabled returns true only if enable-workload-certificate metadata attribute
 // is present and set to true.
 func (j *RefresherJob) isEnabled(ctx context.Context) bool {
-	resp, err := j.readMetadata(ctx, enableWorkloadCertsKey)
-	if err != nil {
-		galog.Debugf("Failed to get %q from MDS with error: %v", enableWorkloadCertsKey, err)
-		return false
+	if j.isGRPCServiceEnabled(ctx) {
+		// If GRPC service is enabled, we should use that instead of MDS for cert
+		// refresh.
+		return true
 	}
 
-	return bytes.EqualFold(resp, []byte("true"))
+	// If GRPC service is not enabled, we should fallback to use MDS for cert
+	// refresh. This is the default behavior.
+	return j.isMDSServiceEnabled(ctx)
 }
 
 // readMetadata reads metadata value for [key] from MDS.
@@ -189,9 +200,8 @@ func writeWorkloadIdentities(destDir string, wisMd []byte) (string, error) {
 	return spiffeID, nil
 }
 
-func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now string) error {
-	contentDir := fmt.Sprintf("%s-%s", opts.contentDirPrefix, now)
-	tempSymlink := fmt.Sprintf("%s-%s", opts.tempSymlinkPrefix, now)
+func (j *RefresherJob) writeCredsFromMDS(ctx context.Context, contentDir, symlink string) error {
+	galog.Infof("Refreshing workload credentials from MDS endpoints...")
 
 	// Get status first so it can be written even when other endpoints are empty.
 	certConfigStatus, err := j.readMetadata(ctx, configStatusKey)
@@ -216,10 +226,10 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 	// Handles the edge case where the config values provided for the first time
 	// may be invalid. This ensures that the symlink directory always exists and
 	// contains the config_status to surface config errors to the VM.
-	if _, err := os.Stat(opts.symlink); os.IsNotExist(err) {
+	if _, err := os.Stat(symlink); os.IsNotExist(err) {
 		galog.Infof("Creating new symlink %s", symlink)
 
-		if err := os.Symlink(contentDir, opts.symlink); err != nil {
+		if err := os.Symlink(contentDir, symlink); err != nil {
 			return fmt.Errorf("error creating symlink: %w", err)
 		}
 	}
@@ -248,6 +258,32 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 		return fmt.Errorf("failed to write trust anchors: %w", err)
 	}
 
+	return nil
+}
+
+func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now string) error {
+	contentDir := fmt.Sprintf("%s-%s", opts.contentDirPrefix, now)
+	tempSymlink := fmt.Sprintf("%s-%s", opts.tempSymlinkPrefix, now)
+
+	// Scheduled job [isEnabled] could return true if we did not successfully
+	// determine the service status. In this case we should check the service
+	// status again before proceeding.
+	if j.isGRPCServiceEnabled(ctx) {
+		if err := j.refreshCredsWithGRPC(ctx, contentDir); err != nil {
+			return fmt.Errorf("refresh creds with gRPC error: %w", err)
+		}
+	} else if j.isMDSServiceEnabled(ctx) {
+		if err := j.writeCredsFromMDS(ctx, contentDir, opts.symlink); err != nil {
+			return fmt.Errorf("refresh creds with MDS error: %w", err)
+		}
+	} else {
+		galog.Debugf("Not refreshing workload certificates, service is not enabled")
+		return nil
+	}
+
+	// We fetched the credentials successfully, now we can rotate the symlink and
+	// remove the previous content dir.
+
 	galog.Debugf("Creating temporary symlink %s", tempSymlink)
 	if err := os.Symlink(contentDir, tempSymlink); err != nil {
 		return fmt.Errorf("error creating temporary link: %w", err)
@@ -262,9 +298,12 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 	// Only rotate on success of all steps above.
 	galog.Infof("Rotating symlink %s", opts.symlink)
 
-	if err := os.Remove(opts.symlink); err != nil {
+	galog.V(2).Debugf("Attempting to remove existing symlink %q", opts.symlink)
+	if err := os.Remove(opts.symlink); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("error removing symlink: %w", err)
 	}
+
+	galog.V(2).Debugf("Attempting to rename temporary symlink %q to %q", tempSymlink, opts.symlink)
 	if err := os.Rename(tempSymlink, opts.symlink); err != nil {
 		return fmt.Errorf("error rotating target link: %w", err)
 	}
@@ -279,6 +318,150 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 		if err := os.RemoveAll(oldTarget); err != nil {
 			return fmt.Errorf("failed to remove old symlink target: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// newClient returns a cached client if present, otherwise creates a new grpc
+// client connection to the MWLID service and caches it.
+func (j *RefresherJob) newClient(ctx context.Context) (*grpc.ClientConn, error) {
+	j.clientMutex.Lock()
+	defer j.clientMutex.Unlock()
+
+	if j.grpcClient != nil {
+		return j.grpcClient, nil
+	}
+
+	creds := grpc.WithTransportCredentials(insecure.NewCredentials())
+	address := fmt.Sprintf("%s:%d", cfg.Retrieve().MWLID.ServiceIP, cfg.Retrieve().MWLID.ServicePort)
+	galog.Debugf("Creating gRPC client for MWLID service at %q", address)
+	conn, err := grpc.NewClient(address, creds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC client for MWLID service at %q: %w", address, err)
+	}
+	j.grpcClient = conn
+	return conn, nil
+}
+
+// isMDSServiceEnabled returns true if the preview version of the workload
+// identity is enabled.
+func (j *RefresherJob) isMDSServiceEnabled(ctx context.Context) bool {
+	resp, err := j.readMetadata(ctx, enableWorkloadCertsKey)
+	if err != nil {
+		galog.Debugf("Failed to get %q from MDS with error: %v", enableWorkloadCertsKey, err)
+		return false
+	}
+
+	return bytes.EqualFold(resp, []byte("true"))
+}
+
+// isGRPCServiceEnabled returns true if the MWLID service is enabled and the
+// server is reachable.
+func (j *RefresherJob) isGRPCServiceEnabled(ctx context.Context) bool {
+	if !cfg.Retrieve().MWLID.Enabled {
+		galog.Debugf("MWLID credential feature is disabled in config, skipping gRPC server check.")
+		return false
+	}
+
+	if currStatus := j.serverStatus(); currStatus != ServiceUnknown {
+		return currStatus == ServiceAvailable
+	}
+
+	conn, err := j.newClient(ctx)
+	if err != nil {
+		galog.Debugf("Failed to create gRPC client for MWLID service: %v", err)
+		return false
+	}
+
+	c := wipb.NewWorkloadIdentityClient(conn)
+	tCtx, cancel := context.WithTimeout(ctx, defaultGRPCTimeout)
+	defer cancel()
+
+	// Try calling any RPC to determine if the server is available.
+	_, err = c.GetWorkloadCertificates(tCtx, &wipb.GetWorkloadCertificatesRequest{}, grpc.WaitForReady(true))
+	if err == nil {
+		galog.Debugf("Successfully connected to MWLID service, gRPC server will be used for cert refresh.")
+		// We successfully connected to the server and it is available.
+		j.setStatus(ServiceAvailable)
+		return true
+	}
+
+	st, ok := status.FromError(err)
+	if ok && st.Code() == codes.FailedPrecondition {
+		// We got a permanent error, gRPC server is unavailable.
+		galog.Debugf("MWLID gRPC server is unavailable: [%v], MDS will be used for cert refresh.", err)
+		j.setStatus(ServiceUnavailable)
+		return false
+	}
+
+	galog.Debugf("Error when connecting to MWLID service: [%v], will retry determining server status.", err)
+	// We got an unknown error, this could be a timeout or other error when
+	// connecting to the server. We should retry determining server status.
+	return true
+}
+
+// closeClient closes and removes the cached grpc client connection.
+func (j *RefresherJob) closeClient() {
+	j.clientMutex.Lock()
+	defer j.clientMutex.Unlock()
+	galog.Debug("Closing gRPC client connection to MWLID service")
+
+	if j.grpcClient == nil {
+		return
+	}
+	if err := j.grpcClient.Close(); err != nil {
+		galog.Warnf("Failed to close connection to MWLID service: %v", err)
+	}
+	j.grpcClient = nil
+}
+
+// refreshCredsWithGRPC refreshes the workload certificates using the MWLID
+// service over gRPC.
+func (j *RefresherJob) refreshCredsWithGRPC(ctx context.Context, contentDir string) error {
+	galog.Infof("Refreshing workload identity credentials from MWLID server...")
+
+	conn, err := j.newClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to snapshot service: %w", err)
+	}
+
+	c := wipb.NewWorkloadIdentityClient(conn)
+
+	// Close the client if we failed to make a successful call to the server. Next
+	// attempt to connect to the server will recreate the client.
+
+	tCtxCerts, cancelCerts := context.WithTimeout(ctx, defaultGRPCTimeout)
+	defer cancelCerts()
+	certs, err := c.GetWorkloadCertificates(tCtxCerts, &wipb.GetWorkloadCertificatesRequest{})
+	if err != nil {
+		j.closeClient()
+		return fmt.Errorf("failed to get workload certificates: %w", err)
+	}
+
+	tCtxBundle, cancelBundle := context.WithTimeout(ctx, defaultGRPCTimeout)
+	defer cancelBundle()
+	bundle, err := c.GetWorkloadTrustBundles(tCtxBundle, &wipb.GetWorkloadTrustBundlesRequest{})
+	if err != nil {
+		j.closeClient()
+		return fmt.Errorf("failed to get workload trust bundles: %w", err)
+	}
+
+	if err := os.MkdirAll(contentDir, 0755); err != nil {
+		return fmt.Errorf("error creating contents dir: %w", err)
+	}
+
+	galog.Debugf("Writing workload certificates private key to %s", contentDir)
+	if err := os.WriteFile(filepath.Join(contentDir, "private_key.pem"), certs.GetPrivateKeyPem(), 0644); err != nil {
+		return fmt.Errorf("error writing private_key.pem: %w", err)
+	}
+	galog.Debugf("Writing workload certificates certificate chain to %s", contentDir)
+	if err := os.WriteFile(filepath.Join(contentDir, "certificates.pem"), certs.GetCertificateChainPem(), 0644); err != nil {
+		return fmt.Errorf("error writing certificates.pem: %w", err)
+	}
+	galog.Debugf("Writing workload trust bundles to %s", contentDir)
+	if err := os.WriteFile(filepath.Join(contentDir, "trust_bundles.json"), bundle.GetSpiffeTrustBundlesMapJson(), 0644); err != nil {
+		return fmt.Errorf("error writing trust_bundles.json: %w", err)
 	}
 
 	return nil

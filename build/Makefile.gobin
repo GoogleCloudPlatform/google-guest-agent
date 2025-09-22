@@ -1,7 +1,8 @@
 PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
-	internal/acp/proto/agent_controlplane.pb.go
+	internal/acp/proto/agent_controlplane.pb.go \
+	cmd/core_plugin/workloadcertrefresh/proto/workload_identity.pb.go
 
 GO_BINARIES = \
 	cmd/core_plugin/core_plugin \
@@ -14,6 +15,7 @@ GO_BINARIES = \
 	cmd/google_authorized_keys_compat/google_authorized_keys_compat
 
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
+MWLID_PROTO_URL = https://github.com/GoogleCloudPlatform/managed-workload-identity
 
 GOOS ?= "linux"
 VERSION ?= "dev"
@@ -32,10 +34,28 @@ fetch-go-tpm-tools:
 	$(Q)git -C proto_deps/go-tpm-tools pull 2> /dev/null || \
 		git clone $(GO_TPM_TOOLS_URL) proto_deps/go-tpm-tools
 
-$(PBGO_FILES): fetch-go-tpm-tools
-	$(Q)echo "[GEN] $(subst .pb.go,.proto,$(@))"
+fetch-mwlid-proto:
+	$(Q)echo "Making proto dependencies dir for mwlid..."
+	$(Q)mkdir -p proto_deps/mwlid
+	$(Q)echo "Cloning/updating mwlid-proto..."
+	$(Q)git -C proto_deps/mwlid pull 2> /dev/null || \
+		git clone $(MWLID_PROTO_URL) proto_deps/mwlid
+	$(Q)mkdir -p cmd/core_plugin/workloadcertrefresh/proto
+	$(Q)cp proto_deps/mwlid/proto/v1/workload-identity.proto cmd/core_plugin/workloadcertrefresh/proto/workload_identity.proto
+
+SOURCE = $(subst .pb.go,.proto,$(@))
+FILENAME = $(notdir $(SOURCE))
+
+# The conditional -M flag.
+# This variable will be set to a value only for workload_identity.proto as this
+# proto is not managed within guest-agent repo and needs to be compiled in
+# separate directory. This is no-op for all other protos.
+M_FLAG = $(if $(filter workload_identity.proto,$(FILENAME)),--go_opt=M$(FILENAME)=/mwlid --go-grpc_opt=M$(FILENAME)=/mwlid,)
+
+$(PBGO_FILES): fetch-go-tpm-tools fetch-mwlid-proto
+	$(Q)echo "[GEN] $(SOURCE)"
 	$(Q)protoc --go_out=$(dir $(@)) --go-grpc_out=$(dir $(@)) --proto_path=proto_deps \
-		--experimental_allow_proto3_optional --proto_path=$(dir $(@)) $(subst .pb.go,.proto,$(@))
+		--experimental_allow_proto3_optional --proto_path=$(dir $(@)) $(M_FLAG) $(SOURCE)
 
 print-go-env:
 	$(Q)echo "golang build environment:"
