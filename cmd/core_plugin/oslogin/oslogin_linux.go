@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 
@@ -505,6 +506,17 @@ func (mod *osloginModule) setupNSSwitch(cleanup bool) error {
 // setupPAM configures the PAM module.
 func (mod *osloginModule) setupPAM(desc *metadata.Descriptor) error {
 	galog.Debug("Configuring PAM module for OS Login.")
+
+	// Make sure the PAM config directory exists, we have seen custom images not
+	// having this directory, since it's a mandatory configuration we must ensure
+	// it exists and the configuration can be written.
+	pamConfigDir := filepath.Dir(mod.pamConfigPath)
+	if !file.Exists(pamConfigDir, file.TypeDir) {
+		if err := os.Mkdir(pamConfigDir, 0755); err != nil {
+			return fmt.Errorf("failed to create PAM config directory: %w", err)
+		}
+	}
+
 	pamConfig := textconfig.New(mod.pamConfigPath, osloginConfigMode, osloginConfigOpts)
 	topBlock := textconfig.NewBlock(textconfig.Top)
 	bottomBlock := textconfig.NewBlock(textconfig.Bottom)

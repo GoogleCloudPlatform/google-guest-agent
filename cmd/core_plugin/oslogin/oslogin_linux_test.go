@@ -653,18 +653,24 @@ func TestDisableOSLoginErrors(t *testing.T) {
 		name      string
 		fileOpts  osloginTestFileOpts
 		runnerErr bool
+		wantErr   bool
 	}{
 		{
-			name: "fail-sshd-cleanup",
+			name:    "fail-sshd-cleanup",
+			wantErr: true,
 		},
+		// Non existent nss file should not cause an error.
 		{
 			name:     "fail-nss-cleanup",
 			fileOpts: osloginTestFileOpts{testSSHD: true},
+			wantErr:  true,
 		},
+		// Non existent pam file should not cause an error.
 		{
 			name:     "fail-pam-cleanup",
 			fileOpts: osloginTestFileOpts{testSSHD: true, testNSSwitch: true},
 		},
+		// Non existent group file should not cause an error.
 		{
 			name:     "fail-group-cleanup",
 			fileOpts: osloginTestFileOpts{testSSHD: true, testNSSwitch: true, testPAM: true},
@@ -673,6 +679,7 @@ func TestDisableOSLoginErrors(t *testing.T) {
 			name:      "fail-restart-services",
 			fileOpts:  osloginTestFileOpts{testSSHD: true, testNSSwitch: true, testPAM: true, testGroup: true},
 			runnerErr: true,
+			wantErr:   true,
 		},
 	}
 
@@ -707,8 +714,8 @@ func TestDisableOSLoginErrors(t *testing.T) {
 			module.osloginSetup(context.Background(), enabledDesc)
 
 			// Now test for errors.
-			if err := module.disableOSLogin(context.Background(), events.FetchManager()); err == nil {
-				t.Errorf("disableOSLogin(ctx, evManager) = nil, want error")
+			if err := module.disableOSLogin(context.Background(), events.FetchManager()); test.wantErr != (err != nil) {
+				t.Errorf("disableOSLogin(ctx, evManager) = %v, want err: %t", err, test.wantErr)
 			}
 		})
 	}
@@ -1118,21 +1125,6 @@ func TestRetryFailConfiguration(t *testing.T) {
 			name: "retry-nss",
 			fileOpts: osloginTestFileOpts{
 				testSSHD: true,
-			},
-		},
-		{
-			name: "retry-pam",
-			fileOpts: osloginTestFileOpts{
-				testSSHD:     true,
-				testNSSwitch: true,
-			},
-		},
-		{
-			name: "retry-group",
-			fileOpts: osloginTestFileOpts{
-				testSSHD:     true,
-				testNSSwitch: true,
-				testPAM:      true,
 			},
 		},
 		{
