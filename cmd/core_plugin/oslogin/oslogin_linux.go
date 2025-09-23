@@ -731,11 +731,13 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 			// Indicates if one of the services in the list was successfully
 			// restarted.
 			var passed bool
+			var errs error
 			for _, service := range serviceConfig.services {
 				galog.V(2).Debugf("Checking if service %s exists", service)
 				if found, err := daemon.CheckUnitExists(ctx, service); !found {
 					if err != nil {
 						galog.V(2).Debugf("Failed to check if service %s exists: %v", service, err)
+						errs = errors.Join(errs, fmt.Errorf("failed to check if service %s exists: %w", service, err))
 					}
 					continue
 				}
@@ -743,6 +745,7 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 				galog.V(2).Debugf("Service %s exists, restarting...", service)
 				if err := daemon.RestartService(ctx, service, method); err != nil {
 					galog.V(2).Debugf("Failed to restart service %s: %v", service, err)
+					errs = errors.Join(errs, fmt.Errorf("failed to restart service %s: %w", service, err))
 					continue
 				}
 				galog.V(2).Debugf("Successfully restarted service %s", service)
@@ -761,7 +764,7 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 						mod.permanentFailure.Store(true)
 					}
 
-					return fmt.Errorf("Failed to restart one of: %v", serviceConfig.services)
+					return errors.Join(fmt.Errorf("Failed to restart one of: %v", serviceConfig.services), errs)
 				}
 				// Only log a debug message if the restart is optional.
 				galog.Debugf("Failed to restart optional services: %v", serviceConfig.services)
