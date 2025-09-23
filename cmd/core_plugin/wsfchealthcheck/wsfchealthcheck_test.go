@@ -146,36 +146,43 @@ func TestListenerAddr(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		desc string
-		want string
+		name       string
+		desc       string
+		want       string
+		configPort string
 	}{
 		{
 			name: "default_port",
-			want: wsfcDefaultAgentPort,
+			want: ":" + wsfcDefaultAgentPort,
 			desc: `{"instance": {"attributes": {}}}`,
 		},
 		{
-			name: "config_port",
-			want: "12345",
-			desc: `{"instance": {"attributes": {}}}`,
+			name:       "config_port",
+			want:       ":12345",
+			configPort: "12345",
+			desc:       `{"instance": {"attributes": {}}}`,
 		},
 		{
 			name: "instance_port",
 			desc: `{"instance": {"attributes": {"wsfc-agent-port": "54321"}}}`,
-			want: "54321",
+			want: ":54321",
 		},
 		{
 			name: "project_port",
 			desc: `{"project": {"attributes": {"wsfc-agent-port": "13579"}}}`,
-			want: "13579",
+			want: ":13579",
+		},
+		{
+			name: "unix_socket",
+			desc: `{"project": {"attributes": {"wsfc-agent-port": "/tmp/wsfc_socket"}}}`,
+			want: "/tmp/wsfc_socket",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.name == "config_port" {
-				cfg.Retrieve().WSFC = &cfg.WSFC{Port: tc.want}
+			if tc.configPort != "" {
+				cfg.Retrieve().WSFC = &cfg.WSFC{Port: tc.configPort}
 				t.Cleanup(func() { cfg.Retrieve().WSFC.Port = "" })
 			}
 

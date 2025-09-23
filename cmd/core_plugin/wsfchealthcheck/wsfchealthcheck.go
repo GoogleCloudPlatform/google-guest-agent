@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
@@ -118,19 +119,31 @@ func isWsfcEnabled(desc *metadata.Descriptor) bool {
 func listenerAddr(desc *metadata.Descriptor) string {
 	config := cfg.Retrieve()
 
+	// If the address is a unix socket path return it as is otherwise assume it's
+	// a tcp port and pack it with a colon prefix - i.e. ":59998".
+	packAddress := func(addr string) string {
+		if addr == "" {
+			return ""
+		}
+		if strings.HasPrefix(addr, "/") || strings.HasPrefix(addr[1:], ":\\") || strings.HasPrefix(addr[1:], "://") {
+			return addr
+		}
+		return ":" + addr
+	}
+
 	if config.WSFC != nil && config.WSFC.Port != "" {
-		return config.WSFC.Port
+		return packAddress(config.WSFC.Port)
 	}
 
 	if port := desc.Instance().Attributes().WSFCAgentPort(); port != "" {
-		return port
+		return packAddress(port)
 	}
 
 	if port := desc.Project().Attributes().WSFCAgentPort(); port != "" {
-		return port
+		return packAddress(port)
 	}
 
-	return wsfcDefaultAgentPort
+	return packAddress(wsfcDefaultAgentPort)
 }
 
 // newWsfcManager returns a new wsfcManager instance.
