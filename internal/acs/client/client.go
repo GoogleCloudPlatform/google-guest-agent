@@ -18,6 +18,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -80,6 +82,10 @@ type acsHelper struct {
 	// isConnectionSet is set if connection is initialized and still valid.
 	// Its reset to false in error case to trigger reconnection.
 	isConnectionSet atomic.Bool
+	// isEnabledMu protects isEnabled.
+	isEnabledMu sync.Mutex
+	// isEnabled tracks if ACS client is enabled.
+	isEnabled *bool
 }
 
 // ContextKey is the context key type to use for overriding.
@@ -166,6 +172,11 @@ func (acs *acsHelper) connect(ctx context.Context) error {
 	acs.connMu.Lock()
 	defer acs.connMu.Unlock()
 
+	if !acs.isACSEnabled(ctx) {
+		galog.V(2).Debugf("ACS client is disabled, skipping connection creation")
+		return nil
+	}
+
 	// Used of unit testing. Create connection makes a http call which must be avoided in unit tests.
 	if ctx.Value(OverrideConnection) != nil {
 		acs.connection = ctx.Value(OverrideConnection).(ConnectionInterface)
@@ -206,6 +217,7 @@ func (acs *acsHelper) sendStream(ctx context.Context, labels map[string]string, 
 	if err := acs.connect(ctx); err != nil {
 		return fmt.Errorf("unable to set connection for sending msg, err: %w", err)
 	}
+
 	err := acs.connection.SendMessage(&acpb.MessageBody{Labels: labels, Body: msg})
 	if err != nil {
 		// Close connection if error occurs, this triggers to create a new ACS
@@ -250,8 +262,8 @@ func (acs *acsHelper) receiveStream(ctx context.Context) (*acpb.MessageBody, err
 // SendMessage sends a message to ACS and waits for response. This is normally
 // used for sending metrics to ACS.
 func SendMessage(ctx context.Context, labels map[string]string, msg proto.Message) (*acpb.SendAgentMessageResponse, error) {
-	if !cfg.Retrieve().Core.ACSClient {
-		galog.V(2).Debugf("ACS client is disabled, ignoring send message request %v", msg)
+	if !acs.isACSEnabled(ctx) {
+		galog.V(2).Debugf("ACS client is disabled, skipping send message request %v", msg)
 		return nil, nil
 	}
 
@@ -279,8 +291,8 @@ func Notify(ctx context.Context, event *acmpb.PluginEventMessage) error {
 
 // Send sends a message on ACS.
 func Send(ctx context.Context, labels map[string]string, msg proto.Message) error {
-	if !cfg.Retrieve().Core.ACSClient {
-		galog.V(2).Debugf("ACS client is disabled, ignoring message %v", msg)
+	if !acs.isACSEnabled(ctx) {
+		galog.V(2).Debugf("ACS client is disabled, skipping send message request %v", msg)
 		return nil
 	}
 
@@ -302,8 +314,8 @@ func Send(ctx context.Context, labels map[string]string, msg proto.Message) erro
 
 // Watch checks for a new message from ACS and returns.
 func Watch(ctx context.Context) (*acpb.MessageBody, error) {
-	if !cfg.Retrieve().Core.ACSClient {
-		galog.V(2).Debugf("ACS client is disabled, ignoring watch request")
+	if !acs.isACSEnabled(ctx) {
+		galog.V(2).Debugf("ACS client is disabled, skipping watch request")
 		return nil, nil
 	}
 
@@ -343,4 +355,46 @@ func isNilInterface(a any) bool {
 		return true
 	}
 	return v == nil
+}
+
+func (acs *acsHelper) isACSEnabled(ctx context.Context) bool {
+	acs.isEnabledMu.Lock()
+	defer acs.isEnabledMu.Unlock()
+
+	if !cfg.Retrieve().Core.ACSClient {
+		galog.Infof("ACS client is disabled in configuration file, setting isEnabled to false")
+		acs.isEnabled = proto.Bool(false)
+		return false
+	}
+
+	if ctx.Value(OverrideConnection) != nil {
+		return true
+	}
+
+	// Detect if we are running in a test environment. If so, we will not be
+	// able to retrieve the metadata descriptor, so assume that the instance
+	// has a service account.
+	if os.Getenv("TEST_UNDECLARED_OUTPUTS_DIR") != "" {
+		galog.Debugf("Running in a test environment, assuming ACS is enabled")
+		return true
+	}
+
+	if acs.isEnabled != nil {
+		galog.V(4).Debugf("ACS client is enabled is already set, returning isEnabled: %t", *acs.isEnabled)
+		return *acs.isEnabled
+	}
+
+	desc, err := metadata.New().Get(ctx)
+	if err != nil {
+		// If we fail to get the metadata descriptor, we assume that the instance
+		// has a service account. Do not set the [isEnabled] yet, wait for
+		// the next retry to re-evaluate.
+		galog.Debugf("Failed to get metadata descriptor, err: %v", err)
+		return false
+	}
+
+	present := desc.HasServiceAccount()
+	galog.Infof("Instance has service account: %t, setting ACS client isEnabled to %t", present, present)
+	acs.isEnabled = proto.Bool(present)
+	return present
 }

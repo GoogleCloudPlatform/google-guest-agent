@@ -581,3 +581,67 @@ func TestClose(t *testing.T) {
 		t.Errorf("close() = isConnectionSet.Load() = true, want false")
 	}
 }
+
+func TestIsACSEnabled(t *testing.T) {
+	tests := []struct {
+		name              string
+		acsEnabled        *bool
+		configEnabled     bool
+		override          bool
+		testEnv           string
+		hasServiceAccount bool
+		metadataErr       error
+		want              bool
+	}{
+		{
+			name:          "override",
+			override:      true,
+			configEnabled: true,
+			want:          true,
+		},
+		{
+			name:          "test_env",
+			testEnv:       "true",
+			want:          true,
+			configEnabled: true,
+		},
+		{
+			name:          "already_enabled",
+			acsEnabled:    proto.Bool(true),
+			configEnabled: true,
+			want:          true,
+		},
+		{
+			name:       "already_disabled",
+			acsEnabled: proto.Bool(false),
+			want:       false,
+		},
+		{
+			name:          "config_disabled",
+			configEnabled: false,
+			want:          false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := cfg.Load(nil); err != nil {
+				t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+			}
+
+			t.Setenv("TEST_UNDECLARED_OUTPUTS_DIR", tc.testEnv)
+
+			acs := &acsHelper{isEnabled: tc.acsEnabled}
+			cfg.Retrieve().Core.ACSClient = tc.configEnabled
+
+			ctx := context.Background()
+			if tc.override {
+				ctx = context.WithValue(ctx, OverrideConnection, &conn{})
+			}
+
+			if got := acs.isACSEnabled(ctx); got != tc.want {
+				t.Errorf("isACSEnabled() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
