@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//go:build linux
-
 // Package workloadcertrefresh is responsible for managing workload certificate refreshes.
 package workloadcertrefresh
 
@@ -36,15 +34,6 @@ const (
 	certRefresherModuleID = "gce-workload-cert-refresher"
 	// refreshFrequency  is the frequency at which this job is executed.
 	refreshFrequency = time.Minute * 10
-	// contentDirPrefix is used as prefix to create certificate directories on
-	// refresh as contentDirPrefix-<time>.
-	contentDirPrefix = "/run/secrets/workload-spiffe-contents"
-	// tempSymlinkPrefix is used as prefix to create temporary symlinks on refresh
-	// as tempSymlinkPrefix-<time> to content directories.
-	tempSymlinkPrefix = "/run/secrets/workload-spiffe-symlink"
-	// symlink points to the directory with current GCE workload certificates and
-	// is always expected to be present.
-	symlink = "/run/secrets/workload-spiffe-credentials"
 )
 
 // NewModule returns the first boot module for late stage registration.

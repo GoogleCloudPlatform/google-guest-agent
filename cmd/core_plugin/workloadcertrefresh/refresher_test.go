@@ -12,8 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//go:build linux
-
 package workloadcertrefresh
 
 import (
@@ -25,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	wipb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/workloadcertrefresh/proto/mwlid"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -684,7 +683,7 @@ func TestRefreshCredsWithGRPC(t *testing.T) {
 			config.MWLID.ServiceIP = host
 			config.MWLID.ServicePort = port
 
-			now := "current-time"
+			now := time.Now().Format(time.RFC3339)
 			tmpDir := t.TempDir()
 			opts := outputOpts{
 				contentDirPrefix:  filepath.Join(tmpDir, "contents"),
