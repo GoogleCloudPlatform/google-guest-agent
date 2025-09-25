@@ -20,6 +20,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 )
 
-func addMDSRoute(ctx context.Context) {
+func addMDSRoute(ctx context.Context) error {
 	galog.V(2).Debugf("Adding route to MDS on linux is no-op")
+	return nil
 }

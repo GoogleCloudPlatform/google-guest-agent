@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
@@ -28,6 +29,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
@@ -184,7 +186,16 @@ func fetchRuntimeConfig(ctx context.Context, mds metadata.MDSClientInterface) (r
 // with core plugin.
 func Run(ctx context.Context, c Config) error {
 	// Try adding MDS route before attempting any other setup steps.
-	addMDSRoute(ctx)
+	retryPolicy := retry.Policy{MaxAttempts: 5, BackoffFactor: 2, Jitter: time.Second}
+
+	err := retry.Run(ctx, retryPolicy, func() error {
+		return addMDSRoute(ctx)
+	})
+
+	if err != nil {
+		galog.Warnf("Failed to add MDS route, continuing with setup: %v", err)
+	}
+
 	conf, err := fetchRuntimeConfig(ctx, metadata.New())
 	if err != nil {
 		return fmt.Errorf("failed to get instance ID: %w", err)
