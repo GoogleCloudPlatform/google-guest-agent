@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
@@ -38,9 +39,9 @@ const (
 )
 
 // managerSetup is the windows entry point for the network management.
-func managerSetup(_ context.Context, nics []*nic.Configuration, _ networkChanged) error {
+func managerSetup(_ context.Context, config *cfg.Sections, nics []*nic.Configuration, _ networkChanged) error {
 	for _, nicConfig := range nics {
-		if err := nicSetup(nicConfig); err != nil {
+		if err := nicSetup(config, nicConfig); err != nil {
 			galog.Errorf("Failed to setup NIC %d: %v", nicConfig.Index, err)
 		}
 	}
@@ -48,7 +49,7 @@ func managerSetup(_ context.Context, nics []*nic.Configuration, _ networkChanged
 }
 
 // nicSetup performs the setup of a single NIC.
-func nicSetup(nicConfig *nic.Configuration) error {
+func nicSetup(config *cfg.Sections, nicConfig *nic.Configuration) error {
 	if nicConfig.ExtraAddresses == nil {
 		return nil
 	}
@@ -59,10 +60,16 @@ func nicSetup(nicConfig *nic.Configuration) error {
 
 	extra := nicConfig.ExtraAddresses
 
+	var wantedIPs address.IPAddressMap
+
 	// These are the IP addresses that we want to be present on the NIC. We'll
 	// filter out addresses that are already present and only add the delta ones.
+	//
+	// Note: We must honor the IPForwarding configuration.
 	// Note: Not considering IPaliases as it's not supported on Windows.
-	wantedIPs := address.MergeIPAddressMap(extra.ForwardedIPs, extra.TargetInstanceIPs)
+	if config.NetworkInterfaces.IPForwarding {
+		wantedIPs = address.MergeIPAddressMap(extra.ForwardedIPs, extra.TargetInstanceIPs)
+	}
 
 	iface := nicConfig.Interface
 	macAddr := nicConfig.MacAddr
