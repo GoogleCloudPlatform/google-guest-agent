@@ -57,6 +57,15 @@ $(PBGO_FILES): fetch-go-tpm-tools fetch-mwlid-proto
 	$(Q)protoc --go_out=$(dir $(@)) --go-grpc_out=$(dir $(@)) --proto_path=proto_deps \
 		--experimental_allow_proto3_optional --proto_path=$(dir $(@)) $(M_FLAG) $(SOURCE)
 
+PLUGIN_PROTO = pkg/proto/plugin_comm.proto
+
+pkg/proto/plugin_comm/plugin_comm.pb.go: $(PLUGIN_PROTO)
+	$(Q)echo "Building plugin_comm.proto..."
+	$(Q)protoc --go_out=$(dir $(PLUGIN_PROTO)) --go-grpc_out=$(dir $(PLUGIN_PROTO)) \
+		--experimental_allow_proto3_optional \
+		--proto_path=$(dir $(PLUGIN_PROTO)) \
+		$(PLUGIN_PROTO)
+
 print-go-env:
 	$(Q)echo "golang build environment:"
 	$(Q)echo "#########################"
