@@ -157,7 +157,7 @@ func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, m
 	galog.V(1).Debugf("Network metadata has changed or failed configuration, setting up network interfaces.")
 
 	// Forward the network configuration to the platform's network manager.
-	if err := managerSetup(ctx, nicConfigs, networkChanged{networkInterfaces: metadataChanged, routes: routeChanged}); err != nil {
+	if err := managerSetup(ctx, config, nicConfigs, networkChanged{networkInterfaces: metadataChanged, routes: routeChanged}); err != nil {
 		failedSetup = true
 		return false, fmt.Errorf("failed to setup network interfaces: %v", err)
 	}
