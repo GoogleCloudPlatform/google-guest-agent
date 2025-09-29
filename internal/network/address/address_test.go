@@ -222,6 +222,32 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 		ignore  IPAddressMap
 	}{
 		{
+			name: "forwarded-ips-noop-config-honored",
+			mdsJSON: `
+			{
+				"instance":  {
+					"networkInterfaces": [
+						{
+							"forwardedIps": [
+								"192.0.2.1/24",
+								"192.0.2.2"
+							],
+							"forwardedIpv6s": [
+								"2002:db8:a0b:12f0::1/32",
+								"2001:db8:a0b:12f0::1"
+							]
+						}
+					]
+				}
+			}`,
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: false}},
+			want: &ExtraAddresses{
+				ForwardedIPs:      make(IPAddressMap),
+				TargetInstanceIPs: make(IPAddressMap),
+				IPAliases:         make(IPAddressMap),
+			},
+		},
+		{
 			name: "forwarded-ips-no-ignore",
 			mdsJSON: `
 			{
@@ -240,7 +266,7 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 					]
 				}
 			}`,
-			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{}},
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
 			want: &ExtraAddresses{
 				ForwardedIPs: NewIPAddressMap([]string{
 					"192.0.2.1/24",
@@ -269,7 +295,7 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 					]
 				}
 			}`,
-			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{}},
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
 			ignore: NewIPAddressMap([]string{"192.0.2.1/24", "2002:db8:a0b:12f0::1/32"}, nil),
 			want: &ExtraAddresses{
 				ForwardedIPs: NewIPAddressMap([]string{
@@ -295,7 +321,7 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 					]
 				}
 			}`,
-			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{TargetInstanceIPs: true}},
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{TargetInstanceIPs: true}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
 			want: &ExtraAddresses{
 				TargetInstanceIPs: NewIPAddressMap([]string{
 					"192.0.2.1/24",
@@ -322,7 +348,7 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 					]
 				}
 			}`,
-			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{TargetInstanceIPs: true}},
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{TargetInstanceIPs: true}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
 			ignore: NewIPAddressMap([]string{
 				"192.0.2.1",
 				"2002:db8:a0b:12f0::1/32",
@@ -352,7 +378,7 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 					]
 				}
 			}`,
-			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{IPAliases: true}},
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{IPAliases: true}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
 			want: &ExtraAddresses{
 				IPAliases: NewIPAddressMap([]string{
 					"192.0.2.1/24",
@@ -378,7 +404,7 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 					]
 				}
 			}`,
-			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{}},
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
 			want:   &ExtraAddresses{},
 		},
 	}

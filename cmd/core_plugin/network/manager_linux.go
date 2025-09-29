@@ -28,7 +28,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nm"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/wicked"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
@@ -47,7 +46,7 @@ var (
 )
 
 // managerSetup sets up the network interfaces for linux.
-func managerSetup(ctx context.Context, config *cfg.Sections, nics []*nic.Configuration, networkChanged networkChanged) error {
+func managerSetup(ctx context.Context, nics []*nic.Configuration, networkChanged networkChanged) error {
 	galog.Infof("Running linux network management module setup.")
 	opts := service.NewOptions(defaultLinuxManagers, nics)
 
@@ -57,14 +56,9 @@ func managerSetup(ctx context.Context, config *cfg.Sections, nics []*nic.Configu
 		}
 	}
 
-	// If the routes have changed and IP forwarding is enabled then we attempt to
-	// setup the routes. Make sure we honor the IP forwarding configuration and
-	// only setup the routes if it's enabled.
-	if networkChanged.routes && config.NetworkInterfaces.IPForwarding {
-		// Attempt to setup the routes.
-		if err := route.Setup(ctx, opts); err != nil {
-			return fmt.Errorf("failed to setup routes: %w", err)
-		}
+	// Attempt to setup the routes.
+	if err := route.Setup(ctx, opts); err != nil {
+		return fmt.Errorf("failed to setup routes: %w", err)
 	}
 
 	galog.Infof("Finished linux network management module setup.")

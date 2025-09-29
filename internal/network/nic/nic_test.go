@@ -105,6 +105,9 @@ func TestNewConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			config := &cfg.Sections{
 				IPForwarding: &cfg.IPForwarding{},
+				NetworkInterfaces: &cfg.NetworkInterfaces{
+					IPForwarding: true,
+				},
 			}
 
 			mds, err := metadata.UnmarshalDescriptor(tc.mdsJSON)
@@ -315,6 +318,7 @@ func TestNewConfigs(t *testing.T) {
 				IPForwarding: &cfg.IPForwarding{},
 				NetworkInterfaces: &cfg.NetworkInterfaces{
 					ManagePrimaryNIC: true,
+					IPForwarding:     false,
 				},
 			}
 

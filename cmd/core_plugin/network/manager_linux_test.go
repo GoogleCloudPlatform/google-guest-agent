@@ -472,7 +472,6 @@ func TestManagerSetup(t *testing.T) {
 		},
 	}
 
-	config := cfg.Retrieve()
 	ctx := context.Background()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -488,7 +487,7 @@ func TestManagerSetup(t *testing.T) {
 				defaultLinuxManagers = oldManagers
 			})
 
-			err := managerSetup(ctx, config, tc.opts.NICConfigs(), networkChanged{true, false})
+			err := managerSetup(ctx, tc.opts.NICConfigs(), networkChanged{true, false})
 			if (err == nil) == tc.wantError {
 				t.Errorf("runManagerSetup(ctx, %+v) = %v, want error", tc.opts, err)
 			}

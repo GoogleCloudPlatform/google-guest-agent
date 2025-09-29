@@ -147,6 +147,21 @@ func NewExtraAddresses(nic *metadata.NetworkInterface, config *cfg.Sections, ign
 	var targetInstanceIPs IPAddressMap
 	var ipAliases IPAddressMap
 
+	// Honor users configuration and don't map any addresses if IP forwarding is
+	// not enabled.
+	//
+	// We return ExtraAddresses object with empty maps so if in any case the
+	// user is running a broken version of guest agent or core plugin where
+	// IPForwarding is not being honored the guest agent will make sure to have
+	// the routes removed.
+	if !config.NetworkInterfaces.IPForwarding {
+		return &ExtraAddresses{
+			ForwardedIPs:      make(IPAddressMap),
+			TargetInstanceIPs: make(IPAddressMap),
+			IPAliases:         make(IPAddressMap),
+		}
+	}
+
 	// Map target instance IPs if configured, ignore addresses provided within
 	// the ignore map.
 	if config.IPForwarding.TargetInstanceIPs {
