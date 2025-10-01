@@ -26,6 +26,17 @@ option go_package = "google_guest_agent/acp";
 
 // option go_api_flag = "OPEN_TO_OPAQUE_HYBRID";
 
+// PlatformInfo reports platform information based on a SMBIOS/DMI check.
+message PlatformInfo {
+  // Whether the process is running on GCE, as determined by SMBIOS/DMI data
+  // such as board_serial. For example, on Linux /sys/class/dmi/id/board_serial
+  // or (Get-CimInstance -ClassName Win32_BaseBoard).SerialNumber is inspected.
+  bool on_gce = 1;
+
+  // Error message if SMBIOS/DMI data could not be read. Empty if successful.
+  string error = 2;
+}
+
 // Continuous State Enforcement system send the message to request agent
 // information.
 message GetAgentInfo {}
