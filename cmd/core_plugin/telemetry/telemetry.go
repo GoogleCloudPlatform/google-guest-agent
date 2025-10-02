@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
@@ -70,8 +71,22 @@ func teardown(context.Context) {
 // moduleSetup schedules a job to collect and publish telemetry data.
 func moduleSetup(ctx context.Context, data any) error {
 	galog.Debugf("Initializing telemetry module.")
+
+	// Send one time platform info to ACS to indicate if running on GCE.
+	onGCE, err := isOnGCE(ctx)
+	msg := &acppb.PlatformInfo{OnGce: onGCE}
+	if err != nil {
+		msg.Error = fmt.Sprintf("Unable to determine if running on GCE: %v", err)
+	}
+
+	go func() {
+		if _, err := client.SendMessage(ctx, nil, msg); err != nil {
+			galog.Warnf("Failed to send platform info to ACS: %v", err)
+		}
+	}()
+
 	job := &Job{client: metadata.New(), osInfoReader: osinfo.Read}
-	err := scheduler.Instance().ScheduleJob(ctx, job)
+	err = scheduler.Instance().ScheduleJob(ctx, job)
 	if err == nil {
 		galog.Debugf("Successfully initialized telemetry job.")
 	}
