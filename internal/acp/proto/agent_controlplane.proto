@@ -63,6 +63,8 @@ message AgentInfo {
     // The agent supports configuring different plugin states through
     // install/remove a plugin revision.
     CONFIGURE_PLUGIN_STATES = 4;
+    // The agent supports applying the config to the installed plugin.
+    APPLY_PLUGIN_CONFIG = 5;
   }
 }
 
@@ -124,6 +126,8 @@ message CurrentPluginStates {
     Status pending_plugin_status = 5;
     // The metrics of the current plugin.
     repeated Metric current_plugin_metrics = 6;
+    // The hash of the config applied to the plugin during the last start.
+    string config_hash = 7;
 
     // Detailed plugin status on the resource.
     //
@@ -207,6 +211,10 @@ message ConfigurePluginStates {
     // When using this action, only the name of the plugin will be specified,
     // other fields will be empty.
     REMOVE = 2;
+    // Instruct the Guest Agent to apply the config to the running plugin. If
+    // the plugin does not support Apply RPC then the Guest Agent will restart
+    // the plugin with the new config.
+    APPLY = 3;
   }
 
   message Plugin {
@@ -311,6 +319,16 @@ message PluginEventMessage {
     // Event indicating that an attempt to remove or uninstall the plugin has
     // failed.
     PLUGIN_REMOVE_FAILED = 10;
+    // Event indicating that agent has received the plugin config to apply.
+    PLUGIN_CONFIG_APPLY = 11;
+    // Event indicating that agent successfully applied the plugin config.
+    PLUGIN_CONFIG_APPLIED = 12;
+    // Event indicating that agent failed to apply the plugin config. This event
+    // will be triggered only when the plugin returns non-unimplemented rpc
+    // error code to the Apply RPC. In case of unimplemented error code, the
+    // agent will run restart workflow on the plugin with new config and
+    // will not trigger this event.
+    PLUGIN_CONFIG_APPLY_FAILED = 13;
   }
 
   // EventType categorizes the event (e.g., CRASH, STOP, START, INSTALL_FAILED).
