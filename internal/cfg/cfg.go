@@ -79,7 +79,7 @@ userdel_cmd = userdel -r {user}
 
 [Daemons]
 accounts_daemon = true
-clock_skew_daemon = true
+clock_skew_daemon = false
 network_daemon = true
 
 [IpForwarding]

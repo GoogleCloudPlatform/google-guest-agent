@@ -19,11 +19,13 @@ package clock
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )
 
 func TestNewModule(t *testing.T) {
@@ -59,34 +61,39 @@ func TestModuleSetup(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		data            any
-		clockSkewDaemon bool
-		wantError       bool
+		name             string
+		data             any
+		clockSkewDaemon  bool
+		wantSubscription bool
+		wantError        bool
 	}{
 		{
-			name:            "empty-mds",
-			data:            desc,
-			clockSkewDaemon: true,
-			wantError:       false,
+			name:             "empty-mds",
+			data:             desc,
+			clockSkewDaemon:  true,
+			wantSubscription: true,
+			wantError:        false,
 		},
 		{
-			name:            "nil-data",
-			data:            nil,
-			clockSkewDaemon: true,
-			wantError:       true,
+			name:             "nil-data",
+			data:             nil,
+			clockSkewDaemon:  true,
+			wantSubscription: false,
+			wantError:        true,
 		},
 		{
-			name:            "invalid-data",
-			data:            &clockSkew{},
-			clockSkewDaemon: true,
-			wantError:       true,
+			name:             "invalid-data",
+			data:             &clockSkew{},
+			clockSkewDaemon:  true,
+			wantError:        true,
+			wantSubscription: false,
 		},
 		{
-			name:            "daemon-disabled",
-			data:            desc,
-			clockSkewDaemon: false,
-			wantError:       false,
+			name:             "daemon-disabled",
+			data:             desc,
+			clockSkewDaemon:  false,
+			wantError:        false,
+			wantSubscription: false,
 		},
 	}
 
@@ -96,11 +103,19 @@ func TestModuleSetup(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+
+			t.Cleanup(func() {
+				events.FetchManager().Unsubscribe(metadata.LongpollEvent, clockSkewModuleID)
+			})
+
 			cfg.Retrieve().Daemons.ClockSkewDaemon = tc.clockSkewDaemon
 			mod := &clockSkew{}
 			err = mod.moduleSetup(context.Background(), tc.data)
 			if err != nil && !tc.wantError {
 				t.Errorf("moduleSetup() returned error %v, want nil", err)
+			}
+			if got := events.FetchManager().IsSubscribed(metadata.LongpollEvent, clockSkewModuleID); got != tc.wantSubscription {
+				t.Errorf("moduleSetup() subscribed to metadata longpoll event: %t, want %t", got, tc.wantSubscription)
 			}
 		})
 	}
@@ -121,8 +136,8 @@ func TestMetadataSubscriber(t *testing.T) {
 	mdsWithTokenJSON := `
 	{
 		"instance":  {
-			"virtual_clock": {
-				"drift_token": "token"
+			"virtualClock": {
+				"driftToken": "token"
 			}
 		}
 	}`
@@ -180,6 +195,7 @@ func TestMetadataSubscriber(t *testing.T) {
 	}
 
 	cfg.Load(nil)
+	cfg.Retrieve().Daemons.ClockSkewDaemon = true
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mod := &clockSkew{prevMetadata: tc.prevDesc}
@@ -192,6 +208,121 @@ func TestMetadataSubscriber(t *testing.T) {
 			}
 			if (err != nil) != tc.wantError {
 				t.Errorf("metadataSubscriber() returned error %v, want error: %t", err, tc.wantError)
+			}
+		})
+	}
+}
+
+type testRunner struct {
+	throwErr bool
+}
+
+func (tr *testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	if tr.throwErr {
+		return nil, errors.New("error")
+	}
+	return nil, nil
+}
+
+func TestClockSetup(t *testing.T) {
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	mdsJSON := `
+	{
+		"instance":  {
+			"virtualClock": {
+				"driftToken": "%s"
+			}
+		}
+	}`
+
+	newDesc := func(token string) *metadata.Descriptor {
+		d, err := metadata.UnmarshalDescriptor(fmt.Sprintf(mdsJSON, token))
+		if err != nil {
+			t.Fatalf("Failed to unmarshal descriptor: %v", err)
+		}
+		return d
+	}
+
+	orig := run.Client
+	t.Cleanup(func() { run.Client = orig })
+
+	tests := []struct {
+		name            string
+		clockSkewDaemon bool
+		mod             *clockSkew
+		desc            *metadata.Descriptor
+		wantRenew       bool
+		wantNoop        bool
+		runClient       run.RunnerInterface
+		wantToken       string
+		wantErr         bool
+	}{
+		{
+			name:      "metadata_unchanged",
+			mod:       &clockSkew{prevMetadata: newDesc("token1")},
+			desc:      newDesc("token1"),
+			wantToken: "token1",
+			wantRenew: true,
+			wantNoop:  true,
+			runClient: &testRunner{throwErr: false},
+			wantErr:   false,
+		},
+		{
+			name:      "metadata_changed",
+			mod:       &clockSkew{prevMetadata: newDesc("token1")},
+			desc:      newDesc("token2"),
+			wantToken: "token2",
+			wantRenew: true,
+			wantNoop:  false,
+			runClient: &testRunner{throwErr: false},
+			wantErr:   false,
+		},
+		{
+			name:      "metadata_changed_err",
+			mod:       &clockSkew{prevMetadata: newDesc("token1")},
+			desc:      newDesc("token2"),
+			wantToken: "token2",
+			wantRenew: true,
+			wantNoop:  false,
+			runClient: &testRunner{throwErr: true},
+			wantErr:   true,
+		},
+		{
+			name:      "no_prev_metadata",
+			mod:       &clockSkew{},
+			desc:      newDesc("token1"),
+			wantToken: "token1",
+			wantRenew: true,
+			wantNoop:  false,
+			runClient: &testRunner{throwErr: false},
+			wantErr:   false,
+		},
+	}
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() returned error %v", err)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			run.Client = tc.runClient
+			renew, noop, err := tc.mod.clockSetup(ctx, tc.desc)
+			if renew != tc.wantRenew {
+				t.Errorf("clockSetup() renew got %t, want %t", renew, tc.wantRenew)
+			}
+			if noop != tc.wantNoop {
+				t.Errorf("clockSetup() noop got %t, want %t", noop, tc.wantNoop)
+			}
+
+			if got := tc.mod.prevMetadata.Instance().VirtualClock().DriftToken(); got != tc.wantToken {
+				t.Errorf("clockSetup() prevMetadata got %v, want %v", got, tc.wantToken)
+			}
+			if (err != nil) != tc.wantErr {
+				t.Errorf("clockSetup() err got %v, want error: %t", err, tc.wantErr)
 			}
 		})
 	}
