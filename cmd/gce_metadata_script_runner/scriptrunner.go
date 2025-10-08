@@ -408,7 +408,7 @@ func readExistingKeys(ctx context.Context, mdsClient metadata.MDSClientInterface
 // handleEvent is the entrypoint for metadata script runner. This is expected to
 // be invoked on receiving VM startup/shutdown/specialze(windows sysprep) event.
 func handleEvent(ctx context.Context, mdsClient metadata.MDSClientInterface, event string) error {
-	galog.Infof("Running metadata script runner for %q event", event)
+	galog.Infof("Running metadata script runner (version %s) for %q event", version, event)
 
 	wantedKeys, err := mdsScriptKeys(event, runtime.GOOS)
 	if err != nil {

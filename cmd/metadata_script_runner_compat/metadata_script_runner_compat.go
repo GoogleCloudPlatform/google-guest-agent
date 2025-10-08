@@ -70,6 +70,8 @@ func main() {
 		galog.Fatalf("No valid event type (%v) provided, usage: %s <startup|shutdown|specialize>", os.Args, os.Args[0])
 	}
 
+	galog.Infof("Initialized Metadata Script Runner Compat (version %s)", version)
+
 	if err := launchScriptRunner(ctx, metadata.New(), os.Args[1]); err != nil {
 		galog.Fatalf("Failed to launch script runner: %v", err)
 	}
