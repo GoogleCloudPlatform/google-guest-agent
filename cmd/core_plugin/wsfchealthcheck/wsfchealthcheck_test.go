@@ -495,3 +495,82 @@ func TestHasDescriptorChanged(t *testing.T) {
 		})
 	}
 }
+
+func TestReset(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	template := `{"instance": {"attributes": {"enable-wsfc": "%s", "wsfc-agent-port": "%d"}}}`
+	ports := freePort(t, 2)
+
+	ctx := context.WithValue(context.Background(), overrideIPExistCheck, "1")
+	mgr := newWsfcManager(connectOpts{protocol: tcpProtocol})
+	t.Cleanup(func() {
+		mgr.agent.stop(ctx)
+	})
+
+	tests := []struct {
+		name        string
+		wsfcEnabled string
+		port        int
+		wantNoop    bool
+		wantRunning bool
+		wantAddr    string
+	}{
+		{
+			name:        "agent_disabled",
+			wsfcEnabled: "false",
+			port:        ports[0],
+			wantNoop:    true,
+			wantRunning: false,
+		},
+		{
+			name:        "agent_enabled",
+			wsfcEnabled: "true",
+			port:        ports[0],
+			wantNoop:    false,
+			wantRunning: true,
+			wantAddr:    fmt.Sprintf(":%d", ports[0]),
+		},
+		{
+			name:        "address_change",
+			wsfcEnabled: "true",
+			port:        ports[1],
+			wantNoop:    false,
+			wantRunning: true,
+			wantAddr:    fmt.Sprintf(":%d", ports[1]),
+		},
+		{
+			name:        "agent_disabled_again",
+			wsfcEnabled: "false",
+			port:        ports[1],
+			wantNoop:    false,
+			wantRunning: false,
+		},
+	}
+
+	// Run tests in sequence to verify state changes.
+	for _, tt := range tests {
+		t.Logf("Running test: %s", tt.name)
+
+		desc, err := metadata.UnmarshalDescriptor(fmt.Sprintf(template, tt.wsfcEnabled, tt.port))
+		if err != nil {
+			t.Fatalf("UnmarshalDescriptor() failed unexpectedly with error: %v", err)
+		}
+
+		noop, err := mgr.reset(ctx, desc)
+		if err != nil {
+			t.Fatalf("mgr.reset(ctx, desc) failed: %v", err)
+		}
+		if noop != tt.wantNoop {
+			t.Errorf("mgr.reset() got noop %t, want %t", noop, tt.wantNoop)
+		}
+		if mgr.agent.isRunning() != tt.wantRunning {
+			t.Errorf("Agent running state %t, want %t", mgr.agent.isRunning(), tt.wantRunning)
+		}
+		if tt.wantRunning && mgr.agent.address() != tt.wantAddr {
+			t.Errorf("Agent address %q, want %q", mgr.agent.address(), tt.wantAddr)
+		}
+	}
+}
