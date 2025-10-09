@@ -19,9 +19,15 @@ package clock
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
+	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 )
+
+var adjtimePath = "/etc/adjtime"
 
 func platformImpl(ctx context.Context) error {
 	cmd := []string{"/sbin/hwclock", "--hctosys", "-u", "--noadjfile"}
@@ -30,4 +36,36 @@ func platformImpl(ctx context.Context) error {
 		return fmt.Errorf("failed to run hwclock: %w", err)
 	}
 	return nil
+}
+
+func isEnabled() bool {
+	clockSkewEnabled := cfg.Retrieve().Daemons.ClockSkewDaemon
+	galog.Debugf("Clock skew daemon is enabled: [%t] from config", clockSkewEnabled)
+	if !clockSkewEnabled {
+		return false
+	}
+
+	isUTC := isRTCModeUTC()
+	galog.Infof("Identified RTC mode isUTC to be: [%t] from %q", isUTC, adjtimePath)
+	return isUTC
+}
+
+func isRTCModeUTC() bool {
+	data, err := os.ReadFile(adjtimePath)
+	if err != nil {
+		galog.Warnf("Failed to read %q: %v, assuming RTC mode to be not UTC", adjtimePath, err)
+		return false
+	}
+
+	// For more details on the format of the file, see:
+	// https://man7.org/linux/man-pages/man5/adjtime_config.5.html
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 3 {
+		galog.Warnf("Invalid format for %q: %v, assuming RTC mode to be not UTC", adjtimePath, err)
+		return false
+	}
+
+	// The third line contains the setting.
+	modeStr := strings.TrimSpace(lines[2])
+	return strings.ToLower(modeStr) == "utc"
 }

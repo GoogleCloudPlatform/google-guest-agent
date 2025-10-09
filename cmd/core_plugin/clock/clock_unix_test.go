@@ -60,6 +60,10 @@ func TestModuleSetup(t *testing.T) {
 		t.Fatalf("UnmarshalDescriptor(%q) returned error %v", mdsJSON, err)
 	}
 
+	oldAdjtimePath := adjtimePath
+	adjtimePath = createTestAdjtimeFile(t, adjtimeContent("UTC"))
+	defer func() { adjtimePath = oldAdjtimePath }()
+
 	tests := []struct {
 		name             string
 		data             any

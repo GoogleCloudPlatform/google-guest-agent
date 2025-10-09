@@ -20,8 +20,16 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
+
+// wallClockPath is the path to the wall clock file on freebsd. Exists if the
+// RTC is not in UTC mode.
+// https://man.freebsd.org/cgi/man.cgi?query=adjkerntz
+const wallClockPath = "/etc/wall_cmos_clock"
 
 // platformImpl implements freebsd's specific clock skew setup.
 func platformImpl(ctx context.Context) error {
@@ -49,4 +57,17 @@ func platformImpl(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func isEnabled() bool {
+	clockSkewEnabled := cfg.Retrieve().Daemons.ClockSkewDaemon
+	galog.Debugf("Clock skew daemon is enabled: [%t] from config", clockSkewEnabled)
+	if !clockSkewEnabled {
+		return false
+	}
+
+	// https://man.freebsd.org/cgi/man.cgi?query=adjkerntz
+	isUTC := !file.Exists(wallClockPath, file.TypeFile)
+	galog.Infof("Identified RTC mode isUTC to be: [%t] from %q", isUTC, wallClockPath)
+	return isUTC
 }
