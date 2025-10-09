@@ -271,7 +271,7 @@ func TestLauncherStep(t *testing.T) {
 			}
 
 			wantPlugin := &Plugin{Name: plugin.Name, Revision: plugin.Revision, Address: addr, Manifest: &Manifest{LaunchArguments: []string{"--foo=bar"}, MaxMemoryUsage: 10, MaxCPUUsage: 20, StartAttempts: 3, StartTimeout: time.Second * 5, StartConfig: &ServiceConfig{Simple: tc.serviceCfg}}, EntryPath: entryPath, RuntimeInfo: &RuntimeInfo{Pid: tr.pid, status: tc.status}, InstallPath: tc.path, Protocol: step.protocol, PluginType: tc.pluginType}
-			if diff := cmp.Diff(wantPlugin, plugin, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}), cmpopts.IgnoreFields(Plugin{}, "client")); diff != "" {
+			if diff := cmp.Diff(wantPlugin, plugin, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}), cmpopts.IgnoreFields(Plugin{}, "client"), cmpopts.IgnoreUnexported(Manifest{})); diff != "" {
 				t.Errorf("launchStep.Run(ctx, %+v) executed unexpectedly with diff (-want +got):\n%s", plugin, diff)
 			}
 
