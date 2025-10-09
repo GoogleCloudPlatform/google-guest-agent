@@ -368,6 +368,7 @@ func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPlug
 			CurrentRevisionId:    p.Revision,
 			CurrentPluginStatus:  status,
 			CurrentPluginMetrics: pluginMetrics,
+			ConfigHash:           p.configHash(),
 		}
 
 		pendingStatus := p.pendingStatus()

@@ -16,6 +16,8 @@ package manager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"net/http"
@@ -199,7 +201,7 @@ func TestStore(t *testing.T) {
 	for _, tc := range loadTests {
 		t.Run(tc.name, func(t *testing.T) {
 			gotP := got[tc.plugin.Name]
-			if diff := cmp.Diff(tc.plugin, gotP, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{})); diff != "" {
+			if diff := cmp.Diff(tc.plugin, gotP, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}, Manifest{})); diff != "" {
 				t.Errorf("load(%s) returned diff (-want +got):\n%s", infoDir, diff)
 			}
 
@@ -549,7 +551,7 @@ func TestSetMetricConfig(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			got := &Plugin{Manifest: &Manifest{}, RuntimeInfo: &RuntimeInfo{}}
 			got.setMetricConfig(tc.req)
-			if diff := cmp.Diff(tc.want, got, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{})); diff != "" {
+			if diff := cmp.Diff(tc.want, got, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}, Manifest{})); diff != "" {
 				t.Errorf("setMetricConfig(%+v) returned unexpected diff (-want +got):\n%s", tc.req, diff)
 			}
 			if got.RuntimeInfo.metrics.Capacity() != tc.capacity {
@@ -672,7 +674,7 @@ func TestInstallPlugin(t *testing.T) {
 			}
 
 			got := pm.plugins[req.Plugin.Name]
-			if diff := cmp.Diff(want, got, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{})); diff != "" {
+			if diff := cmp.Diff(want, got, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}, Manifest{})); diff != "" {
 				t.Errorf("pm.plugins[%s] returned unexpected diff (-want +got):\n%s", req.Plugin.Name, diff)
 			}
 
@@ -883,8 +885,13 @@ func TestMonitoring(t *testing.T) {
 
 func TestListPluginStates(t *testing.T) {
 	now := time.Now()
-	pluginA := &Plugin{Name: "PluginA", Revision: "RevisionA", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 0, messages: []string{"ok"}, timestamp: now}, metrics: boundedlist.New[Metric](2), status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}}
-	pluginB := &Plugin{Name: "PluginB", Revision: "RevisionB", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 1, messages: []string{"missing pre-reqs"}, timestamp: now}, metrics: boundedlist.New[Metric](2), pendingPluginStatus: &pendingPluginStatus{revision: "RevisionB1"}, status: acpb.CurrentPluginStates_DaemonPluginState_CRASHED}}
+
+	simpleData := "simple-config"
+	simpleHashBytes := sha256.Sum256([]byte(simpleData))
+	simpleHash := hex.EncodeToString(simpleHashBytes[:])
+
+	pluginA := &Plugin{Name: "PluginA", Revision: "RevisionA", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 0, messages: []string{"ok"}, timestamp: now}, metrics: boundedlist.New[Metric](2), status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}, Manifest: &Manifest{StartConfig: &ServiceConfig{Simple: simpleData}}}
+	pluginB := &Plugin{Name: "PluginB", Revision: "RevisionB", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 1, messages: []string{"missing pre-reqs"}, timestamp: now}, metrics: boundedlist.New[Metric](2), pendingPluginStatus: &pendingPluginStatus{revision: "RevisionB1"}, status: acpb.CurrentPluginStates_DaemonPluginState_CRASHED}, Manifest: &Manifest{}}
 
 	pluginA.setPendingStatus("RevisionA1", acpb.CurrentPluginStates_DaemonPluginState_INSTALLING)
 	pluginB.resetPendingStatus()
@@ -908,6 +915,7 @@ func TestListPluginStates(t *testing.T) {
 					Results:      pluginA.RuntimeInfo.health.messages,
 					UpdateTime:   tpb.New(now),
 				},
+				ConfigHash: simpleHash,
 			},
 			&acpb.CurrentPluginStates_DaemonPluginState{
 				Name:              pluginB.Name,
@@ -1174,7 +1182,7 @@ func TestNewPluginManifest(t *testing.T) {
 			t.Fatalf("newPluginManifest(%v) returned an unexpected error: %v", tc.req, err)
 		}
 
-		if diff := cmp.Diff(tc.want, got, cmpopts.IgnoreFields(ServiceConfig{}, "Structured")); diff != "" {
+		if diff := cmp.Diff(tc.want, got, cmpopts.IgnoreUnexported(Manifest{}), cmpopts.IgnoreFields(ServiceConfig{}, "Structured")); diff != "" {
 			t.Errorf("newPluginManifest(%v) returned an unexpected diff (-want +got): %v", tc.req, diff)
 		}
 

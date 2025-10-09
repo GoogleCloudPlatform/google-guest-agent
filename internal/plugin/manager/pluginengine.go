@@ -133,6 +133,12 @@ type Manifest struct {
 	// StartConfig is the config service has sent down for passing down to the
 	// plugin on each start RPC request.
 	StartConfig *ServiceConfig
+	// startConfigMu mutex protects concurrent updates to startConfig.
+	startConfigMu sync.Mutex
+	// startConfigHash is the hash of the start config. This is reported back to
+	// the control plane to determine if there's a new config or not and applied
+	// accordingly.
+	startConfigHash string
 	// LaunchArguments are extra arguments specified by plugin owners to pass down
 	// during process launch.
 	LaunchArguments []string
