@@ -103,6 +103,16 @@ func (winServiceClient) StopDaemon(ctx context.Context, daemon string) error {
 		return fmt.Errorf("failed to open service controller for %q: %w", daemon, err)
 	}
 
+	state, err := ctrlr.Query()
+	if err != nil {
+		return fmt.Errorf("failed to query service %q: %w", daemon, err)
+	}
+
+	// If the service is already stopped, return early.
+	if state.State == svc.Stopped {
+		return nil
+	}
+
 	if _, err := ctrlr.Control(svc.Stop); err != nil {
 		return fmt.Errorf("failed to stop service %q: %w", daemon, err)
 	}
