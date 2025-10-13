@@ -112,7 +112,7 @@ func TestModuleSetup(t *testing.T) {
 				events.FetchManager().Unsubscribe(metadata.LongpollEvent, clockSkewModuleID)
 			})
 
-			cfg.Retrieve().Daemons.ClockSkewDaemon = tc.clockSkewDaemon
+			cfg.Retrieve().Daemons.ClockDaemon = tc.clockSkewDaemon
 			mod := &clockSkew{}
 			err = mod.moduleSetup(context.Background(), tc.data)
 			if err != nil && !tc.wantError {
