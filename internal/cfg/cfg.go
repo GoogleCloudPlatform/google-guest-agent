@@ -79,6 +79,7 @@ userdel_cmd = userdel -r {user}
 
 [Daemons]
 accounts_daemon = true
+clock_daemon = false
 clock_skew_daemon = false
 network_daemon = true
 
@@ -338,7 +339,9 @@ type AddressManager struct {
 
 // Daemons contains the configurations of Daemons section.
 type Daemons struct {
-	AccountsDaemon  bool `ini:"accounts_daemon,omitempty"`
+	AccountsDaemon bool `ini:"accounts_daemon,omitempty"`
+	ClockDaemon    bool `ini:"clock_daemon,omitempty"`
+	// Deprecated: Use ClockDaemon instead.
 	ClockSkewDaemon bool `ini:"clock_skew_daemon,omitempty"`
 	NetworkDaemon   bool `ini:"network_daemon,omitempty"`
 }

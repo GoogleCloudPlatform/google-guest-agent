@@ -60,7 +60,7 @@ func platformImpl(ctx context.Context) error {
 }
 
 func isEnabled() bool {
-	clockSkewEnabled := cfg.Retrieve().Daemons.ClockSkewDaemon
+	clockSkewEnabled := cfg.Retrieve().Daemons.ClockDaemon
 	galog.Debugf("Clock skew daemon is enabled: [%t] from config", clockSkewEnabled)
 	if !clockSkewEnabled {
 		return false

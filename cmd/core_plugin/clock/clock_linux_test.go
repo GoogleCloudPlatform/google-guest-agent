@@ -44,6 +44,14 @@ func TestIsEnabled(t *testing.T) {
 		t.Fatalf("cfg.Load() returned error %v", err)
 	}
 
+	if cfg.Retrieve().Daemons.ClockDaemon {
+		t.Errorf("ClockDaemon should be false by default")
+	}
+
+	if cfg.Retrieve().Daemons.ClockSkewDaemon {
+		t.Errorf("ClockSkewDaemon should be false by default")
+	}
+
 	tests := []struct {
 		name            string
 		adjtimeContent  string
@@ -88,7 +96,7 @@ func TestIsEnabled(t *testing.T) {
 			adjtimePath = createTestAdjtimeFile(t, tc.adjtimeContent)
 			defer func() { adjtimePath = oldAdjtimePath }()
 
-			cfg.Retrieve().Daemons.ClockSkewDaemon = tc.clockSkewDaemon
+			cfg.Retrieve().Daemons.ClockDaemon = tc.clockSkewDaemon
 
 			if got := isEnabled(); got != tc.want {
 				t.Errorf("isEnabled() = %v, want %v", got, tc.want)
