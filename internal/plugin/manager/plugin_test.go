@@ -16,6 +16,8 @@ package manager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"path/filepath"
 	"strings"
@@ -421,6 +423,92 @@ func TestBuildStartRequest(t *testing.T) {
 			}
 			if diff := cmp.Diff(test.want, got, protocmp.Transform()); diff != "" {
 				t.Errorf("plugin.buildStartRequest(ctx) returned diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestConfigHash(t *testing.T) {
+	structCfg := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"foo":   structpb.NewStringValue("bar"),
+			"count": structpb.NewNumberValue(10),
+		},
+	}
+
+	structBytes, err := proto.Marshal(structCfg)
+	if err != nil {
+		t.Fatalf("proto.Marshal(%+v) failed unexpectedly with error: %v", structCfg, err)
+	}
+	structuredHashBytes := sha256.Sum256(structBytes)
+	structuredHash := hex.EncodeToString(structuredHashBytes[:])
+
+	simpleData := "simple"
+	simpleHashBytes := sha256.Sum256([]byte(simpleData))
+	simpleHash := hex.EncodeToString(simpleHashBytes[:])
+
+	tests := []struct {
+		name       string
+		plugin     *Plugin
+		wantHash   string
+		wantCached bool
+	}{
+		{
+			name: "nil_start_config",
+			plugin: &Plugin{
+				Name:     "plugin-a",
+				Revision: "1",
+				Manifest: &Manifest{},
+			},
+			wantHash: "",
+		},
+		{
+			name: "empty_service_config",
+			plugin: &Plugin{
+				Name:     "plugin-b",
+				Revision: "1",
+				Manifest: &Manifest{StartConfig: &ServiceConfig{}},
+			},
+			wantHash: "",
+		},
+		{
+			name: "simple_config",
+			plugin: &Plugin{
+				Name:     "plugin-c",
+				Revision: "1",
+				Manifest: &Manifest{StartConfig: &ServiceConfig{Simple: simpleData}},
+			},
+			wantHash: simpleHash,
+		},
+		{
+			name: "structured_config",
+			plugin: &Plugin{
+				Name:     "plugin-d",
+				Revision: "1",
+				Manifest: &Manifest{StartConfig: &ServiceConfig{Structured: structBytes}},
+			},
+			wantHash: structuredHash,
+		},
+		{
+			name: "cached_hash",
+			plugin: &Plugin{
+				Name:     "plugin-e",
+				Revision: "1",
+				Manifest: &Manifest{startConfigHash: "cachedhash"},
+			},
+			wantHash:   "cachedhash",
+			wantCached: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			hash := test.plugin.configHash()
+			if hash != test.wantHash {
+				t.Errorf("configHash() = %q, want %q", hash, test.wantHash)
+			}
+			if !test.wantCached && test.plugin.Manifest.startConfigHash != test.wantHash {
+				t.Errorf("startConfigHash cache = %q, want %q", test.plugin.Manifest.startConfigHash, test.wantHash)
 			}
 		})
 	}

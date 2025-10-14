@@ -17,7 +17,9 @@ package manager
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/gob"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -250,4 +252,33 @@ func (p *Plugin) logfile() string {
 // revision.
 func (p *Plugin) staticInstallPath() string {
 	return filepath.Join(baseState(), pluginInstallDir, p.Name)
+}
+
+// configHash returns the sha256 hash of the config applied to the plugin during
+// the last start. If the config is nil it will return an empty string. If the
+// hash is already computed, it will return the cached hash.
+func (p *Plugin) configHash() string {
+	p.Manifest.startConfigMu.Lock()
+	defer p.Manifest.startConfigMu.Unlock()
+
+	if p.Manifest.startConfigHash != "" || p.Manifest.StartConfig == nil {
+		return p.Manifest.startConfigHash
+	}
+
+	var data []byte
+	// Either simple or structured config is expected to be present. This is
+	// enforced by [Manifest.Config] proto message.
+	if len(p.Manifest.StartConfig.Simple) != 0 {
+		data = []byte(p.Manifest.StartConfig.Simple)
+		galog.Debugf("Computing start config hash from string config for plugin %q", p.FullName())
+	} else if len(p.Manifest.StartConfig.Structured) != 0 {
+		data = p.Manifest.StartConfig.Structured
+		galog.Debugf("Computing start config hash from structured config for plugin %q", p.FullName())
+	} else {
+		return ""
+	}
+
+	hash := sha256.Sum256(data)
+	p.Manifest.startConfigHash = hex.EncodeToString(hash[:])
+	return p.Manifest.startConfigHash
 }
