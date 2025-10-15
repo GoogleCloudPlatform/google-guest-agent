@@ -34,6 +34,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 	tpb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -762,7 +763,22 @@ func (m *PluginManager) applyConfig(ctx context.Context, req *acpb.ConfigurePlug
 	p.configHash()
 
 	_, status := p.Apply(ctx, p.Manifest.StartConfig)
-	if status.Err() != nil {
+	if status.Err() == nil {
+		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLIED, "Successfully applied the config to the plugin.")
+		return nil
+	}
+
+	if status.Code() == codes.Unimplemented {
+		// Plugin doesn't support applying config via Apply RPC. This could be
+		// because plugin doesn't support config update at runtime or it
+		// deliberately needs a restart to apply the config. In either case
+		// retrying won't help and we should attempt restart workflow.
+		galog.Infof("Plugin %q returned unimplemented error for apply config request, attempting the restart workflow", p.FullName())
+		if err := p.runSteps(ctx, relaunchWorkflow(ctx, p)); err != nil {
+			p.setState(acpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+			return fmt.Errorf("failed to relaunch plugin %q: %w", p.FullName(), err)
+		}
+	} else {
 		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to apply config: %v", status.Err()))
 		return fmt.Errorf("failed to apply config: %w", status.Err())
 	}
