@@ -32,7 +32,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	apb "google.golang.org/protobuf/types/known/anypb"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -113,18 +112,47 @@ func (p *Plugin) Stop(ctx context.Context, cleanup bool) (*pb.StopResponse, *sta
 	return resp, status.Convert(err)
 }
 
-// Apply makes plugin RPC apply request.
-func (p *Plugin) Apply(ctx context.Context, reqBytes []byte) (*pb.ApplyResponse, *status.Status) {
+// Apply makes plugin RPC apply request. Function accepts a service config
+// which is passed down to the plugin with the apply request instead of using
+// the one from the plugin manifest as it allows sending adhoc configs that
+// can be used for one off operations without having to update the plugin.
+// For example, this can be used to trigger VM event on plugins that support it.
+func (p *Plugin) Apply(ctx context.Context, serviceConfig *ServiceConfig) (*pb.ApplyResponse, *status.Status) {
 	galog.Debugf("Executing apply request on plugin %q", p.FullName())
 
-	req := &pb.ApplyRequest{
-		Data: &apb.Any{Value: reqBytes},
+	req, err := p.buildApplyRequest(serviceConfig)
+	if err != nil {
+		return nil, status.Convert(err)
 	}
+
 	tCtx, cancel := context.WithTimeout(ctx, defaultApplyRPCTimeout)
 	defer cancel()
 
 	resp, err := p.PluginService().Apply(tCtx, req, grpc.WaitForReady(true))
 	return resp, status.Convert(err)
+}
+
+// buildApplyRequest generates Apply RPC request based on what service config
+// was supplied.
+func (p *Plugin) buildApplyRequest(serviceConfig *ServiceConfig) (*pb.ApplyRequest, error) {
+	req := &pb.ApplyRequest{}
+
+	if serviceConfig == nil {
+		return req, nil
+	}
+
+	// Start config is optional and may not be present.
+	if len(serviceConfig.Simple) != 0 {
+		req.ServiceConfig = &pb.ApplyRequest_StringConfig{StringConfig: serviceConfig.Simple}
+	} else if len(serviceConfig.Structured) != 0 {
+		c, err := serviceConfig.toProto()
+		if err != nil {
+			return nil, fmt.Errorf("unable to generate apply request for %q plugin: %w", p.FullName(), err)
+		}
+		req.ServiceConfig = &pb.ApplyRequest_StructConfig{StructConfig: c}
+	}
+
+	return req, nil
 }
 
 // GetStatus makes the GetStatus RPC request, [req] includes provides the
@@ -280,5 +308,6 @@ func (p *Plugin) configHash() string {
 
 	hash := sha256.Sum256(data)
 	p.Manifest.startConfigHash = hex.EncodeToString(hash[:])
+	galog.Debugf("Updated start config hash for plugin %q", p.FullName())
 	return p.Manifest.startConfigHash
 }

@@ -85,7 +85,10 @@ type testPluginServer struct {
 
 func (ts *testPluginServer) Apply(ctx context.Context, msg *pb.ApplyRequest) (*pb.ApplyResponse, error) {
 	ts.applyCalled = true
-	data := msg.GetData().GetValue()
+	data := msg.GetStringConfig()
+	if ts.ctrs != nil {
+		ts.ctrs[data]++
+	}
 	if string(data) == "failure" || ts.applyFail {
 		return nil, status.Error(1, "test error")
 	}
@@ -157,7 +160,7 @@ func TestApply(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test, func(t *testing.T) {
-			_, err := plugin.Apply(ctx, []byte(test))
+			_, err := plugin.Apply(ctx, &ServiceConfig{Simple: test})
 			shouldFail := test == "failure"
 			if (err != nil) != shouldFail {
 				t.Errorf("plugin.Apply(ctx, %s) = error: %v, want error: %t", test, err, shouldFail)
@@ -423,6 +426,64 @@ func TestBuildStartRequest(t *testing.T) {
 			}
 			if diff := cmp.Diff(test.want, got, protocmp.Transform()); diff != "" {
 				t.Errorf("plugin.buildStartRequest(ctx) returned diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestBuildApplyRequest(t *testing.T) {
+	wantStructCfg := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"foo":   structpb.NewStringValue("bar"),
+			"count": structpb.NewNumberValue(55),
+		},
+	}
+
+	bytes, err := proto.Marshal(wantStructCfg)
+	if err != nil {
+		t.Fatalf("proto.Marshal(%+v) failed unexpectedly with error: %v", wantStructCfg, err)
+	}
+
+	tests := []struct {
+		name          string
+		serviceConfig *ServiceConfig
+		want          *pb.ApplyRequest
+	}{
+		{
+			name:          "simple_cfg",
+			serviceConfig: &ServiceConfig{Simple: "foo=bar"},
+			want: &pb.ApplyRequest{
+				ServiceConfig: &pb.ApplyRequest_StringConfig{StringConfig: "foo=bar"},
+			},
+		},
+		{
+			name:          "struct_cfg",
+			serviceConfig: &ServiceConfig{Structured: bytes},
+			want: &pb.ApplyRequest{
+				ServiceConfig: &pb.ApplyRequest_StructConfig{StructConfig: wantStructCfg},
+			},
+		},
+		{
+			name:          "no_cfg",
+			serviceConfig: &ServiceConfig{},
+			want:          &pb.ApplyRequest{},
+		},
+		{
+			name:          "nil_cfg",
+			serviceConfig: nil,
+			want:          &pb.ApplyRequest{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p := &Plugin{Name: "plugin"}
+			got, err := p.buildApplyRequest(test.serviceConfig)
+			if err != nil {
+				t.Fatalf("buildApplyRequest(%v) failed unexpectedly with error: %v", test.serviceConfig, err)
+			}
+			if diff := cmp.Diff(test.want, got, protocmp.Transform()); diff != "" {
+				t.Errorf("buildApplyRequest(%v) returned diff (-want +got):\n%s", test.serviceConfig, diff)
 			}
 		})
 	}

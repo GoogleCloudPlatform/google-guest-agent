@@ -113,7 +113,7 @@ func vmEventHandler(ctx context.Context, r []byte) ([]byte, error) {
 			}
 
 			// Apply response is empty and can safely be ignored here.
-			_, rpcStatus := p.Apply(ctx, r)
+			_, rpcStatus := p.Apply(ctx, &ServiceConfig{Simple: string(r)})
 			if rpcStatus.Err() != nil {
 				result.StatusMessage = rpcStatus.Proto().String()
 				result.Status = notifyErrorStatus

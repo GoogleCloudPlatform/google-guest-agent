@@ -16,7 +16,6 @@ syntax = "proto3";
 
 package plugin_comm;
 
-import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
 
@@ -67,10 +66,21 @@ message StartResponse {}
 
 // Guest Agent agnostic request from services forwarded to the plugins.
 message ApplyRequest {
-  // Apply data is Guest Agent agnostic, it's a data payload handed off to the
-  // plugin, the actual contract is established between the service and the
-  // plugin itself.
-  google.protobuf.Any data = 1;
+  // Field 1 was the deprecated 'data' field of type Any. It is reserved to
+  // prevent reuse and avoid accidental backward compatibility issues.
+  reserved 1;
+  // Service specific configuration that is passed to the plugin. This is same
+  // as the service_config in the StartRequest. However, it allows updating the
+  // config without restarting the plugin. If the plugin does not support
+  // updating the config, it should return an unimplemented error in which case
+  // the plugin manager will restart the plugin with the new config.
+  oneof service_config {
+    // String configuration. Any string payload that the plugin understands.
+    string string_config = 2;
+    // Struct configuration. Usually used for reading file based configuration
+    // like JSON or yaml.
+    google.protobuf.Struct struct_config = 3;
+  }
 }
 
 // Response from plugins for apply request.

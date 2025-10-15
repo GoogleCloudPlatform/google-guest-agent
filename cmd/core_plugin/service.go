@@ -170,15 +170,16 @@ type PluginServer struct {
 // There's no use-case defined for this yet and is un-implemented.
 func (ps *PluginServer) Apply(ctx context.Context, msg *pb.ApplyRequest) (*pb.ApplyResponse, error) {
 	galog.Debugf("Handling apply request %+v", msg)
+	reqBytes := []byte(msg.GetStringConfig())
 	req := &command.Request{}
 	resp := &pb.ApplyResponse{}
-	if err := json.Unmarshal(msg.GetData().GetValue(), req); err != nil {
-		return resp, status.Errorf(1, "failed to unmarshal apply request (%s): %v", string(msg.GetData().GetValue()), err)
+	if err := json.Unmarshal(reqBytes, req); err != nil {
+		return resp, status.Errorf(1, "failed to unmarshal apply request (%s): %v", msg.GetStringConfig(), err)
 	}
 
 	switch req.Command {
 	case manager.VMEventCmd:
-		if err := handleVMEvent(ctx, msg.GetData().GetValue()); err != nil {
+		if err := handleVMEvent(ctx, reqBytes); err != nil {
 			galog.Errorf("Failed to handle VM event: %v", err)
 		}
 		return resp, nil

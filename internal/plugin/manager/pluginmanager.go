@@ -486,6 +486,12 @@ func (m *PluginManager) configurePlugin(ctx context.Context, req *acpb.Configure
 		} else {
 			success = true
 		}
+	case acpb.ConfigurePluginStates_APPLY:
+		if err := m.applyConfig(ctx, req); err != nil {
+			galog.Errorf("Failed to apply config for plugin %q, revision %q: %v", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId(), err)
+		} else {
+			success = true
+		}
 	default:
 		galog.Warnf("Unknown action (%s) for configure plugin state request, ignoring", req.GetAction().String())
 	}
@@ -515,6 +521,29 @@ func (p *Plugin) setMetricConfig(req *acpb.ConfigurePluginStates_ConfigurePlugin
 	p.RuntimeInfo.metrics = boundedlist.New[Metric](p.Manifest.MaxMetricDatapoints)
 }
 
+func setConfig(manifest *Manifest, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
+	// If no config is provided, return early.
+	if req.GetManifest().Config == nil {
+		return nil
+	}
+
+	manifest.StartConfig = &ServiceConfig{}
+
+	switch req.GetManifest().Config.(type) {
+	case *acpb.ConfigurePluginStates_Manifest_StringConfig:
+		manifest.StartConfig.Simple = req.GetManifest().GetStringConfig()
+	case *acpb.ConfigurePluginStates_Manifest_StructConfig:
+		// Marshal the service config to a byte array to persist it on disk. This
+		// will be un-marshaled to use at plugin launch time.
+		bytes, err := proto.Marshal(req.GetManifest().GetStructConfig())
+		if err != nil {
+			return fmt.Errorf("unable to marshal service config: %w", err)
+		}
+		manifest.StartConfig.Structured = bytes
+	}
+	return nil
+}
+
 // newPluginManifest generates agent representation of the manifest from the
 // install request.
 func newPluginManifest(req *acpb.ConfigurePluginStates_ConfigurePlugin) (*Manifest, error) {
@@ -527,21 +556,8 @@ func newPluginManifest(req *acpb.ConfigurePluginStates_ConfigurePlugin) (*Manife
 		StartConfig:    &ServiceConfig{},
 	}
 
-	if req.GetManifest().Config == nil {
-		return manifest, nil
-	}
-
-	switch req.GetManifest().Config.(type) {
-	case *acpb.ConfigurePluginStates_Manifest_StringConfig:
-		manifest.StartConfig.Simple = req.GetManifest().GetStringConfig()
-	case *acpb.ConfigurePluginStates_Manifest_StructConfig:
-		// Marshal the service config to a byte array to persist it on disk. This
-		// will be un-marshaled to use at plugin launch time.
-		bytes, err := proto.Marshal(req.GetManifest().GetStructConfig())
-		if err != nil {
-			return nil, fmt.Errorf("unable to marshal service config: %w", err)
-		}
-		manifest.StartConfig.Structured = bytes
+	if err := setConfig(manifest, req); err != nil {
+		return nil, err
 	}
 
 	return manifest, nil
@@ -713,6 +729,45 @@ func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin) erro
 	m.delete(p.Name)
 
 	galog.Infof("Successfully removed plugin %q", p.FullName())
+	return nil
+}
+
+// applyConfig applies the config to the plugin and sends events on success or
+// failure.
+func (m *PluginManager) applyConfig(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
+	galog.Infof("Applying config to plugin %q, revision %s", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
+
+	p, err := m.Fetch(req.GetPlugin().GetName())
+	if err != nil {
+		sendEvent(ctx, &Plugin{Name: req.GetPlugin().GetName(), Revision: req.GetPlugin().GetRevisionId()}, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, "Plugin not found.")
+		return fmt.Errorf("plugin %q not found", req.GetPlugin().GetName())
+	}
+
+	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY, "Received request to apply a config to a plugin.")
+
+	if err := setConfig(p.Manifest, req); err != nil {
+		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to set config: %v", err))
+		return fmt.Errorf("failed to set config: %w", err)
+	}
+
+	// Update the plugin state file with the new config.
+	galog.Infof("Updating on-disk config for plugin %q", p.FullName())
+	if err := p.Store(); err != nil {
+		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to store config: %v", err))
+		return fmt.Errorf("failed to store config: %w", err)
+	}
+
+	// Reset start config hash.
+	p.Manifest.startConfigHash = ""
+	p.configHash()
+
+	_, status := p.Apply(ctx, p.Manifest.StartConfig)
+	if status.Err() != nil {
+		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to apply config: %v", status.Err()))
+		return fmt.Errorf("failed to apply config: %w", status.Err())
+	}
+
+	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLIED, "Successfully applied the config to the plugin.")
 	return nil
 }
 

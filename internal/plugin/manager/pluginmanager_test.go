@@ -412,6 +412,11 @@ func TestConfigurePluginStates(t *testing.T) {
 				Manifest: &acpb.ConfigurePluginStates_Manifest{},
 			},
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
+				Action:   acpb.ConfigurePluginStates_APPLY,
+				Plugin:   &acpb.ConfigurePluginStates_Plugin{Name: "PluginD", RevisionId: "3"},
+				Manifest: &acpb.ConfigurePluginStates_Manifest{Config: &acpb.ConfigurePluginStates_Manifest_StringConfig{StringConfig: "foo=bar"}},
+			},
+			&acpb.ConfigurePluginStates_ConfigurePlugin{
 				Action: acpb.ConfigurePluginStates_ACTION_UNSPECIFIED,
 			},
 		},
@@ -437,6 +442,7 @@ func TestConfigurePluginStates(t *testing.T) {
 	wantRequestCount := map[acpb.ConfigurePluginStates_Action]map[bool]int{
 		acpb.ConfigurePluginStates_INSTALL:            map[bool]int{false: 1},
 		acpb.ConfigurePluginStates_REMOVE:             map[bool]int{false: 1},
+		acpb.ConfigurePluginStates_APPLY:              map[bool]int{false: 1},
 		acpb.ConfigurePluginStates_ACTION_UNSPECIFIED: map[bool]int{false: 1},
 	}
 	if diff := cmp.Diff(wantRequestCount, pm.requestCount); diff != "" {
@@ -1177,26 +1183,28 @@ func TestNewPluginManifest(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		got, err := newPluginManifest(tc.req)
-		if err != nil {
-			t.Fatalf("newPluginManifest(%v) returned an unexpected error: %v", tc.req, err)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := newPluginManifest(tc.req)
+			if err != nil {
+				t.Fatalf("newPluginManifest(%v) returned an unexpected error: %v", tc.req, err)
+			}
 
-		if diff := cmp.Diff(tc.want, got, cmpopts.IgnoreUnexported(Manifest{}), cmpopts.IgnoreFields(ServiceConfig{}, "Structured")); diff != "" {
-			t.Errorf("newPluginManifest(%v) returned an unexpected diff (-want +got): %v", tc.req, diff)
-		}
+			if diff := cmp.Diff(tc.want, got, cmpopts.IgnoreUnexported(Manifest{}), cmpopts.IgnoreFields(ServiceConfig{}, "Structured")); diff != "" {
+				t.Errorf("newPluginManifest(%v) returned an unexpected diff (-want +got): %v", tc.req, diff)
+			}
 
-		if len(tc.want.StartConfig.Structured) == 0 {
-			return
-		}
+			if len(tc.want.StartConfig.Structured) == 0 {
+				return
+			}
 
-		gotCfg, err := got.StartConfig.toProto()
-		if err != nil {
-			t.Fatalf("config [%+v] toProto() returned an unexpected error: %v", got.StartConfig, err)
-		}
-		if diff := cmp.Diff(cfg, gotCfg, protocmp.Transform()); diff != "" {
-			t.Errorf("newPluginManifest(%v) returned an unexpected diff for structured config (-want +got): %v", tc.req, diff)
-		}
+			gotCfg, err := got.StartConfig.toProto()
+			if err != nil {
+				t.Fatalf("config [%+v] toProto() returned an unexpected error: %v", got.StartConfig, err)
+			}
+			if diff := cmp.Diff(cfg, gotCfg, protocmp.Transform()); diff != "" {
+				t.Errorf("newPluginManifest(%v) returned an unexpected diff for structured config (-want +got): %v", tc.req, diff)
+			}
+		})
 	}
 }
 
@@ -1438,5 +1446,103 @@ func TestAdHocStopPlugin(t *testing.T) {
 		if err := pm.StopPlugin(ctx, plugin); err != nil {
 			t.Errorf("StopPlugin(ctx, %s) failed unexpectedly with error: %v", plugin, err)
 		}
+	}
+}
+
+func TestApplyConfig(t *testing.T) {
+	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+	cfg.Retrieve().Core.ACSClient = false
+	stateDir := t.TempDir()
+	infoDir := filepath.Join(stateDir, "test-instance-id", agentStateDir, pluginInfoDir)
+	cfg.Retrieve().Plugin.StateDir = stateDir
+	addr := filepath.Join(t.TempDir(), "PluginA_RevisionA.sock")
+	ps := &testPluginServer{ctrs: make(map[string]int)}
+	startTestServer(t, ps, udsProtocol, addr)
+
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, RuntimeInfo: &RuntimeInfo{}, Manifest: &Manifest{startConfigHash: "oldhash"}}
+	if err := plugin.Connect(ctx); err != nil {
+		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
+	}
+
+	computeHash := func(data string) string {
+		hash := sha256.Sum256([]byte(data))
+		return hex.EncodeToString(hash[:])
+	}
+
+	pm := &PluginManager{plugins: map[string]*Plugin{plugin.Name: plugin}, protocol: udsProtocol, instanceID: "test-instance-id"}
+	origPluginManager := pluginManager
+	t.Cleanup(func() { pluginManager = origPluginManager })
+	pluginManager = pm
+
+	tests := []struct {
+		name     string
+		plugin   string
+		config   string
+		wantErr  bool
+		wantCTR  int
+		wantHash string
+	}{
+		{
+			name:     "success",
+			plugin:   "PluginA",
+			config:   "success",
+			wantCTR:  1,
+			wantHash: computeHash("success"),
+		},
+		{
+			name:     "apply_fails",
+			plugin:   "PluginA",
+			config:   "failure",
+			wantErr:  true,
+			wantHash: computeHash("failure"),
+			wantCTR:  1,
+		},
+		{
+			name:    "plugin_not_found",
+			plugin:  "PluginB",
+			config:  "nopluginfound",
+			wantErr: true,
+			wantCTR: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Plugin: &acpb.ConfigurePluginStates_Plugin{
+					Name: tc.plugin,
+				},
+				Manifest: &acpb.ConfigurePluginStates_Manifest{
+					Config: &acpb.ConfigurePluginStates_Manifest_StringConfig{StringConfig: tc.config},
+				},
+			}
+			err := pm.applyConfig(ctx, req)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("applyConfig(ctx, %s) = error: %v, want error: %t", tc.name, err, tc.wantErr)
+			}
+			if ps.ctrs[tc.config] != tc.wantCTR {
+				t.Errorf("applyConfig(ctx, %s) = %d, want %d", tc.name, ps.ctrs[tc.config], tc.wantCTR)
+			}
+
+			if tc.wantHash == "" {
+				return
+			}
+
+			if plugin.Manifest.startConfigHash != tc.wantHash {
+				t.Errorf("applyConfig(ctx, %s) did not reset start config hash, got %q, want %q", tc.name, plugin.Manifest.startConfigHash, tc.wantHash)
+			}
+
+			pluginMap, err := load(infoDir)
+			if err != nil {
+				t.Fatalf("load(%s) failed unexpectedly with error: %v", infoDir, err)
+			}
+
+			if got := pluginMap[tc.plugin].Manifest.StartConfig.Simple; got != tc.config {
+				t.Errorf("applyConfig(ctx, %s) did not update plugin state file with new config, got %q, want %q", tc.name, got, tc.config)
+			}
+		})
 	}
 }

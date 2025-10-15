@@ -20,8 +20,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
-
-	apb "google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestHandleVMEventError(t *testing.T) {
@@ -77,9 +75,8 @@ func TestApply(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			reqBytes := []byte(tc.req)
 			req := &pb.ApplyRequest{
-				Data: &apb.Any{Value: reqBytes},
+				ServiceConfig: &pb.ApplyRequest_StringConfig{StringConfig: tc.req},
 			}
 			_, err := pluginServer.Apply(ctx, req)
 			if (err != nil) != tc.wantErr {
