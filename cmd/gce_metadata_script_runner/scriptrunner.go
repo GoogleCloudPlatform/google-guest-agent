@@ -38,6 +38,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"google.golang.org/api/option"
 )
 
 // contextKey is the context key type to use for overriding storage client.
@@ -90,16 +91,16 @@ var (
 )
 
 // newStorageClient creates and returns a new storage client.
-func newStorageClient(ctx context.Context) (*storage.Client, error) {
+func newStorageClient(ctx context.Context, universeDomain string) (*storage.Client, error) {
 	if ctx.Value(overrideStorageClient) != nil {
 		return ctx.Value(overrideStorageClient).(*storage.Client), nil
 	}
-	return storage.NewClient(ctx)
+	return storage.NewClient(ctx, option.WithUniverseDomain(universeDomain))
 }
 
 // downloadGSURL downloads the object from GCS bucket and writes to a file.
-func downloadGSURL(ctx context.Context, bucket, object string, file *os.File) error {
-	client, err := newStorageClient(ctx)
+func downloadGSURL(ctx context.Context, universeDomain string, bucket, object string, file *os.File) error {
+	client, err := newStorageClient(ctx, universeDomain)
 	if err != nil {
 		return fmt.Errorf("unable to create storage client: %w", err)
 	}
@@ -140,10 +141,10 @@ func downloadURL(ctx context.Context, url string, file *os.File) error {
 }
 
 // downloadScript downloads the script to execute.
-func downloadScript(ctx context.Context, path string, file *os.File) error {
+func downloadScript(ctx context.Context, universeDomain, path string, file *os.File) error {
 	bucket, object := parseGCS(path)
 	if bucket != "" && object != "" {
-		err := downloadGSURL(ctx, bucket, object, file)
+		err := downloadGSURL(ctx, universeDomain, bucket, object, file)
 		if err == nil {
 			galog.Debugf("Succesfully downloaded using GSURL, bucket: %s, object: %s to file: %s", bucket, object, file.Name())
 			return nil
@@ -216,7 +217,7 @@ func waitForDNS(ctx context.Context) error {
 
 // writeScriptToFile waits for DNS to become available if downloading from GCS,
 // and writes to a file.
-func writeScriptToFile(ctx context.Context, value string, filePath string, gcsScriptURL *url.URL) error {
+func writeScriptToFile(ctx context.Context, universeDomain string, value string, filePath string, gcsScriptURL *url.URL) error {
 	galog.Debugf("Writing script (%s) to file: %s", value, filePath)
 
 	if gcsScriptURL != nil {
@@ -227,7 +228,7 @@ func writeScriptToFile(ctx context.Context, value string, filePath string, gcsSc
 		if err != nil {
 			return fmt.Errorf("error opening temp file: %v", err)
 		}
-		if err := downloadScript(ctx, value, file); err != nil {
+		if err := downloadScript(ctx, universeDomain, value, file); err != nil {
 			if err := file.Close(); err != nil {
 				// Just log and return original error.
 				galog.Warnf("Failed to close temp file: %v", err)
@@ -249,7 +250,7 @@ func writeScriptToFile(ctx context.Context, value string, filePath string, gcsSc
 }
 
 // setupAndRunScript sets up like downloading script locally and executes it.
-func setupAndRunScript(ctx context.Context, metadataKey, value string) error {
+func setupAndRunScript(ctx context.Context, universeDomain, metadataKey, value string) error {
 	galog.Debugf("Setting up and running script %s: (%s)", metadataKey, value)
 	// Make sure that the URL is valid for URL startup scripts.
 	var gcsScriptURL *url.URL
@@ -274,7 +275,7 @@ func setupAndRunScript(ctx context.Context, metadataKey, value string) error {
 		tmpFile = normalizeFilePathForWindows(tmpFile, metadataKey, gcsScriptURL)
 	}
 
-	if err := writeScriptToFile(ctx, value, tmpFile, gcsScriptURL); err != nil {
+	if err := writeScriptToFile(ctx, universeDomain, value, tmpFile, gcsScriptURL); err != nil {
 		return fmt.Errorf("unable to write script to file: %v", err)
 	}
 
@@ -427,13 +428,20 @@ func handleEvent(ctx context.Context, mdsClient metadata.MDSClientInterface, eve
 		return nil
 	}
 
+	universeDomain, err := mdsClient.GetKey(ctx, "universe/universe-domain", nil)
+	// TODO(b/452437458): Remove handle error as error as soon as the MDS key is
+	// rolled out.
+	if err != nil {
+		galog.Debugf("Failed to get universe domain: %v, using default universe domain", err)
+	}
+
 	for _, key := range wantedKeys {
 		value, ok := scripts[key]
 		if !ok {
 			continue
 		}
 		galog.Infof("Found %s in metadata", key)
-		if err := setupAndRunScript(ctx, key, value); err != nil {
+		if err := setupAndRunScript(ctx, universeDomain, key, value); err != nil {
 			galog.Warnf("Script %q failed with error: %v", key, err)
 			continue
 		}

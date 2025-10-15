@@ -376,7 +376,7 @@ func (mds *mdsClient) Get(ctx context.Context) (*metadata.Descriptor, error) {
 }
 
 func (mds *mdsClient) GetKey(ctx context.Context, key string, headers map[string]string) (string, error) {
-	return "", fmt.Errorf("GetKey() not yet implemented")
+	return "", nil
 }
 
 func (mds *mdsClient) GetKeyRecursive(ctx context.Context, key string) (string, error) {
@@ -521,7 +521,7 @@ func TestDownloadScript(t *testing.T) {
 				t.Fatalf("Failed to setup test file: %v", err)
 			}
 			defer out.Close()
-			if err := downloadScript(ctx, tt.path, out); err != nil {
+			if err := downloadScript(ctx, "", tt.path, out); err != nil {
 				t.Fatalf("downloadScript(ctx, %s, %s) failed unexpectedly with error %v", "gs://bucket/object", out.Name(), err)
 			}
 			got, err := os.ReadFile(file)
@@ -661,7 +661,7 @@ func TestDownloadGSURL(t *testing.T) {
 			}
 			defer f.Close()
 
-			if err := downloadGSURL(ctx, tt.bucket, tt.object, f); (err != nil) != tt.wantErr {
+			if err := downloadGSURL(ctx, "", tt.bucket, tt.object, f); (err != nil) != tt.wantErr {
 				t.Errorf("downloadGSURL(ctx, %s, %s, %s) error = [%+v], wantErr %t", tt.bucket, tt.object, f.Name(), err, tt.wantErr)
 			}
 
