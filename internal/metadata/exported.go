@@ -28,6 +28,7 @@ import (
 type Descriptor struct {
 	instance *Instance
 	project  *Project
+	universe *Universe
 }
 
 // Instance describes the metadata's instance attributes/keys. This is a
@@ -38,6 +39,12 @@ type Instance struct {
 	networkInterfaces []*NetworkInterface
 	vlanInterfaces    []map[int]*VlanInterface
 	virtualClock      *VirtualClock
+}
+
+// Universe describes the metadata's universe attributes/keys. This is a
+// read-only wrapper of the internal representation.
+type Universe struct {
+	internal *gcpUniverse
 }
 
 // VirtualClock describes the clock skew's configuration.
@@ -81,6 +88,7 @@ func newDescriptor(descriptor descriptor) *Descriptor {
 	return &Descriptor{
 		instance: newInstance(descriptor.Instance),
 		project:  newProject(descriptor.Project),
+		universe: newUniverse(descriptor.Universe),
 	}
 }
 
@@ -257,6 +265,21 @@ func (in *Instance) VlanInterfaces() []map[int]*VlanInterface {
 // VirtualClock returns the instance virtual clock.
 func (in *Instance) VirtualClock() *VirtualClock {
 	return in.virtualClock
+}
+
+// Universe returns the universe described by metadata server.
+func (desc *Descriptor) Universe() *Universe {
+	return desc.universe
+}
+
+// newUniverse returns the universe described by metadata server.
+func newUniverse(universe gcpUniverse) *Universe {
+	return &Universe{internal: &universe}
+}
+
+// UniverseDomain returns the universe domain.
+func (u *Universe) UniverseDomain() string {
+	return u.internal.UniverseDomain
 }
 
 func newVirtualClock(vc virtualClock) *VirtualClock {

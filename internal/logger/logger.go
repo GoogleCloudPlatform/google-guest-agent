@@ -217,6 +217,9 @@ func initCloudLogging(ctx context.Context, eventType string, data any, event *ev
 		Instance:              mds.Instance().Name(),
 		WithoutAuthentication: opts.cloudLoggingWithoutAuthentication,
 		ExtraLabels:           extraLabels,
+		// If in GDU this will be empty, so it's no effect and is ignored by galog
+		// and the cloud logging client library.
+		UniverseDomain: mds.Universe().UniverseDomain(),
 	}
 
 	if err := opts.cloudLoggingBackend.InitClient(ctx, cloudOpts); err != nil {

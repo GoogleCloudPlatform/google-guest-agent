@@ -156,6 +156,47 @@ func TestBlockProjectKeys(t *testing.T) {
 	}
 }
 
+func TestUniverseDomain(t *testing.T) {
+	tests := []struct {
+		name   string
+		json   string
+		wanted string
+	}{
+		{
+			"valid_universe_domain",
+			`{"universe": {"universe-domain": "google.com"}}`,
+			"google.com",
+		},
+		{
+			"empty_universe_domain",
+			`{"universe": {"universe-domain": ""}}`,
+			"",
+		},
+		{
+			"missing_universe_domain",
+			`{}`,
+			"",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			desc, err := UnmarshalDescriptor(test.json)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%q) failed unexpectedly with error: %v", test.json, err)
+			}
+
+			if desc.Universe() == nil {
+				t.Errorf("universe is nil")
+			}
+
+			if desc.Universe().UniverseDomain() != test.wanted {
+				t.Errorf("universe-domain didn't match (got \"%s\" expected %s)", desc.Universe().UniverseDomain(), test.wanted)
+			}
+		})
+	}
+}
+
 func TestGetKey(t *testing.T) {
 	var gotHeaders http.Header
 	var gotReqURI string
