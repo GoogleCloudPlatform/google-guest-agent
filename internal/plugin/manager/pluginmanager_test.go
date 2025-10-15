@@ -1454,15 +1454,24 @@ func TestApplyConfig(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
 	}
-	cfg.Retrieve().Core.ACSClient = false
+
 	stateDir := t.TempDir()
+	connDir := t.TempDir()
 	infoDir := filepath.Join(stateDir, "test-instance-id", agentStateDir, pluginInfoDir)
+
+	cfg.Retrieve().Plugin.SocketConnectionsDir = connDir
 	cfg.Retrieve().Plugin.StateDir = stateDir
-	addr := filepath.Join(t.TempDir(), "PluginA_RevisionA.sock")
+	cfg.Retrieve().Core.ACSClient = false
+
+	addr := filepath.Join(connDir, "PluginA_RevisionA.sock")
+
 	ps := &testPluginServer{ctrs: make(map[string]int)}
 	startTestServer(t, ps, udsProtocol, addr)
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, RuntimeInfo: &RuntimeInfo{}, Manifest: &Manifest{startConfigHash: "oldhash"}}
+	setupConstraintTestClient(t)
+	setupMockPsClient(t, &mockPsClient{alive: true, exe: "test-entry-point"})
+
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: "test-entry-point", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{startConfigHash: "oldhash", StopTimeout: time.Second * 3, StartTimeout: time.Second * 3}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}
@@ -1478,12 +1487,13 @@ func TestApplyConfig(t *testing.T) {
 	pluginManager = pm
 
 	tests := []struct {
-		name     string
-		plugin   string
-		config   string
-		wantErr  bool
-		wantCTR  int
-		wantHash string
+		name         string
+		plugin       string
+		config       string
+		wantErr      bool
+		wantCTR      int
+		wantHash     string
+		wantRelaunch bool
 	}{
 		{
 			name:     "success",
@@ -1501,6 +1511,15 @@ func TestApplyConfig(t *testing.T) {
 			wantCTR:  1,
 		},
 		{
+			name:         "unimplemented_error_relaunch",
+			plugin:       "PluginA",
+			config:       "unimplemented",
+			wantErr:      false,
+			wantHash:     computeHash("unimplemented"),
+			wantCTR:      2,
+			wantRelaunch: true,
+		},
+		{
 			name:    "plugin_not_found",
 			plugin:  "PluginB",
 			config:  "nopluginfound",
@@ -1511,6 +1530,8 @@ func TestApplyConfig(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			tr := setupFakeRunner(t)
+
 			req := &acpb.ConfigurePluginStates_ConfigurePlugin{
 				Plugin: &acpb.ConfigurePluginStates_Plugin{
 					Name: tc.plugin,
@@ -1543,6 +1564,32 @@ func TestApplyConfig(t *testing.T) {
 			if got := pluginMap[tc.plugin].Manifest.StartConfig.Simple; got != tc.config {
 				t.Errorf("applyConfig(ctx, %s) did not update plugin state file with new config, got %q, want %q", tc.name, got, tc.config)
 			}
+
+			validatePluginRelaunched(t, tc.wantRelaunch, plugin, tr, ps)
 		})
+	}
+}
+
+func validatePluginRelaunched(t *testing.T, wantRelaunch bool, plugin *Plugin, tr *testRunner, ps *testPluginServer) {
+	t.Helper()
+	if wantRelaunch {
+		if tr.seenCommand != plugin.EntryPath {
+			t.Errorf("applyConfig for %s did not relaunch plugin with new config, got command %q, want %q", plugin.FullName(), tr.seenCommand, plugin.EntryPath)
+		}
+		if !ps.stopCalled {
+			t.Errorf("applyConfig for %s did not stop plugin", plugin.FullName())
+		}
+		startReq := ps.seenStartReq[plugin.Manifest.StartConfig.Simple]
+		if startReq == nil {
+			t.Errorf("applyConfig for %s did not start plugin with new config, got nil, want non-nil", plugin.FullName())
+		}
+	} else {
+		if tr.seenCommand != "" {
+			t.Errorf("applyConfig(ctx, %s) relaunched plugin unexpectedly, got command %q, want empty", plugin.FullName(), tr.seenCommand)
+		}
+		startReq := ps.seenStartReq[plugin.Manifest.StartConfig.Simple]
+		if startReq != nil {
+			t.Errorf("applyConfig for %s attempted to start plugin with new config, got %v, want nil", plugin.FullName(), startReq)
+		}
 	}
 }
