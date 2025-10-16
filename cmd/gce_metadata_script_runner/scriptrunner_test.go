@@ -355,7 +355,7 @@ func TestParseGCS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			bucket, object := parseGCS(tt.path)
+			bucket, object := parseGCS(defaultUniverseDomain, tt.path)
 			if bucket != tt.bucket {
 				t.Errorf("parseGCS(%s) = bucket %s, want %s", tt.path, bucket, tt.bucket)
 			}

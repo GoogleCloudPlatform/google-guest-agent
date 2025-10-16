@@ -56,6 +56,8 @@ const (
 	// galogShutdownTimeout is the period of time we should wait galog to
 	// shutdown.
 	galogShutdownTimeout = time.Second
+	// defaultUniverseDomain is the default universe domain.
+	defaultUniverseDomain = "googleapis.com"
 )
 
 var (
@@ -70,25 +72,40 @@ var (
 	// its gs://<bucket>/<object> URL.
 	gsRegex = regexp.MustCompile(fmt.Sprintf(`^gs://%s/%s$`, bucketRegex, objectRegex))
 
-	// supportedStorageURLRegex is a list of all supported Google Storage URLs.
-	// http://<bucket>.storage.googleapis.com/<object>
-	// https://<bucket>.storage.googleapis.com/<object>
-	// http://storage.cloud.google.com/<bucket>/<object>
-	// https://storage.cloud.google.com/<bucket>/<object>
-	// http://storage.googleapis.com/<bucket>/<object>
-	// https://storage.googleapis.com/<bucket>/<object>
-	// The following are deprecated but also checked:
-	// http://commondatastorage.googleapis.com/<bucket>/<object>
-	// https://commondatastorage.googleapis.com/<bucket>/<object>
-	supportedStorageURLRegex = []*regexp.Regexp{
-		regexp.MustCompile(fmt.Sprintf(`^http[s]?://%s\.storage\.googleapis\.com/%s$`, bucketRegex, objectRegex)),
-		regexp.MustCompile(fmt.Sprintf(`^http[s]?://storage\.cloud\.google\.com/%s/%s$`, bucketRegex, objectRegex)),
-		regexp.MustCompile(fmt.Sprintf(`^http[s]?://(?:commondata)?storage\.googleapis\.com/%s/%s$`, bucketRegex, objectRegex)),
-	}
-
 	// defaultRetryPolicy is default policy to retry up to 3 times, only wait 1 second between retries.
 	defaultRetryPolicy = retry.Policy{MaxAttempts: 3, BackoffFactor: 1, Jitter: time.Second}
 )
+
+// supportedStorageURLRegexx returns a list of regexes that match supported
+// storage URLs for a given universe domain.
+// http://<bucket>.storage.<universeDomain>/<object>
+// https://<bucket>.storage.<universeDomain>/<object>
+// http://storage.cloud.<universeDomain>/<bucket>/<object>
+// https://storage.cloud.<universeDomain>/<bucket>/<object>
+// http://storage.<universeDomain>/<bucket>/<object>
+// https://storage.<universeDomain>/<bucket>/<object>
+// The following are deprecated but also checked:
+// http://commondatastorage.<universeDomain>/<bucket>/<object>
+// https://commondatastorage.<universeDomain>/<bucket>/<object>
+//
+// If universeDomain is the default universe domain, the following are also
+// checked:
+// http://storage.cloud.google.com/<bucket>/<object>
+// https://storage.cloud.google.com/<bucket>/<object>
+func supportedStorageURLRegexx(universeDomain string) []*regexp.Regexp {
+	domainRegex := regexp.QuoteMeta(universeDomain)
+	res := []*regexp.Regexp{
+		regexp.MustCompile(fmt.Sprintf(`^http[s]?://%s\.storage\.%s/%s$`, bucketRegex, domainRegex, objectRegex)),
+		regexp.MustCompile(fmt.Sprintf(`^http[s]?://storage\.cloud\.%s/%s/%s$`, domainRegex, bucketRegex, objectRegex)),
+		regexp.MustCompile(fmt.Sprintf(`^http[s]?://(?:commondata)?storage\.%s/%s/%s$`, domainRegex, bucketRegex, objectRegex)),
+	}
+
+	if universeDomain == defaultUniverseDomain || universeDomain == "" {
+		res = append(res, regexp.MustCompile(fmt.Sprintf(`^http[s]?://storage\.cloud\.google\.com/%s/%s$`, bucketRegex, objectRegex)))
+	}
+
+	return res
+}
 
 // newStorageClient creates and returns a new storage client.
 func newStorageClient(ctx context.Context, universeDomain string) (*storage.Client, error) {
@@ -142,7 +159,7 @@ func downloadURL(ctx context.Context, url string, file *os.File) error {
 
 // downloadScript downloads the script to execute.
 func downloadScript(ctx context.Context, universeDomain, path string, file *os.File) error {
-	bucket, object := parseGCS(path)
+	bucket, object := parseGCS(universeDomain, path)
 	if bucket != "" && object != "" {
 		err := downloadGSURL(ctx, universeDomain, bucket, object, file)
 		if err == nil {
@@ -161,10 +178,10 @@ func downloadScript(ctx context.Context, universeDomain, path string, file *os.F
 
 // parseGCS parses the path and returns the bucket and object. It tries all 3
 // supported regexes to parse the URL.
-func parseGCS(path string) (string, string) {
+func parseGCS(universeDomain, path string) (string, string) {
 	var allSupportedRgx []*regexp.Regexp
 	allSupportedRgx = append(allSupportedRgx, gsRegex)
-	allSupportedRgx = append(allSupportedRgx, supportedStorageURLRegex...)
+	allSupportedRgx = append(allSupportedRgx, supportedStorageURLRegexx(universeDomain)...)
 	for _, re := range allSupportedRgx {
 		match := re.FindStringSubmatch(path)
 		if len(match) == 3 {
