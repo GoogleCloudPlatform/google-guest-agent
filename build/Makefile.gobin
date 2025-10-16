@@ -35,8 +35,8 @@ fetch-go-tpm-tools:
 		git clone $(GO_TPM_TOOLS_URL) proto_deps/go-tpm-tools
 
 fetch-mwlid-proto:
-	$(Q)echo "Making proto dependencies dir for mwlid..."
-	$(Q)mkdir -p proto_deps/mwlid
+	$(Q)echo "Making proto dependencies dir..."
+	$(Q)mkdir -p proto_deps
 	$(Q)echo "Cloning/updating mwlid-proto..."
 	$(Q)git -C proto_deps/mwlid pull 2> /dev/null || \
 		git clone $(MWLID_PROTO_URL) proto_deps/mwlid
