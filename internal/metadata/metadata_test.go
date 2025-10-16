@@ -156,6 +156,58 @@ func TestBlockProjectKeys(t *testing.T) {
 	}
 }
 
+func TestClockDriftToken(t *testing.T) {
+	tests := []struct {
+		name   string
+		json   string
+		wanted string
+	}{
+		{
+			"valid_clock_drift_token",
+			`{"instance": {"virtualClock": {"driftToken": "123"}}}`,
+			"123",
+		},
+		{
+			"empty_clock_drift_token",
+			`{"instance": {"virtualClock": {"driftToken": ""}}}`,
+			"",
+		},
+		{
+			"invalid_clock_drift_token_key",
+			`{"instance": {"virtualClock": {"drift-token": "123"}}}`,
+			"",
+		},
+		{
+			"invalid_virtual_clock_key",
+			`{"instance": {"virtual-clock": {"driftToken": "123"}}}`,
+			"",
+		},
+		{
+			"missing_clock_drift_token",
+			`{}`,
+			"",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			desc, err := UnmarshalDescriptor(test.json)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%q) failed unexpectedly with error: %v", test.json, err)
+			}
+			if desc.Instance() == nil {
+				t.Errorf("instance is nil")
+			}
+			if desc.Instance().VirtualClock() == nil {
+				t.Errorf("virtual clock is nil")
+			}
+			if desc.Instance().VirtualClock().DriftToken() != test.wanted {
+				t.Errorf("clock drift token didn't match (got \"%s\" expected %s)", desc.Instance().VirtualClock().DriftToken(), test.wanted)
+			}
+		})
+	}
+}
+
 func TestUniverseDomain(t *testing.T) {
 	tests := []struct {
 		name   string
