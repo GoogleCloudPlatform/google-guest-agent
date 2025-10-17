@@ -17,6 +17,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -86,6 +87,8 @@ type acsHelper struct {
 	isEnabledMu sync.Mutex
 	// isEnabled tracks if ACS client is enabled.
 	isEnabled *bool
+	// isUnsupportedTPC tracks if the instance is in an unsupported TPC universe.
+	isUnsupportedTPC bool
 }
 
 // ContextKey is the context key type to use for overriding.
@@ -198,6 +201,11 @@ func (acs *acsHelper) connect(ctx context.Context) error {
 	}
 	acs.client, err = client.NewClient(ctx, false, opts...)
 	if err != nil {
+		if errors.Is(err, &client.ErrUnsupportedUniverse{}) {
+			galog.Debugf("Disabling ACS client: %v", err)
+			acs.isUnsupportedTPC = true
+			return nil
+		}
 		return fmt.Errorf("unable to create new ACS client, err: %w", err)
 	}
 	acs.connection, err = client.NewConnection(ctx, acs.channelID, acs.client)
@@ -363,6 +371,12 @@ func (acs *acsHelper) isACSEnabled(ctx context.Context) bool {
 
 	if !cfg.Retrieve().Core.ACSClient {
 		galog.Infof("ACS client is disabled in configuration file, setting isEnabled to false")
+		acs.isEnabled = proto.Bool(false)
+		return false
+	}
+
+	if acs.isUnsupportedTPC {
+		galog.Infof("Disabling ACS client due to unsupported TPC universe")
 		acs.isEnabled = proto.Bool(false)
 		return false
 	}

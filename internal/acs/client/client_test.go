@@ -591,6 +591,7 @@ func TestIsACSEnabled(t *testing.T) {
 		testEnv           string
 		hasServiceAccount bool
 		metadataErr       error
+		isUnsupportedTPC  bool
 		want              bool
 	}{
 		{
@@ -621,6 +622,11 @@ func TestIsACSEnabled(t *testing.T) {
 			configEnabled: false,
 			want:          false,
 		},
+		{
+			name:             "unsupported_tpc",
+			isUnsupportedTPC: true,
+			want:             false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -631,7 +637,7 @@ func TestIsACSEnabled(t *testing.T) {
 
 			t.Setenv("TEST_UNDECLARED_OUTPUTS_DIR", tc.testEnv)
 
-			acs := &acsHelper{isEnabled: tc.acsEnabled}
+			acs := &acsHelper{isEnabled: tc.acsEnabled, isUnsupportedTPC: tc.isUnsupportedTPC}
 			cfg.Retrieve().Core.ACSClient = tc.configEnabled
 
 			ctx := context.Background()
