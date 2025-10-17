@@ -100,7 +100,6 @@ func TestIPAddrString(t *testing.T) {
 	tests := []struct {
 		name string
 		ip   *IPAddr
-		cdr  bool
 		want string
 	}{
 		{
@@ -109,10 +108,24 @@ func TestIPAddrString(t *testing.T) {
 			want: "192.0.2.1",
 		},
 		{
+			name: "ipv4-cidr",
+			ip:   parseIPAddr("192.0.2.1/24"),
+			want: "192.0.2.0/24",
+		},
+		{
+			name: "ipv4-cidr-all-bits",
+			ip:   parseIPAddr("192.0.2.1/32"),
+			want: "192.0.2.1",
+		},
+		{
 			name: "ipv6-cidr",
 			ip:   parseIPAddr("2001:db8:a0b:12f0::1/32"),
 			want: "2001:db8::/32",
-			cdr:  true,
+		},
+		{
+			name: "ipv6-cidr-all-bits",
+			ip:   parseIPAddr("2001:db8:a0b:12f0::1/128"),
+			want: "2001:db8:a0b:12f0::1",
 		},
 		{
 			name: "ipv6",
