@@ -33,6 +33,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/google/go-cmp/cmp"
 )
 
 // The mock Runner client to use for this test.
@@ -1526,8 +1527,10 @@ func TestSetupVlanInterfaces(t *testing.T) {
 				t.Fatalf("setupVlanInterfaces(ctx, %+v) returned %v, want error? %v", nics[0], err, tc.wantError)
 			}
 
-			if !tc.wantError && !slices.Equal(commands, tc.wantCommands) {
-				t.Fatalf("setupVlanInterfaces(ctx, %+v) executed command %v, want %v", nics[0], commands, tc.wantCommands)
+			if !tc.wantError {
+				if diff := cmp.Diff(tc.wantCommands, commands); diff != "" {
+					t.Errorf("setupVlanInterfaces(ctx, %+v) returned unexpected diff (-want +got):\n%s", nics[0], diff)
+				}
 			}
 		})
 	}

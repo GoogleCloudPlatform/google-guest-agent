@@ -35,7 +35,7 @@ type testRunner struct {
 func (tr testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
 	var out string
 	if tr.hasExtraRoutes {
-		out = "local 10.128.0.23/32 dev eth0 proto 66 scope host\n"
+		out = "local 10.128.0.23 dev eth0 proto 66 scope host\nlocal 10.0.0.1/23 dev eth0 proto 66 scope host\n"
 	}
 	return &run.Result{Output: out}, nil
 }
@@ -51,7 +51,8 @@ func TestRouteChanged(t *testing.T) {
       {
 			  "mac": "00:00:00:00:00:01",
         "forwardedIps": [
-          "10.128.0.23"
+          "10.128.0.23/32",
+					"10.0.0.1/23"
         ]
       }
     ]
@@ -68,7 +69,7 @@ func TestRouteChanged(t *testing.T) {
 		want           bool
 	}{
 		{
-			name: "no-change",
+			name: "no-change-empty-extra-addresses",
 			nicConfigs: []*nic.Configuration{
 				{
 					Interface: &ethernet.Interface{
@@ -78,6 +79,19 @@ func TestRouteChanged(t *testing.T) {
 				},
 			},
 			want: false,
+		},
+		{
+			name: "no-change-extra-addresses",
+			nicConfigs: []*nic.Configuration{
+				{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "eth0" },
+					},
+					ExtraAddresses: address.NewExtraAddresses(desc.Instance().NetworkInterfaces()[0], cfg.Retrieve(), nil),
+				},
+			},
+			hasExtraRoutes: true,
+			want:           false,
 		},
 		{
 			name: "no-interface",

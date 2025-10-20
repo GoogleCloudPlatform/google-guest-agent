@@ -284,14 +284,29 @@ func ParseIP(ip string) (*IPAddr, error) {
 		return nil, ErrEmptyAddress
 	}
 
-	ipAddress, ipNet, err := net.ParseCIDR(ip)
+	// Try to parse the IP address as a CIDR address.
+	prefix, err := netip.ParsePrefix(ip)
 	if err == nil {
+		// If the prefix is a single IP address, we want to return it as an IP
+		// address, not as a CIDR address.
+		if prefix.IsSingleIP() {
+			ipAddress := net.ParseIP(prefix.Addr().String())
+			if ipAddress == nil {
+				return nil, fmt.Errorf("failed to parse IP address: %q", ip)
+			}
+			return &IPAddr{&ipAddress, nil}, nil
+		}
+		ipAddress, ipNet, err := net.ParseCIDR(ip)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse CIDR address %q: %v", ip, err)
+		}
 		return &IPAddr{&ipAddress, ipNet}, nil
 	}
 
-	ipAddress = net.ParseIP(ip)
+	// If the IP address is not a CIDR address, parse it as a regular IP address.
+	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
-		return nil, fmt.Errorf("failed to parse IP address: %s", ip)
+		return nil, fmt.Errorf("failed to parse IP address: %q", ip)
 	}
 
 	return &IPAddr{&ipAddress, nil}, nil
