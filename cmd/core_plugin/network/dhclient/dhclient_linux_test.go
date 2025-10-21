@@ -1115,7 +1115,7 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 			name:         "success",
 			wantError:    false,
 			ethernetName: "eth0",
-			wantCommands: []string{"ip link delete eth0.10"},
+			wantCommands: []string{"ip link delete gcp.eth0.10"},
 			mdsJSON: `
 		{
 			"instance":  {
@@ -1148,7 +1148,7 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 			name:         "fail-command",
 			wantError:    true,
 			ethernetName: "eth1",
-			wantCommands: []string{"ip link delete eth1.10"},
+			wantCommands: []string{"ip link delete gcp.eth1.10"},
 			mdsJSON: `
 		{
 			"instance":  {
@@ -1182,7 +1182,7 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 			wantError:    false,
 			skipIndexes:  map[int]bool{10: true, 33: true},
 			ethernetName: "eth2",
-			wantCommands: []string{"ip link delete eth2.66"},
+			wantCommands: []string{"ip link delete gcp.eth2.66"},
 			mdsJSON: `
 		{
 			"instance":  {
@@ -1338,15 +1338,15 @@ func TestSetupVlanInterfaces(t *testing.T) {
 			wantError:    false,
 			ethernetName: "eth0",
 			wantCommands: []string{
-				"ip link add link eth0 name eth0.10 type vlan id 10 reorder_hdr off",
-				"ip link set dev eth0.10 address 00:00:5e:00:53:01",
-				"ip link set dev eth0.10 mtu 0",
-				"ip link set up eth0.10",
-				"ip -4 addr add dev eth0.10 10.0.0.1",
-				"ip -4 route add 10.0.0.1 dev eth0.10",
+				"ip link add link eth0 name gcp.eth0.10 type vlan id 10 reorder_hdr off",
+				"ip link set dev gcp.eth0.10 address 00:00:5e:00:53:01",
+				"ip link set dev gcp.eth0.10 mtu 0",
+				"ip link set up gcp.eth0.10",
+				"ip -4 addr add dev gcp.eth0.10 10.0.0.1",
+				"ip -4 route add 10.0.0.1 dev gcp.eth0.10",
 				"ip route add 10.0.0.1 via 10.0.0.1",
-				"ip -6 addr add dev eth0.10 10.0.0.1",
-				"ip -6 route add 10.0.0.1 dev eth0.10",
+				"ip -6 addr add dev gcp.eth0.10 10.0.0.1",
+				"ip -6 route add 10.0.0.1 dev gcp.eth0.10",
 			},
 			mdsJSON: `
 		{
@@ -1469,7 +1469,7 @@ func TestSetupVlanInterfaces(t *testing.T) {
 								}
 
 								iface := &ethernet.Interface{
-									NameOp: func() string { return fmt.Sprintf("%s.%d", tc.ethernetName, key) },
+									NameOp: func() string { return fmt.Sprintf("gcp.%s.%d", tc.ethernetName, key) },
 									HardwareAddr: func() net.HardwareAddr {
 										return hwAddr
 									},

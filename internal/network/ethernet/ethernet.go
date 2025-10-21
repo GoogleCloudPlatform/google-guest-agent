@@ -189,7 +189,7 @@ type VlanInterface struct {
 
 // InterfaceName returns the name of the interface.
 func (vic *VlanInterface) InterfaceName() string {
-	return fmt.Sprintf("%s.%d", vic.Parent.NameOp(), vic.Vlan)
+	return fmt.Sprintf("gcp.%s.%d", vic.Parent.NameOp(), vic.Vlan)
 }
 
 // NewVlanInterface transforms a metadata.VlanInterface into a new

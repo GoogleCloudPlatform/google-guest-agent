@@ -502,7 +502,7 @@ func TestNewVlanInterface(t *testing.T) {
 				t.Errorf("newVlanInterface(%+v).GatewayIPv6 = %q, want %q", nic, val.GatewayIPv6.String(), nic.GatewayIPv6())
 			}
 
-			if val.InterfaceName() != fmt.Sprintf("%s.%d", parent.NameOp(), tc.vlanID) {
+			if val.InterfaceName() != fmt.Sprintf("gcp.%s.%d", parent.NameOp(), tc.vlanID) {
 				t.Errorf("newVlanInterface(%+v).InterfaceName() = %q, want %q", nic, val.InterfaceName(), fmt.Sprintf("%s.%d", parent.NameOp(), tc.vlanID))
 			}
 
