@@ -220,7 +220,7 @@ func newInstance(instance instance) *Instance {
 	for _, nic := range instance.NetworkInterfaces {
 		res.networkInterfaces = append(res.networkInterfaces, newNetworkInterface(nic))
 	}
-	for _, vics := range instance.VlanInterfaces {
+	for _, vics := range instance.VlanNetworkInterfaces {
 		mp := make(map[int]*VlanInterface)
 		for vlanID, iface := range vics {
 			mp[vlanID] = newVlanInterface(iface)

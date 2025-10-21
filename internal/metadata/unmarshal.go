@@ -74,13 +74,13 @@ type gcpUniverse struct {
 // internal representation used to parse the json formatted output of metadata
 // server.
 type instance struct {
-	ID                json.Number
-	MachineType       string
-	Attributes        attributes
-	NetworkInterfaces []networkInterface
-	VlanInterfaces    []map[int]vlanInterface
-	VirtualClock      virtualClock
-	Name              string
+	ID                    json.Number
+	MachineType           string
+	Attributes            attributes
+	NetworkInterfaces     []networkInterface
+	VlanNetworkInterfaces map[int]map[int]vlanInterface
+	VirtualClock          virtualClock
+	Name                  string
 	// We don't need the details for now, but we need to keep the key to know
 	// if service accounts are present.
 	ServiceAccounts map[string]json.RawMessage

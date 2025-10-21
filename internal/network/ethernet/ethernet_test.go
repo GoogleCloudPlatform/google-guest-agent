@@ -329,13 +329,14 @@ func TestNewVlanInterface(t *testing.T) {
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"MAC": "invalid-mac-address"
+							"0": {
+							 	"10": {
+									"MAC": "invalid-mac-address"
+							  }
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -346,14 +347,15 @@ func TestNewVlanInterface(t *testing.T) {
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"MAC": "00:00:5e:00:53:01",
-								"IP": "invalid-ip-address"
+							"0": {
+								"10": {
+									"MAC": "00:00:5e:00:53:01",
+									"IP": "invalid-ip-address"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -364,17 +366,18 @@ func TestNewVlanInterface(t *testing.T) {
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"MAC": "00:00:5e:00:53:01",
-								"IP": "10.0.0.1",
-								"IPv6": [
-									"invalid-ip-address"
-								]
+							"0": {
+								"10": {
+									"MAC": "00:00:5e:00:53:01",
+									"IP": "10.0.0.1",
+									"IPv6": [
+										"invalid-ip-address"
+									]
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -385,18 +388,19 @@ func TestNewVlanInterface(t *testing.T) {
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"MAC": "00:00:5e:00:53:01",
-								"IP": "10.0.0.1",
-								"IPv6": [
-									"2001:db8:a0b:12f0::1"
-								],
-								"Gateway": "invalid-ip-address"
+							"0": {
+								"10": {
+									"MAC": "00:00:5e:00:53:01",
+									"IP": "10.0.0.1",
+									"IPv6": [
+										"2001:db8:a0b:12f0::1"
+									],
+									"Gateway": "invalid-ip-address"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -407,19 +411,20 @@ func TestNewVlanInterface(t *testing.T) {
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"MAC": "00:00:5e:00:53:01",
-								"IP": "10.0.0.1",
-								"IPv6": [
-									"2001:db8:a0b:12f0::1"
-								],
-								"Gateway": "10.0.0.1",
-								"GatewayIPv6": "invalid-ip-address"
+							"0": {
+								"10": {
+									"MAC": "00:00:5e:00:53:01",
+									"IP": "10.0.0.1",
+									"IPv6": [
+										"2001:db8:a0b:12f0::1"
+									],
+									"Gateway": "10.0.0.1",
+									"GatewayIPv6": "invalid-ip-address"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -430,20 +435,21 @@ func TestNewVlanInterface(t *testing.T) {
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"VLAN": 10,
-								"MAC": "00:00:5e:00:53:01",
-								"IP": "10.0.0.1",
-								"IPv6": [
-									"2001:db8:a0b:12f0::1"
-								],
-								"Gateway": "10.0.0.1",
-								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+							"0": {
+								"10": {
+									"VLAN": 10,
+									"MAC": "00:00:5e:00:53:01",
+									"IP": "10.0.0.1",
+									"IPv6": [
+										"2001:db8:a0b:12f0::1"
+									],
+									"Gateway": "10.0.0.1",
+									"GatewayIPv6": "2001:db8:a0b:12f0::1"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -512,49 +518,49 @@ func TestNewVlanInterface(t *testing.T) {
 
 func TestVlanParentInterface(t *testing.T) {
 	tests := []struct {
-		name      string
-		vlanID    int
-		mdsJSON   string
-		wantError bool
-		wantValue int
+		name               string
+		vlanID             int
+		mdsJSON            string
+		wantError          bool
+		wantUnmarshalError bool
+		wantValue          int
 	}{
 		{
-			name:      "invalid-parent-id-format",
-			vlanID:    10,
-			wantError: true,
+			name:               "invalid-parent-id-format",
+			vlanID:             10,
+			wantError:          true,
+			wantUnmarshalError: false,
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
-						{"10": {"parentInterface": "invalid-format"}}
-					]
+					"vlanNetworkInterfaces":
+						{"0": { "10": {"parentInterface": "invalid-format"}}}
 				}
 			}`,
 		},
 		{
-			name:      "invalid-parent-id-value",
-			vlanID:    10,
-			wantError: true,
+			name:               "invalid-parent-id-value",
+			vlanID:             10,
+			wantUnmarshalError: true,
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
-						{"10": {"parentInterface": "/computeMetadata/v1/instance/network-interfaces/9999999999999999999999/"}}
-					]
+					"vlanNetworkInterfaces":
+						{"9999999999999999999999": {"10": {"parentInterface": "/computeMetadata/v1/instance/network-interfaces/9999999999999999999999/"}}}
 				}
 			}`,
 		},
 		{
-			name:      "success",
-			vlanID:    10,
-			wantValue: 33,
-			wantError: false,
+			name:               "success",
+			vlanID:             10,
+			wantValue:          33,
+			wantError:          false,
+			wantUnmarshalError: false,
 			mdsJSON: `
 			{
 				"instance":  {
-					"vlanInterfaces": [
-						{"10": {"parentInterface": "/computeMetadata/v1/instance/network-interfaces/33/"}}
-					]
+					"vlanNetworkInterfaces":
+						{"33": {"10": {"parentInterface": "/computeMetadata/v1/instance/network-interfaces/33/"}}}
 				}
 			}`,
 		},
@@ -563,8 +569,10 @@ func TestVlanParentInterface(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mds, err := metadata.UnmarshalDescriptor(tc.mdsJSON)
-			if err != nil {
+			if (err == nil) == tc.wantUnmarshalError {
 				t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", tc.mdsJSON, err)
+			} else if tc.wantUnmarshalError {
+				return
 			}
 
 			nic := mds.Instance().VlanInterfaces()[0][tc.vlanID]

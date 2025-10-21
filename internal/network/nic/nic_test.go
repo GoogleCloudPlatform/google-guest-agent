@@ -222,13 +222,14 @@ func TestNewConfigs(t *testing.T) {
 							"DHCPv6Refresh": "not-empty"
 						}
 					],
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"parentInterface": "invalid-parent-interface"
+							"0": {
+								"10": {
+									"parentInterface": "invalid-parent-interface"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -245,13 +246,14 @@ func TestNewConfigs(t *testing.T) {
 							"DHCPv6Refresh": "not-empty"
 						}
 					],
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/30/"
+							"30": {
+								"10": {
+									"parentInterface": "/computeMetadata/v1/instance/network-interfaces/30/"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -268,14 +270,15 @@ func TestNewConfigs(t *testing.T) {
 							"DHCPv6Refresh": "not-empty"
 						}
 					],
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-								"MAC": "invalid-mac"
+							"0": {
+								"10": {
+									"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+									"MAC": "invalid-mac"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},
@@ -292,21 +295,22 @@ func TestNewConfigs(t *testing.T) {
 							"DHCPv6Refresh": "not-empty"
 						}
 					],
-					"vlanInterfaces": [
+					"vlanNetworkInterfaces":
 						{
-							"10": {
-								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-								"VLAN": 10,
-								"MAC": "00:00:5e:00:53:01",
-								"IP": "10.0.0.1",
-								"IPv6": [
-									"2001:db8:a0b:12f0::1"
-								],
-								"Gateway": "10.0.0.1",
-								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+							"0": {
+								"10": {
+									"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+									"VLAN": 10,
+									"MAC": "00:00:5e:00:53:01",
+									"IP": "10.0.0.1",
+									"IPv6": [
+										"2001:db8:a0b:12f0::1"
+									],
+									"Gateway": "10.0.0.1",
+									"GatewayIPv6": "2001:db8:a0b:12f0::1"
+								}
 							}
 						}
-					]
 				}
 			}`,
 		},

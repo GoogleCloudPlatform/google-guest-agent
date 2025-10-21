@@ -152,7 +152,7 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 	}
 
 	// Write the netplan vlan drop-in file.
-	netplanVlanChanged, err := sn.writeVlanDropin(nicConfigs)
+	netplanVlanChanged, err := sn.writeVlanDropin(ctx, nicConfigs)
 	if err != nil {
 		return fmt.Errorf("error writing netplan vlan dropin: %w", err)
 	}
@@ -196,7 +196,7 @@ func (sn *serviceNetplan) generateConfigs(ctx context.Context) error {
 // interfaces are consolidated into a single drop-in file, if no vlan interfaces
 // are configured, the drop-in file is removed - accounting for the removal
 // aspect of hot unplugging a dynamic vlan.
-func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, error) {
+func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Configuration) (bool, error) {
 	galog.Debugf("Writing vlan drop-in configuration.")
 
 	dropin := netplanDropin{
@@ -207,6 +207,12 @@ func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, erro
 	}
 
 	var vlanConfigured bool
+	deleteMe, err := sn.presentVlanNICs(sn.vlanDropinFile())
+	if err != nil {
+		return false, fmt.Errorf("failed to check if netplan vlan drop-in config is present: %w", err)
+	}
+
+	galog.V(2).Debugf("Present vlan nics before setup: %v", deleteMe)
 
 	for _, nic := range nics {
 		if !nic.ShouldManage() {
@@ -219,9 +225,11 @@ func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, erro
 
 			nv := netplanVlan{
 				ID:     vlan.Vlan,
-				Link:   nic.Interface.Name(),
+				Link:   sn.addPrefix(nic.Interface.Name(), false),
 				DHCPv4: &trueVal,
 			}
+
+			delete(deleteMe, vlan.InterfaceName())
 
 			if len(vlan.IPv6Addresses) > 0 {
 				nv.DHCPv6 = &trueVal
@@ -229,6 +237,12 @@ func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, erro
 
 			dropin.Network.Vlans[vlan.InterfaceName()] = nv
 			vlanConfigured = true
+		}
+	}
+
+	if len(deleteMe) > 0 {
+		if err := sn.removeOrphanedVlans(ctx, deleteMe); err != nil {
+			return false, fmt.Errorf("failed to remove orphaned vlan interfaces: %w", err)
 		}
 	}
 
@@ -251,6 +265,29 @@ func (sn *serviceNetplan) writeVlanDropin(nics []*nic.Configuration) (bool, erro
 	}
 
 	return wrote, nil
+}
+
+// removeOrphanedVlans removes the orphaned vlan interfaces. This is required to
+// ensure that the vlan interfaces are removed from the system.
+func (sn *serviceNetplan) removeOrphanedVlans(ctx context.Context, deleteMe map[string]bool) error {
+	var deleteNics []string
+
+	for k := range deleteMe {
+		deleteNics = append(deleteNics, k)
+	}
+
+	// Simply removing configs on disk and reloading netplan/networkctl doesn't remove
+	// existing vlan nics, it requires instance reboot or systemd-networkd restart. Instead,
+	// make sure its removed by [networkctl delete <interfaces>] command.
+	args := []string{"delete"}
+	args = append(args, deleteNics...)
+
+	opt := run.Options{OutputType: run.OutputNone, Name: "networkctl", Args: args}
+	if _, err := run.WithContext(ctx, opt); err != nil {
+		return fmt.Errorf("error deleting orphaned vlan nics: %w", err)
+	}
+
+	return nil
 }
 
 // writeDropin writes the netplan drop-in file.
@@ -374,7 +411,7 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 
 	// Remove the netplan vlan drop-in file.
 	vlanDropin := sn.vlanDropinFile()
-	if file.Exists(vlanDropin, file.TypeFile) {
+	if !active && file.Exists(vlanDropin, file.TypeFile) {
 		if err := os.Remove(vlanDropin); err != nil {
 			return fmt.Errorf("error removing netplan vlan dropin: %w", err)
 		}
@@ -474,4 +511,30 @@ func (nd netplanDropin) equals(cfgPath string) (bool, error) {
 		return false, fmt.Errorf("error unmarshalling netplan drop-in yaml file: %w", err)
 	}
 	return reflect.DeepEqual(&nd, cfg), nil
+}
+
+// presentVlanNICs returns a map of vlan NICs present in the netplan drop-in
+// file.
+func (sn *serviceNetplan) presentVlanNICs(cfgPath string) (map[string]bool, error) {
+	if !file.Exists(cfgPath, file.TypeFile) {
+		galog.V(2).Debugf("Netplan vlan drop-in file(%s) does not exist, skipping read.", cfgPath)
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading netplan drop-in file: %w", err)
+	}
+
+	cfg := new(netplanDropin)
+	if err = yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("error unmarshalling netplan drop-in yaml file: %w", err)
+	}
+
+	res := make(map[string]bool)
+	for vlanName := range cfg.Network.Vlans {
+		res[vlanName] = true
+	}
+
+	return res, nil
 }

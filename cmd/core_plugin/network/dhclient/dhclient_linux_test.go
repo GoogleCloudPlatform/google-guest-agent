@@ -1108,7 +1108,7 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 		mdsJSON      string
 		ethernetName string
 		wantError    bool
-		skipIndexes  []int
+		skipIndexes  map[int]bool
 		wantCommands []string
 	}{
 		{
@@ -1125,21 +1125,22 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 						"DHCPv6Refresh": "not-empty"
 					}
 				],
-				"vlanInterfaces": [
+				"vlanNetworkInterfaces": 
 					{
-						"10": {
-							"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-							"VLAN": 10,
-							"MAC": "00:00:5e:00:53:01",
-							"IP": "10.0.0.1",
-							"IPv6": [
-								"2001:db8:a0b:12f0::1"
-							],
-							"Gateway": "10.0.0.1",
-							"GatewayIPv6": "2001:db8:a0b:12f0::1"
+						"0": {
+							"10": {
+								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+								"VLAN": 10,
+								"MAC": "00:00:5e:00:53:01",
+								"IP": "10.0.0.1",
+								"IPv6": [
+									"2001:db8:a0b:12f0::1"
+								],
+								"Gateway": "10.0.0.1",
+								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+						  }
 						}
 					}
-				]
 			}
 		}`,
 		},
@@ -1157,9 +1158,10 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 						"DHCPv6Refresh": "not-empty"
 					}
 				],
-				"vlanInterfaces": [
+				"vlanNetworkInterfaces":
 					{
-						"10": {
+						"0": {
+							"10": {
 							"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
 							"VLAN": 10,
 							"MAC": "00:00:5e:00:53:01",
@@ -1169,16 +1171,16 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 							],
 							"Gateway": "10.0.0.1",
 							"GatewayIPv6": "2001:db8:a0b:12f0::1"
-						}
+						  }
 					}
-				]
+				}
 			}
 		}`,
 		},
 		{
 			name:         "skip-vlans",
 			wantError:    false,
-			skipIndexes:  []int{0, 1},
+			skipIndexes:  map[int]bool{10: true, 33: true},
 			ethernetName: "eth2",
 			wantCommands: []string{"ip link delete eth2.66"},
 			mdsJSON: `
@@ -1190,47 +1192,44 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 						"DHCPv6Refresh": "not-empty"
 					}
 				],
-				"vlanInterfaces": [
+				"vlanNetworkInterfaces":
 					{
-						"10": {
-							"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-							"VLAN": 10,
-							"MAC": "00:00:5e:00:53:01",
-							"IP": "10.0.0.1",
-							"IPv6": [
-								"2001:db8:a0b:12f0::1"
-							],
-							"Gateway": "10.0.0.1",
-							"GatewayIPv6": "2001:db8:a0b:12f0::1"
-						}
-					},
-					{
-						"33": {
-							"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-							"VLAN": 33,
-							"MAC": "00:00:5e:00:53:01",
-							"IP": "10.0.0.1",
-							"IPv6": [
-								"2001:db8:a0b:12f0::1"
-							],
-							"Gateway": "10.0.0.1",
-							"GatewayIPv6": "2001:db8:a0b:12f0::1"
-						}
-					},
-					{
-						"66": {
-							"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-							"VLAN": 66,
-							"MAC": "00:00:5e:00:53:01",
-							"IP": "10.0.0.1",
-							"IPv6": [
-								"2001:db8:a0b:12f0::1"
-							],
-							"Gateway": "10.0.0.1",
-							"GatewayIPv6": "2001:db8:a0b:12f0::1"
+						"0": {
+							"10": {
+								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+								"VLAN": 10,
+								"MAC": "00:00:5e:00:53:01",
+								"IP": "10.0.0.1",
+								"IPv6": [
+									"2001:db8:a0b:12f0::1"
+								],
+								"Gateway": "10.0.0.1",
+								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+							},
+							"33": {
+								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+								"VLAN": 33,
+								"MAC": "00:00:5e:00:53:01",
+								"IP": "10.0.0.1",
+								"IPv6": [
+									"2001:db8:a0b:12f0::1"
+								],
+								"Gateway": "10.0.0.1",
+								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+							},
+							"66": {
+								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+								"VLAN": 66,
+								"MAC": "00:00:5e:00:53:01",
+								"IP": "10.0.0.1",
+								"IPv6": [
+									"2001:db8:a0b:12f0::1"
+								],
+								"Gateway": "10.0.0.1",
+								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+							}
 						}
 					}
-				]
 			}
 		}`,
 		},
@@ -1302,8 +1301,12 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 			}
 
 			var skip []*ethernet.VlanInterface
-			for _, i := range tc.skipIndexes {
-				skip = append(skip, nics[0].VlanInterfaces[i])
+			for key := range tc.skipIndexes {
+				for _, vlan := range nics[0].VlanInterfaces {
+					if vlan.Vlan == key {
+						skip = append(skip, vlan)
+					}
+				}
 			}
 
 			ds := &dhclientService{}
@@ -1354,21 +1357,22 @@ func TestSetupVlanInterfaces(t *testing.T) {
 						"DHCPv6Refresh": "not-empty"
 					}
 				],
-				"vlanInterfaces": [
+				"vlanNetworkInterfaces":
 					{
-						"10": {
-							"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-							"VLAN": 10,
-							"MAC": "00:00:5e:00:53:01",
-							"IP": "10.0.0.1",
-							"IPv6": [
-								"2001:db8:a0b:12f0::1"
-							],
-							"Gateway": "10.0.0.1",
-							"GatewayIPv6": "2001:db8:a0b:12f0::1"
+						"0": {
+							"10": {
+								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+								"VLAN": 10,
+								"MAC": "00:00:5e:00:53:01",
+								"IP": "10.0.0.1",
+								"IPv6": [
+									"2001:db8:a0b:12f0::1"
+								],
+								"Gateway": "10.0.0.1",
+								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+							}
 						}
 					}
-				]
 			}
 		}`,
 		},
@@ -1386,21 +1390,22 @@ func TestSetupVlanInterfaces(t *testing.T) {
 						"DHCPv6Refresh": "not-empty"
 					}
 				],
-				"vlanInterfaces": [
+				"vlanNetworkInterfaces":
 					{
-						"10": {
-							"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
-							"VLAN": 10,
-							"MAC": "00:00:5e:00:53:01",
-							"IP": "10.0.0.1",
-							"IPv6": [
-								"2001:db8:a0b:12f0::1"
-							],
-							"Gateway": "10.0.0.1",
-							"GatewayIPv6": "2001:db8:a0b:12f0::1"
+						"0": {
+							"10": {
+								"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+								"VLAN": 10,
+								"MAC": "00:00:5e:00:53:01",
+								"IP": "10.0.0.1",
+								"IPv6": [
+									"2001:db8:a0b:12f0::1"
+								],
+								"Gateway": "10.0.0.1",
+								"GatewayIPv6": "2001:db8:a0b:12f0::1"
+							}
 						}
 					}
-				]
 			}
 		}`,
 		},
@@ -1418,8 +1423,7 @@ func TestSetupVlanInterfaces(t *testing.T) {
 						"DHCPv6Refresh": "not-empty"
 					}
 				],
-				"vlanInterfaces": [
-				]
+				"vlanNetworkInterfaces": {}
 			}
 		}`,
 		},
