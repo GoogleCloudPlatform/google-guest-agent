@@ -100,6 +100,19 @@ type netplanVlan struct {
 
 	// DHCPv6 determines if DHCPv6 support must be enabled to such an interface.
 	DHCPv6 *bool `yaml:"dhcp6,omitempty"`
+
+	// OverrideMacAddress sets the netplan macaddress configuration. This is used
+	// to override the MAC address of the interface.
+	OverrideMacAddress string `yaml:"macaddress,omitempty"`
+
+	// MTU sets the MTU for interface. The default is 1500.
+	MTU int `yaml:"mtu,omitempty"`
+
+	// DHCP4Overrides sets DHCP4 overrides for the vlan.
+	DHCP4Overrides *netplanDHCPOverrides `yaml:"dhcp4-overrides,omitempty"`
+
+	// DHCP6Overrides sets DHCP6 overrides for the vlan.
+	DHCP6Overrides *netplanDHCPOverrides `yaml:"dhcp6-overrides,omitempty"`
 }
 
 // netplanEthernet describes the actual ethernet configuration.

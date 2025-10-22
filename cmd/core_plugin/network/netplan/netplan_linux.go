@@ -222,11 +222,15 @@ func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Confi
 		for _, vlan := range nic.VlanInterfaces {
 			galog.Debugf("Adding vlan %s(parent %s) to drop-in configuration.", vlan.InterfaceName(), vlan.Parent.Name())
 			trueVal := true
-
+			falseVal := false
 			nv := netplanVlan{
-				ID:     vlan.Vlan,
-				Link:   sn.addPrefix(nic.Interface.Name(), false),
-				DHCPv4: &trueVal,
+				ID:                 vlan.Vlan,
+				Link:               sn.addPrefix(nic.Interface.Name(), false),
+				DHCPv4:             &trueVal,
+				OverrideMacAddress: vlan.MacAddr,
+				MTU:                vlan.MTU,
+				DHCP4Overrides:     &netplanDHCPOverrides{UseDomains: &falseVal},
+				DHCP6Overrides:     &netplanDHCPOverrides{UseDomains: &falseVal},
 			}
 
 			delete(deleteMe, vlan.InterfaceName())
