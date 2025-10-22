@@ -52,7 +52,7 @@ type testBackend struct {
 	IsManagingCb      func(context.Context, *service.Options) (bool, error)
 	WriteDropinsCb    func([]*nic.Configuration, string) (bool, error)
 	RollbackDropinsCb func([]*nic.Configuration, string, bool) error
-	ReloadCb          func(context.Context) error
+	ReloadCb          func(context.Context, int) error
 }
 
 func (tb *testBackend) ID() string {
@@ -71,8 +71,8 @@ func (tb *testBackend) RollbackDropins(nics []*nic.Configuration, filePrefix str
 	return tb.RollbackDropinsCb(nics, filePrefix, active)
 }
 
-func (tb *testBackend) Reload(ctx context.Context) error {
-	return tb.ReloadCb(ctx)
+func (tb *testBackend) Reload(ctx context.Context, numInterfaces int) error {
+	return tb.ReloadCb(ctx, numInterfaces)
 }
 
 func TestNewService(t *testing.T) {
@@ -114,7 +114,7 @@ func (tb *testNetplanBackend) RollbackDropins([]*nic.Configuration, string, bool
 	return nil
 }
 
-func (tb *testNetplanBackend) Reload(context.Context) error {
+func (tb *testNetplanBackend) Reload(context.Context, int) error {
 	return nil
 }
 
@@ -662,7 +662,7 @@ func TestRollback(t *testing.T) {
 				RollbackDropinsCb: func([]*nic.Configuration, string, bool) error {
 					return errors.New("rollback dropins failed")
 				},
-				ReloadCb: func(context.Context) error {
+				ReloadCb: func(context.Context, int) error {
 					return nil
 				},
 			},
@@ -681,7 +681,7 @@ func TestRollback(t *testing.T) {
 				RollbackDropinsCb: func([]*nic.Configuration, string, bool) error {
 					return nil
 				},
-				ReloadCb: func(context.Context) error {
+				ReloadCb: func(context.Context, int) error {
 					return nil
 				},
 			},
@@ -700,7 +700,7 @@ func TestRollback(t *testing.T) {
 				RollbackDropinsCb: func([]*nic.Configuration, string, bool) error {
 					return nil
 				},
-				ReloadCb: func(context.Context) error {
+				ReloadCb: func(context.Context, int) error {
 					return nil
 				},
 			},

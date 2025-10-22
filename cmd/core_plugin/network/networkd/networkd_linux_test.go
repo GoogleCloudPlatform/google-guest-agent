@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
@@ -608,6 +609,8 @@ func TestSetup(t *testing.T) {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
+	var mod *Module
+
 	type testOptions struct {
 		createConfigDir bool
 	}
@@ -636,6 +639,7 @@ func TestSetup(t *testing.T) {
 		testOptions testOptions
 		runCallback func(context.Context, run.Options) (*run.Result, error)
 		wantErr     bool
+		wantWaitErr bool // If we expect an error when waiting for DHCP leases.
 		writeFile   bool
 		noReload    bool
 	}{
@@ -699,6 +703,100 @@ func TestSetup(t *testing.T) {
 			writeFile: true,
 			noReload:  true,
 		},
+		{
+			name: "success-reload",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 1,
+				},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface2" },
+					},
+					Index: 2,
+				},
+			}),
+			testOptions: testOptions{
+				createConfigDir: true,
+			},
+			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+				if opts.Name == "networkctl" && opts.Args[0] == "reload" {
+					go func() {
+						time.Sleep(500 * time.Millisecond)
+						if err := os.WriteFile(filepath.Join(mod.dhcpLeasesDir, "2"), []byte("test"), 0644); err != nil {
+							t.Errorf("failed to write file: %v", err)
+						}
+						if err := os.WriteFile(filepath.Join(mod.dhcpLeasesDir, "3"), []byte("test"), 0644); err != nil {
+							t.Errorf("failed to write file: %v", err)
+						}
+					}()
+				}
+				return &run.Result{}, nil
+			},
+			wantErr:   false,
+			writeFile: false,
+			noReload:  false,
+		},
+		{
+			name: "success-reload-timeout",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 1,
+				},
+			}),
+			testOptions: testOptions{
+				createConfigDir: true,
+			},
+			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+				return &run.Result{}, nil
+			},
+			wantErr:     false,
+			wantWaitErr: true,
+			writeFile:   false,
+			noReload:    false,
+		},
+		{
+			name: "success-reload-secondary-no-lease",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 1,
+				},
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface2" },
+					},
+					Index: 2,
+				},
+			}),
+			testOptions: testOptions{
+				createConfigDir: true,
+			},
+			runCallback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+				if opts.Name == "networkctl" && opts.Args[0] == "reload" {
+					go func() {
+						time.Sleep(500 * time.Millisecond)
+						file := filepath.Join(mod.dhcpLeasesDir, "2")
+						if err := os.WriteFile(file, []byte("test"), 0644); err != nil {
+							t.Errorf("failed to write file: %v", err)
+						}
+					}()
+				}
+				return &run.Result{}, nil
+			},
+			wantErr:     false,
+			wantWaitErr: true,
+			writeFile:   false,
+			noReload:    false,
+		},
 	}
 
 	ctx := context.Background()
@@ -706,17 +804,23 @@ func TestSetup(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			configDir := filepath.Join(t.TempDir(), "systemd", "network")
 
-			mod := &Module{
+			mod = &Module{
 				configDir:          configDir,
+				dhcpLeasesDir:      filepath.Join(configDir, "dhcp", "leases"),
 				networkCtlKeys:     []string{"AdministrativeState", "SetupState"},
 				priority:           defaultSystemdNetworkdPriority,
 				deprecatedPriority: deprecatedPriority,
+				dhcpTimeout:        time.Second,
 			}
 
 			if tc.testOptions.createConfigDir {
 				if err := os.MkdirAll(mod.configDir, 0755); err != nil {
 					t.Fatalf("failed to create mock network config directory: %v", err)
 				}
+			}
+
+			if err := os.MkdirAll(mod.dhcpLeasesDir, 0755); err != nil {
+				t.Fatalf("failed to create mock DHCP leases directory: %v", err)
 			}
 
 			// Setup mock runner if a callback is provided.
@@ -755,6 +859,10 @@ func TestSetup(t *testing.T) {
 			err := mod.Setup(ctx, tc.opts)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want %v", err, tc.wantErr)
+			}
+
+			if (mod.dhcpWaitErr == nil) == tc.wantWaitErr {
+				t.Errorf("Setup() = dhcp wait error: %v, want error? %v", mod.dhcpWaitErr, tc.wantWaitErr)
 			}
 
 			// Only time commands are run are for reloads.
@@ -862,9 +970,18 @@ func TestRollback(t *testing.T) {
 
 			mod := &Module{
 				configDir:          configDir,
+				dhcpLeasesDir:      filepath.Join(t.TempDir(), "dhcp", "leases"),
 				networkCtlKeys:     []string{"AdministrativeState", "SetupState"},
 				priority:           defaultSystemdNetworkdPriority,
 				deprecatedPriority: deprecatedPriority,
+			}
+
+			// Create a mock DHCP leases directory with a file to prevent unnecessary waits.
+			if err := os.MkdirAll(mod.dhcpLeasesDir, 0755); err != nil {
+				t.Fatalf("failed to create mock DHCP leases directory: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(mod.dhcpLeasesDir, "2"), []byte("test"), 0644); err != nil {
+				t.Fatalf("failed to write file: %v", err)
 			}
 
 			if tc.data != "" {

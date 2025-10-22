@@ -9,6 +9,7 @@ require (
 	github.com/GoogleCloudPlatform/agentcommunication_client v0.0.0-20251015211329-5c9ae0ed2931
 	github.com/GoogleCloudPlatform/galog v0.0.0-20250924170816-9dbf105986f4
 	github.com/Microsoft/go-winio v0.6.2
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-ini/ini v1.67.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-tpm v0.9.6
@@ -17,7 +18,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	go.bug.st/serial v1.6.4
 	golang.org/x/crypto v0.43.0
-	golang.org/x/exp v0.0.0-20251009144603-d2f985daa21b
+	golang.org/x/exp v0.0.0-20251017212417-90e834f514db
 	golang.org/x/sys v0.37.0
 	google.golang.org/api v0.252.0
 	google.golang.org/grpc v1.76.0
@@ -76,7 +77,7 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	google.golang.org/genproto v0.0.0-20251014184007-4626949a642f // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20251014184007-4626949a642f // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20251014184007-4626949a642f // indirect
+	google.golang.org/genproto v0.0.0-20251020155222-88f65dc88635 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20251020155222-88f65dc88635 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20251020155222-88f65dc88635 // indirect
 )

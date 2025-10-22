@@ -173,7 +173,7 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 
 	// Reload the backend if networkd's configuration has changed.
 	if (netplanChanged || netplanVlanChanged || backendChanged) && sn.backendReload {
-		if err := sn.backend.Reload(ctx); err != nil {
+		if err := sn.backend.Reload(ctx, len(nicConfigs)); err != nil {
 			return fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
 		}
 	}
@@ -444,7 +444,7 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 		if err := sn.generateConfigs(ctx); err != nil {
 			return fmt.Errorf("error reloading netplan changes: %w", err)
 		}
-		if err := sn.backend.Reload(ctx); err != nil {
+		if err := sn.backend.Reload(ctx, 0); err != nil {
 			return fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
 		}
 	}

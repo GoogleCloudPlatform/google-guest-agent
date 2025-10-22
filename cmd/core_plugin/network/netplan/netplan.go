@@ -162,7 +162,7 @@ type netplanBackend interface {
 	RollbackDropins([]*nic.Configuration, string, bool) error
 
 	// Reload reloads the backend's configuration.
-	Reload(context.Context) error
+	Reload(context.Context, int) error
 }
 
 // serviceNetplan implements the netplan service.

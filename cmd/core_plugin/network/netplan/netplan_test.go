@@ -50,7 +50,7 @@ func (tb *noopBackend) RollbackDropins([]*nic.Configuration, string, bool) error
 	return nil
 }
 
-func (tb *noopBackend) Reload(context.Context) error {
+func (tb *noopBackend) Reload(context.Context, int) error {
 	return nil
 }
 

@@ -14,7 +14,10 @@
 
 package networkd
 
-import "os/exec"
+import (
+	"os/exec"
+	"time"
+)
 
 const (
 	// defaultSystemdNetworkdPriority is a value adjusted to be above netplan
@@ -30,6 +33,9 @@ const (
 	// are not yet supported/available.
 	minSupportedVersion = 252
 
+	// defaultDHCPTimeout is the time to wait for DHCP to acquire leases.
+	defaultDHCPTimeout = 5 * time.Second
+
 	// ServiceID is the service ID for systemd-networkd.
 	ServiceID = "systemd-networkd"
 
@@ -40,6 +46,10 @@ const (
 	// DefaultConfigDir is the directory where systemd-networkd's configuration
 	// files are located.
 	DefaultConfigDir = "/usr/lib/systemd/network"
+
+	// DefaultDHCPLeasesDir is the directory where systemd-networkd stores the
+	// DHCP leases.
+	DefaultDHCPLeasesDir = "/run/systemd/netif/leases"
 )
 
 var (
@@ -118,6 +128,9 @@ type Module struct {
 	// dropinDir determines where the agent writes its drop-in files.
 	dropinDir string
 
+	// dhcpLeasesDir determines where the agent looks for the DHCP leases.
+	dhcpLeasesDir string
+
 	// networkCtlKeys helps with compatibility with different versions of
 	// systemd, where the desired status key can be different.
 	networkCtlKeys []string
@@ -129,6 +142,14 @@ type Module struct {
 	// deprecatedPriority is the priority previously supported by us and
 	// requires us to roll it back.
 	deprecatedPriority int
+
+	// dhcpTimeout is the time to wait for DHCP to acquire leases.
+	dhcpTimeout time.Duration
+
+	// dhcpWaitErr is the error gotten when waiting for DHCP to acquire leases.
+	// This is used in testing to determine if a timeout has occurred. Outside of
+	// tests, the timeout shouldn't block the rest of the network setup process.
+	dhcpWaitErr error
 }
 
 // DefaultModule returns the default module for systemd-networkd.
@@ -136,8 +157,10 @@ func DefaultModule() *Module {
 	return &Module{
 		configDir:          DefaultConfigDir,
 		dropinDir:          DefaultDropinDir,
+		dhcpLeasesDir:      DefaultDHCPLeasesDir,
 		networkCtlKeys:     DefaultNetworkCtlKeys,
 		priority:           defaultSystemdNetworkdPriority,
 		deprecatedPriority: deprecatedPriority,
+		dhcpTimeout:        defaultDHCPTimeout,
 	}
 }

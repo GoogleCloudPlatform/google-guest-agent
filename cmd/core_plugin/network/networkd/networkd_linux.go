@@ -40,6 +40,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ini"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/regex"
+	"github.com/fsnotify/fsnotify"
 )
 
 // NewService returns a new networkd service handler.
@@ -298,7 +299,7 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 	}
 
 	// Attempt to reload systemd-networkd configurations.
-	if err := sn.Reload(ctx); err != nil {
+	if err := sn.Reload(ctx, len(nicConfigs)); err != nil {
 		return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
 	}
 
@@ -307,14 +308,63 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 }
 
 // Reload reloads the systemd-networkd daemon.
-func (sn *Module) Reload(ctx context.Context) error {
+func (sn *Module) Reload(ctx context.Context, numInterfaces int) error {
+	// Reset the error gotten when waiting for DHCP to acquire leases.
+	sn.dhcpWaitErr = nil
+
 	// We do actually a reload so we avoid restarting systemd-networkd service so
 	// we don run into cyclical dependencies with the guest-agent.
 	opt := run.Options{OutputType: run.OutputNone, Name: "networkctl", Args: []string{"reload"}}
 	if _, err := run.WithContext(ctx, opt); err != nil {
 		return fmt.Errorf("error reloading systemd-networkd network configs: %w", err)
 	}
-	return nil
+
+	// If the leases directory is not present, we can't wait for DHCP leases.
+	if !file.Exists(sn.dhcpLeasesDir, file.TypeDir) {
+		galog.Debugf("No DHCP leases directory found: %s.", sn.dhcpLeasesDir)
+		return nil
+	}
+
+	if numInterfaces == 0 {
+		galog.Debugf("No interfaces to wait for DHCP leases, skipping wait.")
+		return nil
+	}
+
+	// We need to wait for systemd-networkd to acquire DHCP leases to avoid
+	// race conditions where we try to configure routes before they are acquired.
+	// This is only needed for `systemd-networkd` because other network managers
+	// block until the leases are acquired before completing the configuration.
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		galog.Warnf("Failed to create fsnotify watcher: %v", err)
+		return nil
+	}
+	watcher.Add(sn.dhcpLeasesDir)
+	defer watcher.Close()
+
+	// Wait for DHCP leases to be acquired.
+	timeout, cancel := context.WithTimeout(ctx, sn.dhcpTimeout)
+	defer cancel()
+
+	galog.Debugf("Waiting for DHCP leases for all interfaces.")
+	var numWrites int
+	for {
+		select {
+		case fsnotifyEvent := <-watcher.Events:
+			galog.V(3).Debugf("fsnotifyEvent: %v", fsnotifyEvent.String())
+			if fsnotifyEvent.Has(fsnotify.Write) {
+				numWrites++
+			}
+			if numWrites >= numInterfaces {
+				galog.Debugf("Found DHCP leases for all interfaces.")
+				return nil
+			}
+		case <-timeout.Done():
+			galog.Warnf("Timed out after %v waiting for DHCP leases.", sn.dhcpTimeout)
+			sn.dhcpWaitErr = timeout.Err()
+			return nil
+		}
+	}
 }
 
 // cleanupVlanConfigs removes vlan interfaces that are no longer present. The
@@ -580,7 +630,7 @@ func (sn *Module) Rollback(ctx context.Context, opts *service.Options, active bo
 	// Attempt to reload systemd-networkd configurations.
 	if !active {
 		galog.Debugf("Reloading systemd-networkd daemon.")
-		if err := sn.Reload(ctx); err != nil {
+		if err := sn.Reload(ctx, 0); err != nil {
 			return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
 		}
 	}
