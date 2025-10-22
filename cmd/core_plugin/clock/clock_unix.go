@@ -65,7 +65,7 @@ func (mod *clockSkew) moduleSetup(ctx context.Context, data any) error {
 		return fmt.Errorf("clock skew module expects a metadata descriptor in the data pointer")
 	}
 
-	if !isEnabled() {
+	if !isEnabled(ctx) {
 		galog.Infof("Clock skew configuration is disabled, skipping module setup.")
 		return nil
 	}

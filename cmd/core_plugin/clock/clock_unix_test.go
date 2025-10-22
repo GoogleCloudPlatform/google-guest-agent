@@ -219,13 +219,14 @@ func TestMetadataSubscriber(t *testing.T) {
 
 type testRunner struct {
 	throwErr bool
+	output   string
 }
 
 func (tr *testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
 	if tr.throwErr {
 		return nil, errors.New("error")
 	}
-	return nil, nil
+	return &run.Result{Output: tr.output}, nil
 }
 
 func TestClockSetup(t *testing.T) {
