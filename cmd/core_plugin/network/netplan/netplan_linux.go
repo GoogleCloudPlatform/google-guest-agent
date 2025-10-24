@@ -245,9 +245,7 @@ func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Confi
 	}
 
 	if len(deleteMe) > 0 {
-		if err := sn.removeOrphanedVlans(ctx, deleteMe); err != nil {
-			return false, fmt.Errorf("failed to remove orphaned vlan interfaces: %w", err)
-		}
+		sn.removeOrphanedVlans(ctx, deleteMe)
 	}
 
 	// If we don't have any vlan interfaces, remove the drop-in file.
@@ -273,7 +271,10 @@ func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Confi
 
 // removeOrphanedVlans removes the orphaned vlan interfaces. This is required to
 // ensure that the vlan interfaces are removed from the system.
-func (sn *serviceNetplan) removeOrphanedVlans(ctx context.Context, deleteMe map[string]bool) error {
+//
+// This operation is best effort, if we fail to delete the orphaned vlans, it
+// will be a no-op.
+func (sn *serviceNetplan) removeOrphanedVlans(ctx context.Context, deleteMe map[string]bool) {
 	var deleteNics []string
 
 	for k := range deleteMe {
@@ -288,10 +289,8 @@ func (sn *serviceNetplan) removeOrphanedVlans(ctx context.Context, deleteMe map[
 
 	opt := run.Options{OutputType: run.OutputNone, Name: "networkctl", Args: args}
 	if _, err := run.WithContext(ctx, opt); err != nil {
-		return fmt.Errorf("error deleting orphaned vlan nics: %w", err)
+		galog.Debugf("Failed to delete orphaned vlan nics: %v", err)
 	}
-
-	return nil
 }
 
 // writeDropin writes the netplan drop-in file.
