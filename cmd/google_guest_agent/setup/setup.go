@@ -55,10 +55,10 @@ type PluginManagerInterface interface {
 // verifyPluginRunning verifies the plugin [name] is in running state.
 func verifyPluginRunning(ctx context.Context, pm PluginManagerInterface, name, revision string) error {
 	states := pm.ListPluginStates(ctx, &acpb.ListPluginStates{})
-	var foundState *acpb.CurrentPluginStates_DaemonPluginState_Status
+	var foundState *acpb.CurrentPluginStates_Status
 	for _, s := range states.GetDaemonPluginStates() {
 		if s.GetName() == name {
-			if s.GetCurrentPluginStatus().GetStatus() == acpb.CurrentPluginStates_DaemonPluginState_RUNNING && s.GetCurrentRevisionId() == revision {
+			if s.GetCurrentPluginStatus().GetStatus() == acpb.CurrentPluginStates_RUNNING && s.GetCurrentRevisionId() == revision {
 				return nil
 			}
 			foundState = s.GetCurrentPluginStatus()
@@ -86,6 +86,7 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 
 	galog.Infof("Current plugin state: %v installing core plugin...", err)
 
+	// TODO(andrewhl): Read the core plugin config from a file.
 	req := &acpb.ConfigurePluginStates{
 		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
@@ -96,9 +97,11 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 					EntryPoint: c.CorePluginPath,
 				},
 				Manifest: &acpb.ConfigurePluginStates_Manifest{
-					StartAttemptCount: 5,
-					StartTimeout:      &dpb.Duration{Seconds: 30},
-					StopTimeout:       &dpb.Duration{Seconds: 30},
+					StartAttemptCount:      5,
+					StartTimeout:           &dpb.Duration{Seconds: 30},
+					StopTimeout:            &dpb.Duration{Seconds: 30},
+					PluginType:             acpb.PluginType_DAEMON,
+					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
 				},
 			},
 		},
