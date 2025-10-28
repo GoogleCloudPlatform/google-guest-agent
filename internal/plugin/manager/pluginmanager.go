@@ -262,7 +262,7 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 				// return. If the revision is different, it means the core plugin is
 				// being updated and there's no need to relaunch if not running.
 				if p.IsRunning(ctx) {
-					p.setState(acpb.CurrentPluginStates_DaemonPluginState_RUNNING)
+					p.setState(acpb.CurrentPluginStates_RUNNING)
 				}
 				galog.Infof("Plugin %q state is different from expected revision %q, skipping relaunch", p.FullName(), version)
 				return
@@ -294,7 +294,7 @@ func (m *PluginManager) RemoveAllDynamicPlugins(ctx context.Context) error {
 
 	var toRemove []*Plugin
 	for _, p := range m.list() {
-		if p.PluginType == PluginTypeCore {
+		if p.IsLocal() {
 			galog.Debugf("Skipping core plugin %q, it will be removed by package manager", p.Name)
 			continue
 		}
@@ -345,7 +345,7 @@ func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPlug
 	plugins := m.list()
 
 	for _, p := range plugins {
-		status := &acpb.CurrentPluginStates_DaemonPluginState_Status{Status: p.State()}
+		status := &acpb.CurrentPluginStates_Status{Status: p.State()}
 		h := p.healthInfo()
 		if h != nil {
 			status.ResponseCode = h.responseCode
@@ -354,9 +354,9 @@ func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPlug
 		}
 
 		p.RuntimeInfo.metricsMu.Lock()
-		var pluginMetrics []*acpb.CurrentPluginStates_DaemonPluginState_Metric
+		var pluginMetrics []*acpb.CurrentPluginStates_Metric
 		for _, metric := range p.RuntimeInfo.metrics.All() {
-			monitorMetric := &acpb.CurrentPluginStates_DaemonPluginState_Metric{
+			monitorMetric := &acpb.CurrentPluginStates_Metric{
 				Timestamp:   metric.timestamp,
 				CpuUsage:    metric.cpuUsage,
 				MemoryUsage: metric.memoryUsage,
@@ -549,12 +549,14 @@ func setConfig(manifest *Manifest, req *acpb.ConfigurePluginStates_ConfigurePlug
 // install request.
 func newPluginManifest(req *acpb.ConfigurePluginStates_ConfigurePlugin) (*Manifest, error) {
 	manifest := &Manifest{
-		StartAttempts:  int(req.GetManifest().GetStartAttemptCount()),
-		MaxMemoryUsage: req.GetManifest().GetMaxMemoryUsageBytes(),
-		MaxCPUUsage:    req.GetManifest().GetMaxCpuUsagePercentage(),
-		StopTimeout:    time.Duration(req.GetManifest().GetStopTimeout().GetSeconds()) * time.Second,
-		StartTimeout:   time.Duration(req.GetManifest().GetStartTimeout().GetSeconds()) * time.Second,
-		StartConfig:    &ServiceConfig{},
+		StartAttempts:          int(req.GetManifest().GetStartAttemptCount()),
+		MaxMemoryUsage:         req.GetManifest().GetMaxMemoryUsageBytes(),
+		MaxCPUUsage:            req.GetManifest().GetMaxCpuUsagePercentage(),
+		StopTimeout:            time.Duration(req.GetManifest().GetStopTimeout().GetSeconds()) * time.Second,
+		StartTimeout:           time.Duration(req.GetManifest().GetStartTimeout().GetSeconds()) * time.Second,
+		StartConfig:            &ServiceConfig{},
+		PluginType:             req.GetManifest().GetPluginType(),
+		PluginInstallationType: req.GetManifest().GetPluginInstallationType(),
 	}
 
 	if err := setConfig(manifest, req); err != nil {
@@ -570,7 +572,6 @@ func newPluginManifest(req *acpb.ConfigurePluginStates_ConfigurePlugin) (*Manife
 func newPlugin(req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) (*Plugin, error) {
 	p := &Plugin{
 		Name:        req.GetPlugin().GetName(),
-		PluginType:  PluginTypeDynamic,
 		Revision:    req.GetPlugin().GetRevisionId(),
 		RuntimeInfo: &RuntimeInfo{},
 	}
@@ -582,14 +583,12 @@ func newPlugin(req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool
 
 	p.Manifest = manifest
 
-	if localPlugin {
+	if p.IsLocal() {
 		// Dynamic plugins are installed in a specific directory, that install
 		// workflow sets its install path. In case of local plugins since they're
 		// already present on disk and directory is known set its install path here
 		// itself.
 		p.InstallPath = filepath.Dir(req.GetPlugin().GetEntryPoint())
-		// Only core plugins can be present on disk before Plugin Manager installs.
-		p.PluginType = PluginTypeCore
 	}
 
 	p.setMetricConfig(req)
@@ -688,7 +687,7 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 	// Current plugin will be removed as soon as new plugin launch is started
 	// below. Set the pending status to show new plugin revision install in
 	// progress. This will be captured by [ListPluginStates] and sent to ACS.
-	currPlugin.setPendingStatus(plugin.Revision, acpb.CurrentPluginStates_DaemonPluginState_INSTALLING)
+	currPlugin.setPendingStatus(plugin.Revision, acpb.CurrentPluginStates_INSTALLING)
 
 	// Two plugin revisions can co-exist on the same host, but only one of them
 	// can be running. Run pre-launch steps on new plugin revision to reduce
@@ -775,7 +774,7 @@ func (m *PluginManager) applyConfig(ctx context.Context, req *acpb.ConfigurePlug
 		// retrying won't help and we should attempt restart workflow.
 		galog.Infof("Plugin %q returned unimplemented error for apply config request, attempting the restart workflow", p.FullName())
 		if err := p.runSteps(ctx, relaunchWorkflow(ctx, p)); err != nil {
-			p.setState(acpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+			p.setState(acpb.CurrentPluginStates_CRASHED)
 			return fmt.Errorf("failed to relaunch plugin %q: %w", p.FullName(), err)
 		}
 	} else {
@@ -878,12 +877,12 @@ func (m *PluginManager) stopMetricsMonitoring(p *Plugin) {
 // connectOrReLaunch connects to the plugin and launches the plugin if needed.
 func connectOrReLaunch(ctx context.Context, p *Plugin) error {
 	if p.IsRunning(ctx) {
-		p.setState(acpb.CurrentPluginStates_DaemonPluginState_RUNNING)
+		p.setState(acpb.CurrentPluginStates_RUNNING)
 		return nil
 	}
 	galog.Debugf("Plugin %q is not running, relaunching", p.FullName())
 	if err := p.runSteps(ctx, relaunchWorkflow(ctx, p)); err != nil {
-		p.setState(acpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+		p.setState(acpb.CurrentPluginStates_CRASHED)
 		return fmt.Errorf("failed to relaunch plugin %q: %w", p.FullName(), err)
 	}
 
