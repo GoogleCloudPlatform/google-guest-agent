@@ -28,6 +28,7 @@ import (
 )
 
 const (
+	// defaultPluginPath is the default path to the plugin directory.
 	mibIPRouteTypeIndirect                   = 4
 	mibIPProtoNetmgmt      mibIPForwardProto = 3
 )
