@@ -512,6 +512,11 @@ func (attr *Attributes) DisableTelemetry() bool {
 	return attr.internal.DisableTelemetry
 }
 
+// DisableDNSProbe returns the attributes disable dns probe.
+func (attr *Attributes) DisableDNSProbe() bool {
+	return attr.internal.DisableDNSProbe
+}
+
 // Email is the windows email key.
 func (wk *WindowsKey) Email() string {
 	return wk.internal.Email

@@ -151,6 +151,7 @@ type attributes struct {
 	WSFCAddresses             string
 	WSFCAgentPort             string
 	DisableTelemetry          bool
+	DisableDNSProbe           bool
 }
 
 // UnmarshalJSON unmarshals b into Attribute.
@@ -184,6 +185,7 @@ func (a *attributes) UnmarshalJSON(b []byte) error {
 		WSFCAddresses             string      `json:"wsfc-addrs"`
 		WSFCAgentPort             string      `json:"wsfc-agent-port"`
 		DisableTelemetry          string      `json:"disable-guest-telemetry"`
+		DisableDNSProbe           string      `json:"disable-dns-probe"`
 	}
 	var temp inner
 	if err := json.Unmarshal(b, &temp); err != nil {
@@ -250,6 +252,9 @@ func (a *attributes) UnmarshalJSON(b []byte) error {
 
 	if value, err := strconv.ParseBool(temp.DisableTelemetry); err == nil {
 		a.DisableTelemetry = value
+	}
+	if value, err := strconv.ParseBool(temp.DisableDNSProbe); err == nil {
+		a.DisableDNSProbe = value
 	}
 	// So SSHKeys will be nil instead of []string{}
 	if temp.SSHKeys != "" {
