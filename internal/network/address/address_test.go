@@ -625,7 +625,7 @@ func TestMaskFromIPAddr(t *testing.T) {
 		{
 			name: "default-mask-ipv4",
 			ip:   &IPAddr{IP: &ipv4},
-			want: ipv4.DefaultMask(),
+			want: net.IPv4Mask(255, 255, 255, 255),
 		},
 		{
 			name: "valid-ipv6",

@@ -90,9 +90,11 @@ type IPAddr struct {
 
 // Mask returns the netmask of the IP address.
 func (i *IPAddr) Mask() (net.IPMask, error) {
-	// Only IPv4 addresses has default mask and this returns nil for IPv6
-	// addresses.
-	m := i.IP.DefaultMask()
+	var m net.IPMask
+	// Default to `/32` netmask for IPv4 addresses.
+	if !i.IsIPv6() {
+		m = net.IPv4Mask(255, 255, 255, 255)
+	}
 	// In case of IPv6 address we get CIDR block instead of just IP. If CIDR is
 	// is present then we use mask from CIDR instead of default mask.
 	if i.CIDR != nil {
