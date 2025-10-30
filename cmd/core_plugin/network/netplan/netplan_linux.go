@@ -453,45 +453,19 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 
 // restoreDefaultConfig restores the default netplan configuration.
 func (sn *serviceNetplan) restoreDefaultConfig(ctx context.Context) error {
-	const (
-		defaultConfigPath = "/etc/netplan/90-default.yaml"
-		defaultConfig     = `network:
-	version: 2
-	ethernets:
-			all-en:
-					match:
-							name: en*
-					dhcp4: true
-					dhcp4-overrides:
-							use-domains: true
-					dhcp6: true
-					dhcp6-overrides:
-							use-domains: true
-			all-eth:
-					match:
-							name: eth*
-					dhcp4: true
-					dhcp4-overrides:
-							use-domains: true
-					dhcp6: true
-					dhcp6-overrides:
-							use-domains: true
-`
-	)
-
 	if !cfg.Retrieve().NetworkInterfaces.RestoreDebian12NetplanConfig {
 		galog.Debugf("Skipping restore of default netplan configuration.")
 		return nil
 	}
 
-	osDesc := osinfo.Read()
+	osDesc := sn.osInfoReader()
 	if osDesc.OS != "debian" || osDesc.Version.Major != 12 {
 		galog.Debugf("Skipping restore of default netplan configuration for non-Debian 12.")
 		return nil
 	}
 
-	if !file.Exists(defaultConfigPath, file.TypeFile) {
-		if err := os.WriteFile(defaultConfigPath, []byte(defaultConfig), 0644); err != nil {
+	if !file.Exists(sn.configPath, file.TypeFile) {
+		if err := os.WriteFile(sn.configPath, []byte(defaultConfig), 0600); err != nil {
 			return fmt.Errorf("error writing default netplan configuration: %w", err)
 		}
 		galog.Debugf("Restored default netplan configuration.")

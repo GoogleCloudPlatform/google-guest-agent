@@ -743,6 +743,9 @@ func TestRollback(t *testing.T) {
 				forceNoOpBackend:         true,
 				backendReload:            true,
 				netplanConfigDir:         filepath.Join(t.TempDir(), "netplan"),
+				osInfoReader: func() osinfo.OSInfo {
+					return osinfo.OSInfo{}
+				},
 			}
 
 			if tc.data != "" {
@@ -802,6 +805,8 @@ func TestSetOSFlags(t *testing.T) {
 		wantPriority           int
 		wantBackendReload      bool
 		wantEthernetNamePrefix string
+		wantConfigPath         string
+		wantOSInfoReader       func() osinfo.OSInfo
 	}{
 		{
 			name: "ubuntu-16.04",
@@ -813,6 +818,8 @@ func TestSetOSFlags(t *testing.T) {
 			wantNetplanConfigDir: defaultNetplanConfigDir,
 			wantEthernetSuffix:   netplanEthernetSuffix,
 			wantBackendReload:    true,
+			wantConfigPath:       defaultConfigPath,
+			wantOSInfoReader:     osinfo.Read,
 		},
 		{
 			name: "ubuntu-18.04",
@@ -824,6 +831,8 @@ func TestSetOSFlags(t *testing.T) {
 			wantNetplanConfigDir: defaultNetplanConfigDir,
 			wantEthernetSuffix:   netplanEthernetSuffix,
 			wantBackendReload:    false,
+			wantConfigPath:       defaultConfigPath,
+			wantOSInfoReader:     osinfo.Read,
 		},
 		{
 			name: "ubuntu-20.04",
@@ -835,6 +844,8 @@ func TestSetOSFlags(t *testing.T) {
 			wantNetplanConfigDir: defaultNetplanConfigDir,
 			wantEthernetSuffix:   netplanEthernetSuffix,
 			wantBackendReload:    true,
+			wantConfigPath:       defaultConfigPath,
+			wantOSInfoReader:     osinfo.Read,
 		},
 		{
 			name: "ubuntu-22.10",
@@ -846,6 +857,8 @@ func TestSetOSFlags(t *testing.T) {
 			wantNetplanConfigDir: defaultNetplanConfigDir,
 			wantEthernetSuffix:   netplanEthernetSuffix,
 			wantBackendReload:    true,
+			wantConfigPath:       defaultConfigPath,
+			wantOSInfoReader:     osinfo.Read,
 		},
 		{
 			name: "ubuntu-22.04",
@@ -857,6 +870,8 @@ func TestSetOSFlags(t *testing.T) {
 			wantNetplanConfigDir: defaultNetplanConfigDir,
 			wantEthernetSuffix:   netplanEthernetSuffix,
 			wantBackendReload:    true,
+			wantConfigPath:       defaultConfigPath,
+			wantOSInfoReader:     osinfo.Read,
 		},
 		{
 			name: "debian-12",
@@ -869,6 +884,8 @@ func TestSetOSFlags(t *testing.T) {
 			wantEthernetSuffix:     netplanEthernetSuffix,
 			wantBackendReload:      true,
 			wantEthernetNamePrefix: debian12EthernetNamePrefix,
+			wantConfigPath:         defaultConfigPath,
+			wantOSInfoReader:       osinfo.Read,
 		},
 	}
 
@@ -897,6 +914,121 @@ func TestSetOSFlags(t *testing.T) {
 
 			if svc.ethernetNamePrefix != tc.wantEthernetNamePrefix {
 				t.Errorf("ethernetNamePrefix = %v, want %v", svc.ethernetNamePrefix, tc.wantEthernetNamePrefix)
+			}
+
+			if svc.configPath != tc.wantConfigPath {
+				t.Errorf("configPath = %v, want %v", svc.configPath, tc.wantConfigPath)
+			}
+
+			if svc.osInfoReader() != tc.wantOSInfoReader() {
+				t.Errorf("osInfoReader = %v, want %v", svc.osInfoReader(), tc.wantOSInfoReader())
+			}
+		})
+	}
+}
+
+func TestRestoreDefaultConfig(t *testing.T) {
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	var v any
+	// This is to ensure that the default config is a valid yaml.
+	if err := yaml.Unmarshal([]byte(defaultConfig), &v); err != nil {
+		t.Fatalf("Failed to unmarshal default config: %v", err)
+	}
+
+	tests := []struct {
+		name            string
+		restoreCfg      bool
+		osInfo          osinfo.OSInfo
+		createFile      bool
+		existingContent string
+		wantFileContent string
+		wantFileCreated bool
+	}{
+		{
+			name:       "restore-disabled",
+			restoreCfg: false,
+			osInfo: osinfo.OSInfo{
+				OS:      "debian",
+				Version: osinfo.Ver{Major: 12},
+			},
+		},
+		{
+			name:       "not-debian12",
+			restoreCfg: true,
+			osInfo: osinfo.OSInfo{
+				OS:      "ubuntu",
+				Version: osinfo.Ver{Major: 22},
+			},
+		},
+		{
+			name:       "file-exists",
+			restoreCfg: true,
+			osInfo: osinfo.OSInfo{
+				OS:      "debian",
+				Version: osinfo.Ver{Major: 12},
+			},
+			createFile:      true,
+			existingContent: "existing-content",
+			wantFileContent: "existing-content",
+		},
+		{
+			name:       "file-does-not-exist-expect-restore",
+			restoreCfg: true,
+			osInfo: osinfo.OSInfo{
+				OS:      "debian",
+				Version: osinfo.Ver{Major: 12},
+			},
+			createFile:      false,
+			wantFileCreated: true,
+			wantFileContent: defaultConfig,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cfgPath := filepath.Join(tmpDir, "90-default.yaml")
+
+			if tc.createFile {
+				if err := os.WriteFile(cfgPath, []byte(tc.existingContent), 0644); err != nil {
+					t.Fatalf("Failed to write test file: %v", err)
+				}
+			}
+
+			sn := &serviceNetplan{
+				configPath: cfgPath,
+				osInfoReader: func() osinfo.OSInfo {
+					return tc.osInfo
+				},
+			}
+
+			cfg.Retrieve().NetworkInterfaces.RestoreDebian12NetplanConfig = tc.restoreCfg
+
+			if err := sn.restoreDefaultConfig(ctx); err != nil {
+				t.Errorf("restoreDefaultConfig() returned unexpected error: %v", err)
+			}
+
+			fExists := file.Exists(cfgPath, file.TypeFile)
+			if !tc.createFile && !tc.wantFileCreated && fExists {
+				t.Errorf("restoreDefaultConfig() created file %s, expected it to be missing", cfgPath)
+			}
+			if tc.wantFileCreated && !fExists {
+				t.Fatalf("restoreDefaultConfig() did not create file %s", cfgPath)
+			}
+
+			if fExists {
+				gotContent, err := os.ReadFile(cfgPath)
+				if err != nil {
+					t.Fatalf("Failed to read config file: %v", err)
+				}
+
+				if string(gotContent) != tc.wantFileContent {
+					t.Errorf("restoreDefaultConfig() wrote unexpected content to %s, got: %s, want: %s", cfgPath, string(gotContent), tc.wantFileContent)
+				}
 			}
 		})
 	}

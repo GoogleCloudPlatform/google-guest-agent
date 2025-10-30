@@ -21,6 +21,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 )
 
 const (
@@ -61,6 +62,34 @@ const (
 
 	// noOpBackendID is the ID of the no-op backend.
 	noOpBackendID = "no-op"
+
+	// defaultConfigPath is the path to the default netplan configuration file.
+	defaultConfigPath = "/etc/netplan/90-default.yaml"
+
+	// defaultConfig is the default netplan configuration for Debian 12.
+	defaultConfig = `
+network:
+  version: 2
+  ethernets:
+    all-en:
+      match:
+        name: en*
+      dhcp4: true
+      dhcp4-overrides:
+        use-domains: true
+      dhcp6: true
+      dhcp6-overrides:
+        use-domains: true
+    all-eth:
+      match:
+        name: eth*
+      dhcp4: true
+      dhcp4-overrides:
+        use-domains: true
+      dhcp6: true
+      dhcp6-overrides:
+        use-domains: true
+`
 )
 
 var (
@@ -195,6 +224,13 @@ type serviceNetplan struct {
 
 	// ethernetNamePrefix is the prefix to use for the ethernet interfaces.
 	ethernetNamePrefix string
+
+	// configPath is the path to the netplan configuration file. This is used to
+	// restore the default netplan configuration.
+	configPath string
+
+	// osInfoReader is the function to use to read the OS information.
+	osInfoReader func() osinfo.OSInfo
 }
 
 // defaultModule returns the default module for netplan.
@@ -212,4 +248,6 @@ func (sn *serviceNetplan) defaultConfig() {
 	sn.ethernetDropinIdentifier = netplanDropinIdentifier
 	sn.netplanConfigDir = defaultNetplanConfigDir
 	sn.ethernetSuffix = netplanEthernetSuffix
+	sn.configPath = defaultConfigPath
+	sn.osInfoReader = osinfo.Read
 }
