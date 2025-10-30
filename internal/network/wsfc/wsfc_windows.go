@@ -48,6 +48,17 @@ func AddressMap(desc *metadata.Descriptor, config *cfg.Sections) address.IPAddre
 
 	// addresses contains the wsfc wanted addresses.
 	addresses := wantedAddresses()
+	if addresses == "" {
+		galog.Debugf("No WSFC addresses found, ignoring forwarded IPs and targeted instance IPs.")
+		// Ignore forwarded IPs and targeted instance IPs if no WSFC addresses are found.
+		var ignoreAddrs []address.IPAddressMap
+		for _, nic := range desc.Instance().NetworkInterfaces() {
+			forwardedIPsMap := address.NewIPAddressMap(nic.ForwardedIPs(), nil)
+			targetedInstanceIPsMap := address.NewIPAddressMap(nic.TargetInstanceIPs(), nil)
+			ignoreAddrs = append(ignoreAddrs, forwardedIPsMap, targetedInstanceIPsMap)
+		}
+		return address.MergeIPAddressMap(ignoreAddrs...)
+	}
 	galog.Debugf("Found WSFC addresses: %s", addresses)
 
 	// Transform the wanted addresses into a slice - make sure to remove empty

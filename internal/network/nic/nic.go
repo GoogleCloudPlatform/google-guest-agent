@@ -38,7 +38,7 @@ var (
 type Configuration struct {
 	// Index is the index of the NIC.
 	Index uint32
-	// Invalid is true if the NIC is valid.
+	// Invalid is true if the NIC is invalid.
 	Invalid bool
 	// SupportsIPv6 is true if the NIC supports IPv6.
 	SupportsIPv6 bool

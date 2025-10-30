@@ -131,6 +131,30 @@ func TestWSFCAddressMap(t *testing.T) {
 			want: address.NewIPAddressMap(nil, nil),
 		},
 		{
+			name:   "no-addresses-ignore-forwarded-ips",
+			config: &cfg.Sections{},
+			mdsJSON: `
+			{
+				"project":  {
+					"attributes": {
+					}
+				},
+				"instance":  {
+					"attributes": {
+					},
+					"networkInterfaces": [
+						{
+							"mac": "00:00:5e:00:53:01",
+							"forwardedIps": [
+							  "10.1.1.2"
+							]
+						}
+					]
+				}
+			}`,
+			want: address.NewIPAddressMap([]string{"10.1.1.2"}, nil),
+		},
+		{
 			name: "address-on-config",
 			config: &cfg.Sections{
 				WSFC: &cfg.WSFC{
