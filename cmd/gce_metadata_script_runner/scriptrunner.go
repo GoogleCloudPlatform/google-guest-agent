@@ -479,13 +479,14 @@ func main() {
 
 	coreCfg := cfg.Retrieve().Core
 	logOpts := logger.Options{
-		Ident:             "google_metadata_script_runner",
-		CloudIdent:        "GCEGuestMetadataScriptRunner",
-		ProgramVersion:    version,
-		LogToCloudLogging: coreCfg.CloudLoggingEnabled,
-		LogFile:           coreCfg.LogFile,
-		Level:             coreCfg.LogLevel,
-		Verbosity:         coreCfg.LogVerbosity,
+		Ident:                       "google_metadata_script_runner",
+		CloudIdent:                  "GCEGuestMetadataScriptRunner",
+		ProgramVersion:              version,
+		LogToCloudLogging:           coreCfg.CloudLoggingEnabled,
+		LogFile:                     coreCfg.LogFile,
+		Level:                       coreCfg.LogLevel,
+		Verbosity:                   coreCfg.LogVerbosity,
+		InitCloudLoggingImmediately: true,
 	}
 
 	if err := logger.Init(ctx, logOpts); err != nil {
