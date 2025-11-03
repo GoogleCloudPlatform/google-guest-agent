@@ -28,6 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
@@ -89,8 +90,11 @@ func (ts *testPluginServer) Apply(ctx context.Context, msg *pb.ApplyRequest) (*p
 	if ts.ctrs != nil {
 		ts.ctrs[data]++
 	}
+	if string(data) == "unimplemented" {
+		return nil, status.Error(codes.Unimplemented, "unimplemented")
+	}
 	if string(data) == "failure" || ts.applyFail {
-		return nil, status.Error(1, "test error")
+		return nil, status.Error(codes.Unknown, "test error")
 	}
 	return nil, nil
 }
@@ -117,7 +121,6 @@ func (ts *testPluginServer) Stop(ctx context.Context, msg *pb.StopRequest) (*pb.
 	ts.mu.Lock()
 	ts.stopCalled = true
 	ts.mu.Unlock()
-
 	switch msg.GetDeadline().GetSeconds() {
 	case 1:
 		// Add fake delay to test request timeout.
