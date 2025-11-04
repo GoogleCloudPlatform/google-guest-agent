@@ -432,6 +432,17 @@ func TestDelUser(t *testing.T) {
 	}
 }
 
+func TestHandleGroup(t *testing.T) {
+	testGroup := createTestGroup(t, "testgroup")
+	group, err := handleGroup(context.Background(), &Group{GID: testGroup.GID})
+	if err != nil {
+		t.Fatalf("handleGroup(ctx, %v) = err %v, want nil", testGroup.GID, err)
+	}
+	if group.Name != testGroup.Name {
+		t.Errorf("handleGroup(ctx, %v) = Name %v, want: %v", testGroup.GID, group.Name, testGroup.Name)
+	}
+}
+
 func TestCreateGroup(t *testing.T) {
 	tests := []struct {
 		// name is the name of the test.
