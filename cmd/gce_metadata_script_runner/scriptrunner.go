@@ -469,6 +469,13 @@ func handleEvent(ctx context.Context, mdsClient metadata.MDSClientInterface, eve
 	return nil
 }
 
+func cloudLoggingName() string {
+	if runtime.GOOS == "windows" {
+		return "GCEMetadataScripts"
+	}
+	return "google_metadata_script_runner"
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -479,13 +486,14 @@ func main() {
 
 	coreCfg := cfg.Retrieve().Core
 	logOpts := logger.Options{
-		Ident:             "google_metadata_script_runner",
-		CloudIdent:        "GCEGuestMetadataScriptRunner",
-		ProgramVersion:    version,
-		LogToCloudLogging: coreCfg.CloudLoggingEnabled,
-		LogFile:           coreCfg.LogFile,
-		Level:             coreCfg.LogLevel,
-		Verbosity:         coreCfg.LogVerbosity,
+		Ident:                       "google_metadata_script_runner",
+		CloudIdent:                  cloudLoggingName(),
+		ProgramVersion:              version,
+		LogToCloudLogging:           coreCfg.CloudLoggingEnabled,
+		LogFile:                     coreCfg.LogFile,
+		Level:                       coreCfg.LogLevel,
+		Verbosity:                   coreCfg.LogVerbosity,
+		InitCloudLoggingImmediately: true,
 	}
 
 	if err := logger.Init(ctx, logOpts); err != nil {

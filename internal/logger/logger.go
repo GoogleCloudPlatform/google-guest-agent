@@ -58,6 +58,9 @@ type Options struct {
 	Prefix string
 	// ACSClientDebugLogging is a flag to enable ACS client logging.
 	ACSClientDebugLogging bool
+	// InitCloudLoggingImmediately is a flag to initialize cloud logging
+	// immediately.
+	InitCloudLoggingImmediately bool
 }
 
 const (
@@ -126,9 +129,7 @@ func Init(ctx context.Context, opts Options) error {
 
 	if opts.LogToCloudLogging {
 		galog.V(2).Debugf("Initializing cloud logging backend")
-		// We initialize and register the cloud logging backend in a lazy mode,
-		// meaning the cloud logging client will only be initialized when the
-		// metadata longpoll event is handled by initCloudLogging() subscriber.
+
 		be, err := galog.NewCloudBackend(ctx, galog.CloudLoggingInitModeLazy, nil)
 		galog.RegisterBackend(ctx, be)
 		if err != nil {
@@ -136,8 +137,22 @@ func Init(ctx context.Context, opts Options) error {
 		}
 		opts.cloudLoggingBackend = be
 
-		sub := events.EventSubscriber{Name: loggerMetadataSubscriberID, Data: &opts, Callback: initCloudLogging}
-		events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
+		if opts.InitCloudLoggingImmediately {
+			mds, err := metadata.New().Get(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to get metadata descriptor: %w", err)
+			}
+			_, _, err = initCloudLogging(ctx, "", &opts, &events.EventData{Data: mds})
+			if err != nil {
+				return fmt.Errorf("failed to initialize cloud logging: %w", err)
+			}
+		} else {
+			// We initialize and register the cloud logging backend in a lazy mode,
+			// meaning the cloud logging client will only be initialized when the
+			// metadata longpoll event is handled by initCloudLogging() subscriber.
+			sub := events.EventSubscriber{Name: loggerMetadataSubscriberID, Data: &opts, Callback: initCloudLogging}
+			events.FetchManager().Subscribe(metadata.LongpollEvent, sub)
+		}
 	}
 
 	level, err := galog.ParseLevel(opts.Level)
