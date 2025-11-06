@@ -17,8 +17,11 @@ package cfg
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestApplyTemplate(t *testing.T) {
@@ -180,4 +183,35 @@ func TestApplyTemplateFailure(t *testing.T) {
 		})
 	}
 
+}
+
+func TestToString(t *testing.T) {
+	oldInstance := instance
+	t.Cleanup(func() { instance = oldInstance })
+	instance = &Sections{
+		Core: &Core{
+			Version:  "test_version",
+			LogLevel: 2,
+		},
+		Daemons: &Daemons{
+			AccountsDaemon: true,
+			NetworkDaemon:  false,
+		},
+	}
+
+	got, err := ToString()
+	if err != nil {
+		t.Fatalf("ToString() failed unexpectedly; err = %s", err)
+	}
+
+	newLine := "\n"
+	if runtime.GOOS == "windows" {
+		newLine = "\r\n"
+	}
+
+	want := []string{"[Core]", "log_level = 2", "", "[Daemons]", "accounts_daemon = true", ""}
+
+	if diff := cmp.Diff(strings.Split(got, newLine), want); diff != "" {
+		t.Errorf("ToString() got diff (-want +got):\n%s", diff)
+	}
 }
