@@ -127,6 +127,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Log the config read by the guest agent to debug.
+	cfgStr, err := cfg.ToString()
+	if err != nil {
+		galog.Debugf("Failed to convert config to string: %v", err)
+	} else {
+		galog.Debugf("Read configuration file: %s", cfgStr)
+	}
+
 	if err := service.Init(ctx, func() {
 		galog.Info("Google Guest Agent Leaving (canceling context)...")
 		galog.Shutdown(galogShutdownTimeout)
