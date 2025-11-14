@@ -228,6 +228,7 @@ func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix string, 
 		}
 
 		filePath := sn.dropinFile(filePrefix, nic.Interface.Name())
+		galog.Debugf("Rolling back systemd-networkd drop-in file: %s", filePath)
 
 		if _, err := rollbackConfiguration(filePath); err != nil {
 			return fmt.Errorf("error rolling back systemd-networkd drop-in config: %w", err)

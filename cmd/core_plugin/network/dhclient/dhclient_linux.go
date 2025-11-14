@@ -429,8 +429,29 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, 
 			}
 		}
 
-		if err := ds.removeVlanInterfaces(ctx, iface, nil); err != nil {
-			return fmt.Errorf("failed to remove vlan interfaces: %w", err)
+		// This prevents incorrect rollback by dhclient where NICs are managed by
+		// netplan.
+		// VLAN interfaces does not have dhclient process running and IPs are
+		// assigned directly by running [ipAddressSet] command. Attempt to rollback
+		// any VLAN interfaces only if network stack is managed by dhclient
+		// (at-least one dhclient process for known ethernet interfaces). Simple
+		// dhclient existence does not prove this its managed by dhclient as in case
+		// of Debian-12 we have dhclient but NICs are managed by netplan/networkd.
+
+		ipv6DhclientProcess, err := dhclientProcessExists(iface, ipv6)
+		if err != nil {
+			return fmt.Errorf("failed to check if IPv6 dhclient process exists for %s: %w", ifaceName, err)
+		}
+
+		ipv4DhclientProcess, err := dhclientProcessExists(iface, ipv4)
+		if err != nil {
+			return fmt.Errorf("failed to check if IPv4 dhclient process exists for %s: %w", ifaceName, err)
+		}
+
+		if ipv6DhclientProcess || ipv4DhclientProcess {
+			if err := ds.removeVlanInterfaces(ctx, iface, nil); err != nil {
+				return fmt.Errorf("failed to remove vlan interfaces: %w", err)
+			}
 		}
 	}
 	return nil
