@@ -223,6 +223,38 @@ func CopyFile(ctx context.Context, src, dst string, opts Options) error {
 	return nil
 }
 
+// countLastNLinesBytes counts the number of bytes required to read the last n
+// lines of a file.
+func countLastNLinesBytes(f *os.File, size int64, n int) (int64, error) {
+	var result int64
+	seenLines := n
+
+	for i := size - 1; i >= 0; i-- {
+		result++
+		tmp := make([]byte, 1)
+
+		_, err := f.ReadAt(tmp, i)
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return -1, err
+		}
+
+		if tmp[0] == '\n' {
+			seenLines--
+		}
+
+		if seenLines == 0 {
+			break
+		}
+	}
+
+	// If we didn't read enough lines, return an error.
+	if n > 0 && seenLines == n {
+		return -1, fmt.Errorf("failed to read %d lines from file", n)
+	}
+
+	return result, nil
+}
+
 // ReadLastNLines reads the last n lines of a file.
 func ReadLastNLines(path string, n int) ([]string, error) {
 	galog.Debugf("Reading last %d lines of file %q", n, path)
@@ -239,9 +271,16 @@ func ReadLastNLines(path string, n int) ([]string, error) {
 	}
 
 	size := stat.Size()
-	bufferSize := int64(1024)
+	if size == 0 {
+		return nil, nil
+	}
 
-	buffer := make([]byte, bufferSize)
+	bufferSize, err := countLastNLinesBytes(f, size, n)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine last n lines size of file %q: %w", path, err)
+	}
+
+	buffer := make([]byte, bufferSize+1)
 	var lines []string
 	var chunk []byte
 

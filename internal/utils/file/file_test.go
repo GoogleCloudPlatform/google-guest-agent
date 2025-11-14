@@ -301,7 +301,7 @@ func TestCopyFileError(t *testing.T) {
 func TestReadLastNLines(t *testing.T) {
 	tmp := t.TempDir()
 	file := filepath.Join(tmp, "file")
-	write := []string{"line 1", "line 2", "line 3"}
+	write := []string{"line 1", "line 2", "line 3", strings.Repeat("a", 1024)}
 
 	if err := os.WriteFile(file, []byte(strings.Join(write, "\n")), 0644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
@@ -326,30 +326,41 @@ func TestReadLastNLines(t *testing.T) {
 			name:  "read_1_line",
 			file:  file,
 			lines: 1,
-			want:  []string{write[2]},
+			want:  []string{write[3]},
 		},
 		{
 			name:  "read_2_lines",
 			file:  file,
 			lines: 2,
-			want:  []string{write[1], write[2]},
+			want:  []string{write[2], write[3]},
 		},
 		{
 			name:  "read_3_lines",
 			file:  file,
 			lines: 3,
-			want:  []string{write[0], write[1], write[2]},
+			want:  []string{write[1], write[2], write[3]},
 		},
 		{
 			name:  "read_10_lines",
 			file:  file,
 			lines: 10,
-			want:  []string{write[0], write[1], write[2]},
+			want:  []string{write[0], write[1], write[2], write[3]},
+		},
+		{
+			name:  "read_0_lines",
+			file:  file,
+			lines: 0,
+			want:  []string{},
 		},
 		{
 			name:  "empty_file",
 			file:  file2,
 			lines: 10,
+		},
+		{
+			name:  "empty_file_0_lines",
+			file:  file2,
+			lines: 0,
 		},
 	}
 
