@@ -175,8 +175,9 @@ func ignoreCorePlugin() bool {
 	// If core plugin config is written in config file, use that. Otherwise, use
 	// the command line flag. Test environment do rely on the command line flag.
 	if config.IsConfigFilePresent() {
-		galog.Infof("Core plugin config file is present, setting skipCorePlugin to [%t]", skipCorePlugin)
-		return !config.IsCorePluginEnabled()
+		enabled := config.IsCorePluginEnabled()
+		galog.Infof("Core plugin config file [%q] is present and set to [%t]", config.CorePluginEnabledConfigFile, enabled)
+		return !enabled
 	}
 
 	return skipCorePlugin
