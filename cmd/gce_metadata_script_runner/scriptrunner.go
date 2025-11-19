@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -100,7 +101,7 @@ func supportedStorageURLRegexx(universeDomain string) []*regexp.Regexp {
 		regexp.MustCompile(fmt.Sprintf(`^http[s]?://(?:commondata)?storage\.%s/%s/%s$`, domainRegex, bucketRegex, objectRegex)),
 	}
 
-	if universeDomain == defaultUniverseDomain || universeDomain == "" {
+	if universeDomain == defaultUniverseDomain {
 		res = append(res, regexp.MustCompile(fmt.Sprintf(`^http[s]?://storage\.cloud\.google\.com/%s/%s$`, bucketRegex, objectRegex)))
 	}
 
@@ -160,25 +161,35 @@ func downloadURL(ctx context.Context, url string, file *os.File) error {
 // downloadScript downloads the script to execute.
 func downloadScript(ctx context.Context, universeDomain, path string, file *os.File) error {
 	bucket, object := parseGCS(universeDomain, path)
+	var gcsErr error
 	if bucket != "" && object != "" {
-		err := downloadGSURL(ctx, universeDomain, bucket, object, file)
-		if err == nil {
+		gcsErr = downloadGSURL(ctx, universeDomain, bucket, object, file)
+		if gcsErr == nil {
 			galog.Debugf("Succesfully downloaded using GSURL, bucket: %s, object: %s to file: %s", bucket, object, file.Name())
 			return nil
 		}
 
-		galog.Warnf("Failed to download object [%s] from GCS bucket [%s], err: %v", object, bucket, err)
+		gcsErr = fmt.Errorf("downloading object [%s], from GCS bucket [%s]: %w", object, bucket, gcsErr)
+		galog.Warnf("Failed to download object [%s] from GCS bucket [%s], err: %v", object, bucket, gcsErr)
 		galog.Infof("Trying unauthenticated download")
 		path = fmt.Sprintf("https://%s/%s/%s", storageURL, bucket, object)
 	}
 
 	// Fall back to an HTTP GET of the URL.
-	return downloadURL(ctx, path, file)
+	if err := downloadURL(ctx, path, file); err != nil {
+		urlErr := fmt.Errorf("downloading from URL [%s]: %w", path, err)
+		return errors.Join(urlErr, gcsErr)
+	}
+	return nil
 }
 
 // parseGCS parses the path and returns the bucket and object. It tries all 3
 // supported regexes to parse the URL.
 func parseGCS(universeDomain, path string) (string, string) {
+	if universeDomain == "" {
+		universeDomain = defaultUniverseDomain
+	}
+
 	var allSupportedRgx []*regexp.Regexp
 	allSupportedRgx = append(allSupportedRgx, gsRegex)
 	allSupportedRgx = append(allSupportedRgx, supportedStorageURLRegexx(universeDomain)...)
@@ -450,6 +461,7 @@ func handleEvent(ctx context.Context, mdsClient metadata.MDSClientInterface, eve
 	// rolled out.
 	if err != nil {
 		galog.Debugf("Failed to get universe domain: %v, using default universe domain", err)
+		universeDomain = defaultUniverseDomain
 	}
 
 	for _, key := range wantedKeys {
