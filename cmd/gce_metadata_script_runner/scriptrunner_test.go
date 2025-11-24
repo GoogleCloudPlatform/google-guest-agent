@@ -274,10 +274,11 @@ func TestRunScript(t *testing.T) {
 
 func TestParseGCS(t *testing.T) {
 	tests := []struct {
-		desc   string
-		path   string
-		bucket string
-		object string
+		desc           string
+		path           string
+		bucket         string
+		object         string
+		universeDomain string
 	}{
 		{
 			desc:   "gs_root",
@@ -351,11 +352,22 @@ func TestParseGCS(t *testing.T) {
 			bucket: "",
 			object: "",
 		},
+		{
+			desc:           "non_empty _universe_domain",
+			path:           "https://storage.apis-tpclp.goog/bucket/some/object",
+			bucket:         "bucket",
+			object:         "some/object",
+			universeDomain: "apis-tpclp.goog",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			bucket, object := parseGCS(defaultUniverseDomain, tt.path)
+			// parseGCS does not support being called with an empty universe domain.
+			if tt.universeDomain == "" {
+				tt.universeDomain = defaultUniverseDomain
+			}
+			bucket, object := parseGCS(tt.universeDomain, tt.path)
 			if bucket != tt.bucket {
 				t.Errorf("parseGCS(%s) = bucket %s, want %s", tt.path, bucket, tt.bucket)
 			}

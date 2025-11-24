@@ -101,7 +101,7 @@ func supportedStorageURLRegexx(universeDomain string) []*regexp.Regexp {
 		regexp.MustCompile(fmt.Sprintf(`^http[s]?://(?:commondata)?storage\.%s/%s/%s$`, domainRegex, bucketRegex, objectRegex)),
 	}
 
-	if universeDomain == defaultUniverseDomain || universeDomain == "" {
+	if universeDomain == defaultUniverseDomain {
 		res = append(res, regexp.MustCompile(fmt.Sprintf(`^http[s]?://storage\.cloud\.google\.com/%s/%s$`, bucketRegex, objectRegex)))
 	}
 
@@ -186,6 +186,7 @@ func downloadScript(ctx context.Context, universeDomain, path string, file *os.F
 
 // parseGCS parses the path and returns the bucket and object. It tries all 3
 // supported regexes to parse the URL.
+// universeDomain must not be empty.
 func parseGCS(universeDomain, path string) (string, string) {
 	var allSupportedRgx []*regexp.Regexp
 	allSupportedRgx = append(allSupportedRgx, gsRegex)
@@ -458,6 +459,7 @@ func handleEvent(ctx context.Context, mdsClient metadata.MDSClientInterface, eve
 	// rolled out.
 	if err != nil {
 		galog.Debugf("Failed to get universe domain: %v, using default universe domain", err)
+		universeDomain = defaultUniverseDomain
 	}
 
 	for _, key := range wantedKeys {
