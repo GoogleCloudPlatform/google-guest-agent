@@ -152,10 +152,33 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 	}
 
 	// Write the netplan vlan drop-in file.
-	netplanVlanChanged, err := sn.writeVlanDropin(ctx, nicConfigs)
+	netplanVlanChanged, vlanDeleteMe, err := sn.writeVlanDropin(ctx, nicConfigs)
 	if err != nil {
 		return fmt.Errorf("error writing netplan vlan dropin: %w", err)
 	}
+
+	// Write the backend's vlan drop-in file.
+	backendVlanChanged, err := sn.backend.WriteNetplanVlanDropins(backendDropinPrefix, nicConfigs)
+	if err != nil {
+		return fmt.Errorf("error writing backend vlan dropin: %w", err)
+	}
+
+	// Rollback the backend's vlan drop-in file if we are not the active network
+	// manager.
+	backendVlanCleanedup, err := sn.backend.RollbackNetplanVlanDropins(vlanDeleteMe, backendDropinPrefix)
+	if err != nil {
+		return fmt.Errorf("error rolling back backend vlan dropin: %w", err)
+	}
+
+	// Make sure to delete the actual vlan interfaces after we are done writing,
+	// removing, cleaning up drop-in files, applied netplan configuration and
+	// reloaded the backend's configuration.
+	defer func() {
+		galog.V(2).Debugf("Vlan nics to be deleted: %v", vlanDeleteMe)
+		if len(vlanDeleteMe) > 0 {
+			sn.removeOrphanedVlans(ctx, vlanDeleteMe)
+		}
+	}()
 
 	// Write the backend's drop-in files.
 	dropinPrefix := sn.addPrefix(backendDropinPrefix, true)
@@ -165,14 +188,14 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 	}
 
 	// Apply the netplan configuration.
-	if netplanChanged || netplanVlanChanged {
+	if netplanChanged || netplanVlanChanged || backendVlanChanged || backendVlanCleanedup {
 		if err := sn.generateConfigs(ctx); err != nil {
 			return fmt.Errorf("error applying netplan changes: %w", err)
 		}
 	}
 
 	// Reload the backend if networkd's configuration has changed.
-	if (netplanChanged || netplanVlanChanged || backendChanged) && sn.backendReload {
+	if (netplanChanged || netplanVlanChanged || backendChanged || backendVlanChanged || backendVlanCleanedup) && sn.backendReload {
 		if err := sn.backend.Reload(ctx, len(nicConfigs)); err != nil {
 			return fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
 		}
@@ -196,7 +219,7 @@ func (sn *serviceNetplan) generateConfigs(ctx context.Context) error {
 // interfaces are consolidated into a single drop-in file, if no vlan interfaces
 // are configured, the drop-in file is removed - accounting for the removal
 // aspect of hot unplugging a dynamic vlan.
-func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Configuration) (bool, error) {
+func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Configuration) (bool, map[string]bool, error) {
 	galog.Debugf("Writing vlan drop-in configuration.")
 
 	dropin := netplanDropin{
@@ -209,7 +232,7 @@ func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Confi
 	var vlanConfigured bool
 	deleteMe, err := sn.presentVlanNICs(sn.vlanDropinFile())
 	if err != nil {
-		return false, fmt.Errorf("failed to check if netplan vlan drop-in config is present: %w", err)
+		return false, nil, fmt.Errorf("failed to check if netplan vlan drop-in config is present: %w", err)
 	}
 
 	galog.V(2).Debugf("Present vlan nics before setup: %v", deleteMe)
@@ -244,29 +267,28 @@ func (sn *serviceNetplan) writeVlanDropin(ctx context.Context, nics []*nic.Confi
 		}
 	}
 
-	if len(deleteMe) > 0 {
-		sn.removeOrphanedVlans(ctx, deleteMe)
-	}
-
 	// If we don't have any vlan interfaces, remove the drop-in file.
 	if !vlanConfigured {
+		galog.Debugf("No vlan interfaces configured, removing drop-in file: %s.", sn.vlanDropinFile())
+
 		fPath := sn.vlanDropinFile()
 		if !file.Exists(fPath, file.TypeFile) {
-			return false, nil
+			return false, nil, nil
 		}
 
 		if err := os.Remove(fPath); err != nil {
-			return false, fmt.Errorf("error removing netplan vlan dropin: %w", err)
+			return false, nil, fmt.Errorf("error removing netplan vlan dropin: %w", err)
 		}
-		return true, nil
+
+		return true, deleteMe, nil
 	}
 
 	wrote, err := sn.write(dropin, sn.vlanDropinFile())
 	if err != nil {
-		return false, fmt.Errorf("failed to write netplan vlan drop-in config: %+v", err)
+		return false, nil, fmt.Errorf("failed to write netplan vlan drop-in config: %+v", err)
 	}
 
-	return wrote, nil
+	return wrote, deleteMe, nil
 }
 
 // removeOrphanedVlans removes the orphaned vlan interfaces. This is required to
@@ -287,6 +309,7 @@ func (sn *serviceNetplan) removeOrphanedVlans(ctx context.Context, deleteMe map[
 	args := []string{"delete"}
 	args = append(args, deleteNics...)
 
+	galog.Debugf("Deleting orphaned vlan nics: %v", deleteNics)
 	opt := run.Options{OutputType: run.OutputNone, Name: "networkctl", Args: args}
 	if _, err := run.WithContext(ctx, opt); err != nil {
 		galog.Debugf("Failed to delete orphaned vlan nics: %v", err)

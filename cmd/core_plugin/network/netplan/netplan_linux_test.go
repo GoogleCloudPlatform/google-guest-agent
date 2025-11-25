@@ -75,6 +75,14 @@ func (tb *testBackend) Reload(ctx context.Context, numInterfaces int) error {
 	return tb.ReloadCb(ctx, numInterfaces)
 }
 
+func (tb *testBackend) WriteNetplanVlanDropins(prefix string, nics []*nic.Configuration) (bool, error) {
+	return false, nil
+}
+
+func (tb *testBackend) RollbackNetplanVlanDropins(vlanDropins map[string]bool, prefix string) (bool, error) {
+	return false, nil
+}
+
 func TestNewService(t *testing.T) {
 	svc := NewService()
 	if svc == nil {
@@ -116,6 +124,14 @@ func (tb *testNetplanBackend) RollbackDropins([]*nic.Configuration, string, bool
 
 func (tb *testNetplanBackend) Reload(context.Context, int) error {
 	return nil
+}
+
+func (tb *testNetplanBackend) WriteNetplanVlanDropins(string, []*nic.Configuration) (bool, error) {
+	return false, nil
+}
+
+func (tb *testNetplanBackend) RollbackNetplanVlanDropins(map[string]bool, string) (bool, error) {
+	return false, nil
 }
 
 func TestIsManaging(t *testing.T) {

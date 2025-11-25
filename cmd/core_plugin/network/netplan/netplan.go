@@ -192,6 +192,14 @@ type netplanBackend interface {
 
 	// Reload reloads the backend's configuration.
 	Reload(context.Context, int) error
+
+	// WriteNetplanVlanDropins writes the backend's vlan drop-in files based on
+	// the provided NICs.
+	WriteNetplanVlanDropins(string, []*nic.Configuration) (bool, error)
+
+	// RollbackNetplanVlanDropins rolls back the backend's vlan drop-in files
+	// previously created by us.
+	RollbackNetplanVlanDropins(map[string]bool, string) (bool, error)
 }
 
 // serviceNetplan implements the netplan service.

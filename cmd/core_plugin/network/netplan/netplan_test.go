@@ -54,6 +54,14 @@ func (tb *noopBackend) Reload(context.Context, int) error {
 	return nil
 }
 
+func (tb *noopBackend) WriteNetplanVlanDropins(string, []*nic.Configuration) (bool, error) {
+	return false, nil
+}
+
+func (tb *noopBackend) RollbackNetplanVlanDropins(map[string]bool, string) (bool, error) {
+	return false, nil
+}
+
 func TestDefaultConfig(t *testing.T) {
 	mod := &serviceNetplan{
 		backend: &noopBackend{},

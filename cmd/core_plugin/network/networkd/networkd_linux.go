@@ -714,3 +714,77 @@ func rollbackConfiguration(configFile string) (bool, error) {
 
 	return true, nil
 }
+
+// WriteNetplanVlanDropins writes the systemd-networkd override drop-in file for
+// the vlan interfaces.
+func (sn *Module) WriteNetplanVlanDropins(prefix string, nics []*nic.Configuration) (bool, error) {
+	galog.Debugf("Writing systemd-networkd override drop-in configuration for netplan interfaces.")
+	configChanged := false
+
+	for _, nic := range nics {
+		if !nic.ShouldManage() {
+			continue
+		}
+
+		for _, vlan := range nic.VlanInterfaces {
+			dhcp := "ipv4"
+			if len(vlan.IPv6Addresses) > 0 {
+				dhcp = "yes"
+			}
+
+			cfg := &networkdConfig{
+				Match: networkdMatchConfig{Name: vlan.InterfaceName()},
+				Network: networkdNetworkConfig{
+					DNSDefaultRoute: false,
+					DHCP:            dhcp,
+				},
+				DHCPv4: &networkdDHCPConfig{
+					RoutesToDNS: false,
+					RoutesToNTP: false,
+				},
+			}
+
+			var readCfg networkdConfig
+			err := ini.ReadIniFile(sn.dropinFile(prefix, vlan.InterfaceName()), &cfg)
+			if err != nil {
+				return configChanged, fmt.Errorf("failed to read networkd's vlan dropin: %w", err)
+			}
+
+			if reflect.DeepEqual(cfg, readCfg) {
+				galog.Debugf("Networkd vlan dropin configuration is equal to the new configuration, skipping write for %s.", vlan.InterfaceName())
+				continue
+			}
+
+			_, err = cfg.write(sn.dropinFile(prefix, vlan.InterfaceName()))
+			if err != nil {
+				return configChanged, fmt.Errorf("failed to write networkd's vlan .network config: %w", err)
+			}
+
+			configChanged = true
+		}
+	}
+
+	return configChanged, nil
+}
+
+// RollbackNetplanVlanDropins rolls back the systemd-networkd override drop-in
+// file for the vlan interfaces.
+func (sn *Module) RollbackNetplanVlanDropins(vlanDropins map[string]bool, prefix string) (bool, error) {
+	galog.Debugf("Rolling back systemd-networkd vlan drop-in configuration for netplan interfaces.")
+	configChanged := false
+
+	for vlan := range vlanDropins {
+		if !file.Exists(sn.dropinFile(prefix, vlan), file.TypeFile) {
+			galog.Debugf("No systemd-networkd vlan dropin found: %s. Skipping rollback.", sn.dropinFile(prefix, vlan))
+			continue
+		}
+
+		if err := os.RemoveAll(filepath.Dir(sn.dropinFile(prefix, vlan))); err != nil {
+			return configChanged, fmt.Errorf("failed to remove systemd-networkd vlan dropin directory: %w", err)
+		}
+
+		configChanged = true
+	}
+
+	return configChanged, nil
+}
