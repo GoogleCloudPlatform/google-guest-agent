@@ -16,6 +16,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,6 +122,10 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 	// Cleanup is set to true only on plugin removal.
 	if ss.cleanup {
 		if err := cleanup(ctx, p); err != nil {
+			failedRemovalsMu.Lock()
+			failedRemovals[p.Name] = p
+			failedRemovalsMu.Unlock()
+
 			// Not a critical step in plugin removal, just log a message.
 			galog.Debugf("Unable to cleanup plugin state: %v", err)
 		}
@@ -132,32 +137,33 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 // Cleanup removes all known paths associated with this plugin.
 func cleanup(ctx context.Context, p *Plugin) error {
 	galog.Infof("Cleaning up %q plugin state", p.FullName())
+	var errs []error
 
 	// Remove resource constraint first before attempting any file removal.
 	// On windows [JobObjects] are used for setting resource limits that can
 	// prevent manager from cleanup/removing files.
 	if err := resource.RemoveConstraint(ctx, p.FullName()); err != nil {
-		return fmt.Errorf("resource constraint removal failed: %w", err)
+		errs = append(errs, fmt.Errorf("resource constraint removal failed: %w", err))
 	}
 
 	// Files paths of core plugins are managed by package manager do not remove.
 	if p.PluginType != PluginTypeCore {
 		if err := os.RemoveAll(p.InstallPath); err != nil {
-			return fmt.Errorf("%s plugin install path (%s) removal failed with error: %w", p.FullName(), p.InstallPath, err)
+			errs = append(errs, fmt.Errorf("%s plugin install path (%s) removal failed with error: %w", p.FullName(), p.InstallPath, err))
 		}
 	}
 
 	if p.Protocol == udsProtocol {
 		if err := os.RemoveAll(p.Address); err != nil {
-			return fmt.Errorf("%s plugin socket file (%s) removal failed with error: %w", p.FullName(), p.Address, err)
+			errs = append(errs, fmt.Errorf("%s plugin socket file (%s) removal failed with error: %w", p.FullName(), p.Address, err))
 		}
 	}
 
 	stateFile := p.stateFile()
 	if err := os.RemoveAll(stateFile); err != nil {
-		return fmt.Errorf("%s plugin state (%s) removal failed with error: %w", p.FullName(), stateFile, err)
+		errs = append(errs, fmt.Errorf("%s plugin state (%s) removal failed with error: %w", p.FullName(), stateFile, err))
 	}
 
 	p.Address = ""
-	return nil
+	return errors.Join(errs...)
 }
