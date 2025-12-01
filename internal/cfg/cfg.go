@@ -535,3 +535,22 @@ func Retrieve() *Sections {
 	}
 	return instance
 }
+
+// ToString returns the configuration's instance previously loaded with Load()
+// as a string.
+func ToString() (string, error) {
+	buffer := new(bytes.Buffer)
+
+	// Marshal the configuration to ini.
+	cfg := ini.Empty()
+	if err := ini.ReflectFrom(cfg, instance); err != nil {
+		return "", fmt.Errorf("failed to reflect configuration to object: %w", err)
+	}
+
+	// Write the configuration to a buffer.
+	if _, err := cfg.WriteTo(buffer); err != nil {
+		return "", fmt.Errorf("failed to write configuration to buffer: %w", err)
+	}
+
+	return buffer.String(), nil
+}
