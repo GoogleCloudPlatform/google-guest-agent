@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"google.golang.org/grpc/keepalive"
+
 	"github.com/GoogleCloudPlatform/galog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -89,7 +91,7 @@ func NewModule(context.Context) *manager.Module {
 
 // moduleSetup runs the actual snapshot handler for linux.
 func moduleSetup(ctx context.Context, _ any) error {
-	galog.Debugf("Initializing linux snapshot module.")
+	galog.Infof("Initializing linux snapshot module.")
 	config := cfg.Retrieve().Snapshots
 
 	opts := clientOptions{
@@ -103,13 +105,14 @@ func moduleSetup(ctx context.Context, _ any) error {
 	if err != nil {
 		return fmt.Errorf("failed to create snapshot handler: %w", err)
 	}
+	galog.Infof("Created snapshot handler.")
 
 	// If we don't trigger a new go routine here the snapshot service will block
 	// the module manager as it Wait()s for all modules to finish their work - and
 	// this module will keep running forever.
 	go func() { handler.run(ctx) }()
 
-	galog.Debugf("Finished initializing linux snapshot module.")
+	galog.Infof("Finished creating snapshot handler.")
 	return nil
 }
 
@@ -142,6 +145,7 @@ func (s *snapshotClient) run(ctx context.Context) error {
 	}
 
 	if err := s.listen(ctx); err != nil {
+		galog.Infof("Failed to listen for snapshot requests: %v.", err)
 		return fmt.Errorf("failed to listen for snapshot requests: %w", err)
 	}
 
@@ -153,10 +157,16 @@ func (s *snapshotClient) listen(ctx context.Context) error {
 	galog.Infof("Starting to listen for snapshot requests.")
 
 	for context.Cause(ctx) == nil {
-		galog.Debugf("Attempting to connect to snapshot service at %q via %q.", s.options.address, s.options.protocol)
+		galog.Infof("Attempting to connect to snapshot service at %q via %q.", s.options.address, s.options.protocol)
 
 		creds := grpc.WithTransportCredentials(insecure.NewCredentials())
-		conn, err := grpc.NewClient(s.options.fullAddress(), creds)
+		keepAlive := grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                1 * time.Minute,
+			Timeout:             20 * time.Second,
+			PermitWithoutStream: true,
+		})
+
+		conn, err := grpc.NewClient(s.options.fullAddress(), creds, keepAlive)
 		if err != nil {
 			return fmt.Errorf("failed to connect to snapshot service: %w", err)
 		}
@@ -182,7 +192,9 @@ func (s *snapshotClient) listen(ctx context.Context) error {
 		}
 
 		for {
+			galog.Infof("Waiting for snapshot request from snapshot service.")
 			request, err := r.Recv()
+			galog.Infof("Received snapshot service.")
 			if err != nil {
 				galog.Errorf("Error reading snapshot request: %v.", err)
 				break
