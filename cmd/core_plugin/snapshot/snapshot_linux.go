@@ -29,6 +29,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	sspb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/snapshot/proto/cloud_vmm"
@@ -154,6 +155,13 @@ func (s *snapshotClient) run(ctx context.Context) error {
 	return nil
 }
 
+// closeConnection closes the given connection, and logs any errors.
+func closeConnection(conn *grpc.ClientConn) {
+	if err := conn.Close(); err != nil {
+		galog.Errorf("Failed to close connection to snapshot service: %v.", err)
+	}
+}
+
 // listen listens for snapshot requests from the snapshot service.
 func (s *snapshotClient) listen(ctx context.Context) error {
 	galog.Infof("Starting to listen for snapshot requests.")
@@ -162,16 +170,15 @@ func (s *snapshotClient) listen(ctx context.Context) error {
 		galog.Debugf("Attempting to connect to snapshot service at %q via %q.", s.options.address, s.options.protocol)
 
 		creds := grpc.WithTransportCredentials(insecure.NewCredentials())
-		conn, err := grpc.NewClient(s.options.fullAddress(), creds)
+		keepAlive := grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                1 * time.Minute,
+			Timeout:             20 * time.Second,
+			PermitWithoutStream: true,
+		})
+		conn, err := grpc.NewClient(s.options.fullAddress(), creds, keepAlive)
 		if err != nil {
 			return fmt.Errorf("failed to connect to snapshot service: %w", err)
 		}
-
-		defer func() {
-			if err := conn.Close(); err != nil {
-				galog.Errorf("Failed to close main connection to snapshot service: %v.", err)
-			}
-		}()
 
 		c := sspb.NewSnapshotServiceClient(conn)
 
@@ -184,6 +191,7 @@ func (s *snapshotClient) listen(ctx context.Context) error {
 			if !errors.Is(err, context.Canceled) {
 				galog.Errorf("Error creating connection with snapshot service: %v.", err)
 			}
+			closeConnection(conn)
 			continue
 		}
 
@@ -200,6 +208,7 @@ func (s *snapshotClient) listen(ctx context.Context) error {
 				}
 			}()
 		}
+		closeConnection(conn)
 	}
 
 	return nil
