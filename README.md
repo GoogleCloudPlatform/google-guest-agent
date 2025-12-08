@@ -1,4 +1,4 @@
-TODO: Add link to external documentation whenever it is ready.
+[Public Cloud Docs](https://docs.cloud.google.com/compute/docs/images/guest-agent)
 
 ## Guest Agent for Google Compute Engine.
 This repository contains the source code and packaging artifacts for the Google
