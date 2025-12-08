@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	acppb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
@@ -40,6 +41,11 @@ const (
 	telemetryInterval = 24 * time.Hour
 	// programName is the name of the program used in telemetry data.
 	programName = "GCEGuestAgent"
+	// messageType is key in labels for message type.
+	messageType = "message_type"
+	// guestAgentPlatformInfoMsg is the message type label to use with platform
+	// info sent by agent.
+	guestAgentPlatformInfoMsg = "agent_controlplane.PlatformInfo"
 )
 
 // Job implements job scheduler interface for recording telemetry.
@@ -71,7 +77,25 @@ func teardown(context.Context) {
 func moduleSetup(ctx context.Context, data any) error {
 	galog.Debugf("Initializing telemetry module.")
 	job := &Job{client: metadata.New(), osInfoReader: osinfo.Read}
-	err := scheduler.Instance().ScheduleJob(ctx, job)
+
+	// Send one time platform info to ACS to indicate if running on GCE.
+	onGCE, err := isOnGCE(ctx)
+	msg := &acppb.PlatformInfo{OnGce: onGCE}
+	if err != nil {
+		msg.Error = fmt.Sprintf("Unable to determine if running on GCE: %v", err)
+	}
+
+	go func() {
+		if !job.ShouldEnable(ctx) {
+			galog.Debugf("Telemetry module is disabled, skipping platform info send to ACS.")
+			return
+		}
+		if _, err := client.SendMessage(ctx, map[string]string{messageType: guestAgentPlatformInfoMsg}, msg); err != nil {
+			galog.Warnf("Failed to send platform info to ACS: %v", err)
+		}
+	}()
+
+	err = scheduler.Instance().ScheduleJob(ctx, job)
 	if err == nil {
 		galog.Debugf("Successfully initialized telemetry job.")
 	}
