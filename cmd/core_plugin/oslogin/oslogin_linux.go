@@ -461,6 +461,11 @@ func (mod *osloginModule) setupOpenSSH(desc *metadata.Descriptor) error {
 		twoFABlock.Append("AuthenticationMethods", "publickey")
 	}
 
+	// Source per-user config from /var/google-users.d.
+	block.Append("Include", "/var/google-users.d/*")
+	// Per-user configs will use "Match User <user>"; "Match all" ends those Match blocks.
+	block.Append("Match", "all")
+
 	if err := sshdCfg.Apply(); err != nil {
 		return fmt.Errorf("failed to apply openssh config: %w", err)
 	}
