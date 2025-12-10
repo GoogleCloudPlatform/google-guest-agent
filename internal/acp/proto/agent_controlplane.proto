@@ -1,11 +1,11 @@
 //  Copyright 2024 Google LLC
-
+//
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 //  Unless required by applicable law or agreed to in writing, software
 //  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -102,10 +102,31 @@ message OSInfo {
 // states.
 message ListPluginStates {}
 
+// Type of the plugin.
+enum PluginType {
+  // Unspecified plugin type.
+  PLUGIN_TYPE_UNSPECIFIED = 0;
+  // Daemon plugin type.
+  DAEMON = 1;
+  // One-shot plugin type.
+  ONE_SHOT = 2;
+}
+
+// Plugin installation type.
+enum PluginInstallationType {
+  // Plugin needs to be dynamically downloaded. This is the default type.
+  DYNAMIC_INSTALLATION = 0;
+  // Plugin is located in a local directory.
+  LOCAL_INSTALLATION = 1;
+}
+
 // Response from Guest Agent replying to ListPluginStates.
 message CurrentPluginStates {
   // The states of all daemon plugins on the resource.
   repeated DaemonPluginState daemon_plugin_states = 1;
+
+  // The states of all one-shot plugins on the resource.
+  repeated OneShotPluginState one_shot_plugin_states = 2;
 
   message DaemonPluginState {
     // The name of the plugin. e.g., "sap-hana-01"
@@ -128,61 +149,84 @@ message CurrentPluginStates {
     repeated Metric current_plugin_metrics = 6;
     // The hash of the config applied to the plugin during the last start.
     string config_hash = 7;
+  }
 
-    // Detailed plugin status on the resource.
-    //
-    // If there's another revision is running, it will be stopped before
-    // starting this plugin. If any step fails during the process, agent will
-    // retry until retry attempts exhausted.
-    //
-    // During restart of a plugin, it will go through
-    // STOPPING -> STOPPED -> STARTING -> RUNNING
-    // with start_time updated if it restarts successfully.
-    //
-    // When trying to stop the plugin, the agent will first try signal the
-    // plugin to stop itself. If the plugin does not stop after a certain
-    // timeout, it will force kill the process.
-    //
-    // CRASHED and INSTALL_FAILED statuses expect a non-zero response code
-    // indicating an error. Other statuses might have a non-zero response code
-    // indicating a non-fatal error.
-    enum StatusValue {
-      STATE_VALUE_UNSPECIFIED = 0;
-      // Life cycle of a plugin after installed.
-      STARTING = 1;
-      RUNNING = 2;
-      STOPPING = 3;
-      STOPPED = 4;
-      CRASHED = 5;
-      // Installing or failed to install.
-      INSTALLING = 6;
-      INSTALL_FAILED = 7;
-    }
+  message OneShotPluginState {
+    // The name of the plugin. e.g., "sap-hana-01"
+    string name = 1;
+    // A randomly generated 8 digit hexa string for current plugin. e.g.,
+    // "67C5640D"
+    string current_revision_id = 2;
+    // Status of the current plugin.
+    Status current_plugin_status = 3;
+    // The revision id for the pending plugin. If this pending revision is
+    // installed and running, the field value should be empty and
+    // current_revision_id should be updated and status set to RUNNING. If
+    // there's an error during the process, this value should remain as is and
+    // the pending_revision_status should update to an error status.
+    string pending_revision_id = 4;
+    // Status of the pending plugin. Available only if pending_revision_id has a
+    // value
+    Status pending_plugin_status = 5;
+    // The metrics of the current plugin.
+    repeated Metric current_plugin_metrics = 6;
+    // The hash of the config applied to the plugin during the last start.
+    string config_hash = 7;
+  }
 
-    message Status {
-      StatusValue status = 1;
-      // The response code returned when agent checks plugin health.
-      // Zero indicates running normally. Non-zero code indicates an error.  If
-      // it's a non-fatal error, the status value should be RUNNING.
-      int32 response_code = 2;
-      // A result message returned when agent checks plugin health explaining
-      // potential error reasons.
-      repeated string results = 3;
-      // The time when the agent checks plugin health and gets the
-      // response_code.
-      google.protobuf.Timestamp update_time = 4;
-    }
+  // Detailed plugin status on the resource.
+  //
+  // If there's another revision is running, it will be stopped before
+  // starting this plugin. If any step fails during the process, agent will
+  // retry until retry attempts exhausted.
+  //
+  // During restart of a plugin, it will go through
+  // STOPPING -> STOPPED -> STARTING -> RUNNING
+  // with start_time updated if it restarts successfully.
+  //
+  // When trying to stop the plugin, the agent will first try signal the
+  // plugin to stop itself. If the plugin does not stop after a certain
+  // timeout, it will force kill the process.
+  //
+  // CRASHED and INSTALL_FAILED statuses expect a non-zero response code
+  // indicating an error. Other statuses might have a non-zero response code
+  // indicating a non-fatal error.
+  enum StatusValue {
+    STATE_VALUE_UNSPECIFIED = 0;
+    // Life cycle of a plugin after installed.
+    STARTING = 1;
+    RUNNING = 2;
+    STOPPING = 3;
+    STOPPED = 4;
+    CRASHED = 5;
+    // Installing or failed to install.
+    INSTALLING = 6;
+    INSTALL_FAILED = 7;
+  }
 
-    // The CPU and Memory usage of the plugin at a specific time.
-    message Metric {
-      // The time when the agent checks for metrics.
-      google.protobuf.Timestamp timestamp = 1;
-      // The value of the metric.
-      // The recent CPU usage of the plugin.
-      float cpu_usage = 6;
-      // The recent memory usage of the plugin.
-      int64 memory_usage = 7;
-    }
+  message Status {
+    StatusValue status = 1;
+    // The response code returned when agent checks plugin health.
+    // Zero indicates running normally. Non-zero code indicates an error.  If
+    // it's a non-fatal error, the status value should be RUNNING.
+    int32 response_code = 2;
+    // A result message returned when agent checks plugin health explaining
+    // potential error reasons.
+    repeated string results = 3;
+    // The time when the agent checks plugin health and gets the
+    // response_code.
+    google.protobuf.Timestamp update_time = 4;
+  }
+
+  // The CPU and Memory usage of the plugin at a specific time.
+  message Metric {
+    // The time when the agent checks for metrics.
+    google.protobuf.Timestamp timestamp = 1;
+    // The value of the metric.
+    // The recent CPU usage of the plugin.
+    float cpu_usage = 6;
+    // The recent memory usage of the plugin.
+    int64 memory_usage = 7;
   }
 }
 
@@ -278,6 +322,100 @@ message ConfigurePluginStates {
     // If the value is 2, then the first retry will be 1 second, the second
     // retry will be 2 seconds, the third retry will be 4 seconds, etc.
     int32 start_exp_backoff_factor = 12;
+    // The type of the plugin.
+    PluginType plugin_type = 13;
+    // The installation type of the plugin.
+    PluginInstallationType plugin_installation_type = 14;
+    // The execution model of the plugin. This is used to determine how the
+    // plugin should be executed.
+    ExecutionModel execution_model = 15;
+  }
+}
+
+message ExecutionModel {
+  // The base state of the plugin before any rule evaluation.
+  State on_default = 1;
+  // The state of the plugin if the rule matches.
+  State on_match = 2;
+  // Determines how the rules are evaluated.
+  MatchPolicy match_policy = 3;
+  // An array of rules object to evaluate against the host.
+  repeated Rules rules = 4;
+  // Identifies if the plugin must run immediately at boot after agent is
+  // initialized.
+  bool boot_critical = 5;
+  // How to execute the plugin.
+  oneof type {
+    OneShot one_shot = 6;
+    Daemon daemon = 7;
+  }
+
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    ENABLED = 1;
+    DISABLED = 2;
+  }
+
+  enum MatchPolicy {
+    MATCH_POLICY_UNSPECIFIED = 0;
+    // Logical AND
+    ALL = 1;
+    // Logical OR
+    ANY = 2;
+  }
+
+  message Daemon {}
+
+  message OneShot {
+    Triggers triggers = 1;
+    // The max duration plugin is allowed to run.
+    google.protobuf.Duration execution_timeout = 2;
+  }
+
+  message Triggers {
+    // If true, the plugin runs every time when the instance boots, similar to
+    // startup script.
+    bool startup = 1;
+    // If true, the plugin runs only on the very first startup of an instance,
+    // triggered by an agent detecting a new instance ID.
+    bool firstboot = 2;
+    // A simple recurring schedule in minutes. Schedule begins at instance
+    // startup.
+    google.protobuf.Duration interval = 3;
+  }
+}
+
+message Rules {
+  // The scope of the rule.
+  Scope scope = 1;
+  // The attribute to compare against.
+  string attribute = 2;
+  // The operator to compare the attribute against the value.
+  ComparisonOperator comparison_operator = 3;
+  // The value to compare against.
+  google.protobuf.Value value = 4;
+
+  // Enum for all supported comparison operators.
+  enum ComparisonOperator {
+    OPERATOR_UNSPECIFIED = 0;
+    EQUAL = 1;
+    NOT_EQUAL = 2;
+    CONTAINS = 3;
+  }
+
+  // Enum defining the valid, known namespaces for rule evaluation.
+  enum Scope {
+    // Default, unspecified value.
+    NAMESPACE_UNSPECIFIED = 0;
+    // For checking OS properties from /etc/os-release.
+    OS = 1;
+    // Source is instance properties from the metadata server, like machine
+    // type. Value is fetched from Metadata Server key “v1/instance/<attribute>”
+    // to compare.
+    INSTANCE = 2;
+    // Source is custom key-value pairs from the metadata server. The value is
+    // retrieved from "v1/instance/attributes/<key>" for comparison.
+    METADATA = 3;
   }
 }
 
