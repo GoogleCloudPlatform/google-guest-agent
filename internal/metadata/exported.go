@@ -279,6 +279,9 @@ func newUniverse(universe gcpUniverse) *Universe {
 
 // UniverseDomain returns the universe domain.
 func (u *Universe) UniverseDomain() string {
+	if u.internal.UniverseDomain == "" {
+		return DefaultUniverseDomain
+	}
 	return u.internal.UniverseDomain
 }
 

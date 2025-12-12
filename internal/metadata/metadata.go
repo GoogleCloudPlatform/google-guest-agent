@@ -42,6 +42,9 @@ const (
 	// defaultHangTimeout and client timeout should be enough to avoid canceling the context
 	// before headers and body are read.
 	defaultClientTimeout = 70
+
+	// DefaultUniverseDomain is the default universe domain.
+	DefaultUniverseDomain = "googleapis.com"
 )
 
 var (
@@ -91,6 +94,25 @@ func New() *Client {
 			Timeout: defaultClientTimeout * time.Second,
 		},
 	}
+}
+
+// IsGDUUniverse returns true if the universe domain is googleapis.com, false
+// otherwise. If the universe domain is not set or an error occurs, it returns
+// true as we assume we are running in GDU universe.
+func (c *Client) IsGDUUniverse(ctx context.Context) bool {
+	// Assume we are running in GDU universe unless the universe domain is
+	// explicitly set and is not googleapis.com.
+	universeDomain, err := c.GetKey(ctx, "universe/universe-domain", nil)
+	if err == nil && universeDomain != DefaultUniverseDomain {
+		galog.Debugf("Running in non GDU universe: %s", universeDomain)
+		return false
+	}
+
+	if err != nil {
+		galog.Debugf("Failed to get universe domain: %v, assuming GDU", err)
+	}
+
+	return true
 }
 
 func (c *Client) updateEtag(resp *http.Response) bool {
