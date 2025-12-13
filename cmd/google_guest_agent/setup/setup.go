@@ -203,12 +203,15 @@ func Run(ctx context.Context, c Config) error {
 
 	galog.Infof("Running Guest Agent setup with config: %+v, runtime config: %+v", c, conf)
 
+	// Only enable ACS watcher in GDU universe.
+	runningInGDU := metadata.New().IsGDUUniverse(ctx)
+
 	// Registers the acs event watcher and initializes the acs handler if
 	// on-demand plugins are enabled in the configuration file.
 	// This is done as early as possible to ensure that the handler is ready
 	// to handle to respond to non-plugin configuration requests as they serve as
 	// heartbeat for the agent.
-	if c.EnableACSWatcher && conf.svcActPresent {
+	if runningInGDU && c.EnableACSWatcher && conf.svcActPresent {
 		if err := events.FetchManager().AddWatcher(ctx, watcher.New()); err != nil {
 			galog.Fatalf("Failed to add ACS watcher: %v", err)
 		}
