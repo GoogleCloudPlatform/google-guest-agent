@@ -18,6 +18,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
@@ -52,6 +53,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
 	}
 	cfg.Retrieve().Core.ACSClient = true
+	os.Setenv("SKIP_GDU_UNIVERSE_CHECK", "true")
 
 	wantMsg := &apb.Any{
 		TypeUrl: "test.message.type",

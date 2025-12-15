@@ -222,12 +222,12 @@ func TestUniverseDomain(t *testing.T) {
 		{
 			"empty_universe_domain",
 			`{"universe": {"universe-domain": ""}}`,
-			"",
+			DefaultUniverseDomain,
 		},
 		{
 			"missing_universe_domain",
 			`{}`,
-			"",
+			DefaultUniverseDomain,
 		},
 	}
 

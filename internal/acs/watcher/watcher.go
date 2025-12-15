@@ -18,10 +18,12 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 )
 
 const (
@@ -52,6 +54,21 @@ func (w *Watcher) Events() []string {
 // Run listens on ACS channel and report back the messages. Run must return true
 // irrespective of the error to continue listening for any messages.
 func (w *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
+	skipGDUUnverseCheck := os.Getenv("SKIP_GDU_UNIVERSE_CHECK") != ""
+
+	// In test environment we don't want to check GDU universe as we know the test
+	// is running in GDU universe.
+	if !skipGDUUnverseCheck {
+		// Only enable ACS watcher in GDU universe.
+		runningInGDU := metadata.New().IsGDUUniverse(ctx)
+		galog.Infof("Running in GDU universe: %t", runningInGDU)
+
+		if !runningInGDU {
+			galog.V(2).Debugf("ACS watcher is disabled in non-GDU universe, removing watcher")
+			return false, nil, nil
+		}
+	}
+
 	if !cfg.Retrieve().Core.ACSClient {
 		galog.V(2).Debugf("ACS client is disabled, removing watcher")
 		return false, nil, nil

@@ -393,6 +393,13 @@ func (acs *acsHelper) isACSEnabled(ctx context.Context) bool {
 		return false
 	}
 
+	// Only enable ACS client in GDU universe.
+	if desc.Universe().UniverseDomain() != metadata.DefaultUniverseDomain {
+		galog.Debugf("Not running in GDU universe, disabling ACS client")
+		acs.isEnabled = proto.Bool(false)
+		return false
+	}
+
 	present := desc.HasServiceAccount()
 	galog.Infof("Instance has service account: %t, setting ACS client isEnabled to %t", present, present)
 	acs.isEnabled = proto.Bool(present)
