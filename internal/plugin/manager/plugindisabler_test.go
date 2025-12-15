@@ -80,7 +80,7 @@ func TestStopPlugin(t *testing.T) {
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
 			installCleanup: true,
-			plugin:         &Plugin{Name: "testplugin1", EntryPath: "testplugin1", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
+			plugin:         &Plugin{Name: "testplugin1", EntryPath: "testplugin1", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3, PluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION}, RuntimeInfo: &RuntimeInfo{Pid: -5555}},
 		},
 		{
 			name:           "stop_cleanup_false",
@@ -88,7 +88,7 @@ func TestStopPlugin(t *testing.T) {
 			installCleanup: false,
 			psClient:       &mockPsClient{alive: false},
 			wantStopRPC:    false,
-			plugin:         &Plugin{Name: "testplugin2", EntryPath: "testplugin2", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
+			plugin:         &Plugin{Name: "testplugin2", EntryPath: "testplugin2", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3, PluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION}, RuntimeInfo: &RuntimeInfo{Pid: -5555}},
 		},
 		{
 			name:           "core_stop_cleanup_true",
@@ -96,7 +96,7 @@ func TestStopPlugin(t *testing.T) {
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
 			installCleanup: false,
-			plugin:         &Plugin{Name: "testplugin3", EntryPath: "testplugin3", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeCore},
+			plugin:         &Plugin{Name: "testplugin3", EntryPath: "testplugin3", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3, PluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION}, RuntimeInfo: &RuntimeInfo{Pid: -5555}},
 		},
 		{
 			name:           "core_stop_cleanup_false",
@@ -104,7 +104,7 @@ func TestStopPlugin(t *testing.T) {
 			installCleanup: false,
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
-			plugin:         &Plugin{Name: "testplugin4", EntryPath: "testplugin4", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeCore},
+			plugin:         &Plugin{Name: "testplugin4", EntryPath: "testplugin4", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3, PluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION}, RuntimeInfo: &RuntimeInfo{Pid: -5555}},
 		},
 		{
 			name:           "nokill_cleanup_true",
@@ -113,7 +113,7 @@ func TestStopPlugin(t *testing.T) {
 			wantStopRPC:    false,
 			reusePid:       true,
 			installCleanup: true,
-			plugin:         &Plugin{Name: "testplugin5", EntryPath: "testplugin5", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3}, RuntimeInfo: &RuntimeInfo{Pid: -5555}, PluginType: PluginTypeDynamic},
+			plugin:         &Plugin{Name: "testplugin5", EntryPath: "testplugin5", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3, PluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION}, RuntimeInfo: &RuntimeInfo{Pid: -5555}},
 		},
 	}
 
@@ -136,7 +136,7 @@ func TestStopPlugin(t *testing.T) {
 				t.Errorf("stopStep.Run(ctx, %+v) failed unexpectedly: %v", plugin, err)
 			}
 
-			if plugin.State() != acmpb.CurrentPluginStates_DaemonPluginState_STOPPED {
+			if plugin.State() != acmpb.CurrentPluginStates_STOPPED {
 				t.Errorf("stopStep.Run(ctx, %+v) did not set plugin state to STOPPED", plugin)
 			}
 
@@ -179,8 +179,8 @@ func TestStopPlugin(t *testing.T) {
 
 func TestStopStepApi(t *testing.T) {
 	wantName := "StopPluginStep"
-	wantStatus := acmpb.CurrentPluginStates_DaemonPluginState_STOPPING
-	wantErrorStatus := acmpb.CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED
+	wantStatus := acmpb.CurrentPluginStates_STOPPING
+	wantErrorStatus := acmpb.CurrentPluginStates_STATE_VALUE_UNSPECIFIED
 	step := &stopStep{}
 
 	if step.Name() != wantName {

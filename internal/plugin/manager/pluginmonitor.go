@@ -111,7 +111,7 @@ func readPluginLogs(path string) string {
 // If the plugin is not healthy, it will restart the plugin.
 func (m *PluginMonitor) healthCheck(ctx context.Context) *pcpb.Status {
 	currentState := m.plugin.State()
-	if currentState == acpb.CurrentPluginStates_DaemonPluginState_STOPPING || currentState == acpb.CurrentPluginStates_DaemonPluginState_STOPPED {
+	if currentState == acpb.CurrentPluginStates_STOPPING || currentState == acpb.CurrentPluginStates_STOPPED {
 		// Plugin is explicitly being stopped. Do not perform health check as it
 		// would fail and try to restart the plugin. Health check runs in a separate
 		// goroutine and could race with stop request.
@@ -132,7 +132,7 @@ func (m *PluginMonitor) healthCheck(ctx context.Context) *pcpb.Status {
 	galog.Warnf("Plugin health check failed for %s: %v", m.ID(), err)
 
 	sendEvent(ctx, m.plugin, acpb.PluginEventMessage_PLUGIN_CRASHED, fmt.Sprintf("Plugin health check failed: [%v]. Plugin logs: %s", err, readPluginLogs(m.plugin.logfile())))
-	m.plugin.setState(acpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+	m.plugin.setState(acpb.CurrentPluginStates_CRASHED)
 	if err := connectOrReLaunch(ctx, m.plugin); err != nil {
 		// Each crash or failed attempt would send an ACS event.
 		// ACS will send a message to remove plugin/stop trying based on failed attempts.
