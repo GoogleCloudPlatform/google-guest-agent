@@ -19,6 +19,9 @@
 package reg
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/GoogleCloudPlatform/galog"
 	"golang.org/x/sys/windows/registry"
 )
@@ -42,12 +45,22 @@ func ReadString(key, name string) (string, error) {
 	return s, err
 }
 
-// WriteString writes a single string value to the given registry key.
+// WriteString writes a single string value to the given registry key. It will
+// create the key if it doesn't exist.
 func WriteString(key, name, value string) error {
 	galog.V(3).Debugf("Writing string value %q to registry key %q", name, key)
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.WRITE)
 	if err != nil {
-		return err
+		// Create the key if it doesn't exist.
+		galog.V(3).Debugf("Key %q doesn't exist, creating it", key)
+		if errors.Is(err, registry.ErrNotExist) {
+			k, _, err = registry.CreateKey(registry.LOCAL_MACHINE, key, registry.WRITE)
+			if err != nil {
+				return fmt.Errorf("failed to create registry key %q: %w", key, err)
+			}
+		} else {
+			return fmt.Errorf("failed to open registry key %q: %w", key, err)
+		}
 	}
 	defer k.Close()
 
@@ -71,12 +84,22 @@ func ReadMultiString(key, name string) ([]string, error) {
 	return s, nil
 }
 
-// WriteMultiString writes a multi-string value to the given registry key.
+// WriteMultiString writes a multi-string value to the given registry key. It'll
+// create the key if it doesn't exist.
 func WriteMultiString(key, name string, value []string) error {
 	galog.V(3).Debugf("Writing multi-string value %q to registry key %q", name, key)
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.WRITE)
 	if err != nil {
-		return err
+		// Create the key if it doesn't exist.
+		galog.V(3).Debugf("Key %q doesn't exist, creating it", key)
+		if errors.Is(err, registry.ErrNotExist) {
+			k, _, err = registry.CreateKey(registry.LOCAL_MACHINE, key, registry.WRITE)
+			if err != nil {
+				return fmt.Errorf("failed to create registry key %q: %w", key, err)
+			}
+		} else {
+			return fmt.Errorf("failed to open registry key %q: %w", key, err)
+		}
 	}
 	defer k.Close()
 

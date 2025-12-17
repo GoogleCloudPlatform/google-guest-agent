@@ -21,33 +21,70 @@ import (
 )
 
 func TestReadWriteString(t *testing.T) {
-	const want = "testValue"
-	if err := WriteString("", "testName", want); err != nil {
-		t.Fatalf("WriteString(\"\", \"testName\", %q}) failed: %v", want, err)
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{
+			name: "exists",
+			key:  "",
+		},
+		{
+			name: "not-exist",
+			key:  GCEKeyBase + `\Single`,
+		},
 	}
 
-	val, err := ReadString("", "testName")
-	if err != nil {
-		t.Fatalf("ReadString(\"\", \"testName\") failed: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			const want = "testValue"
+			if err := WriteString(tc.key, "testName", want); err != nil {
+				t.Fatalf("WriteString(%q, \"testName\", %q}) failed: %v", tc.key, want, err)
+			}
+
+			val, err := ReadString(tc.key, "testName")
+			if err != nil {
+				t.Fatalf("ReadString(%q, \"testName\") failed: %v", tc.key, err)
+			}
+
+			if val != want {
+				t.Fatalf("ReadString(%q, \"testName\") = %v, want %v", tc.key, val, want)
+			}
+		})
 	}
 
-	if val != want {
-		t.Fatalf("ReadString() = %v, want %v", val, want)
-	}
 }
 
 func TestReadWriteMultiString(t *testing.T) {
-	want := []string{"testValue"}
-	if err := WriteMultiString("", "testName", want); err != nil {
-		t.Fatalf("WriteMultiString(\"\", \"testName\", %v}) failed: %v", want, err)
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{
+			name: "exists",
+			key:  "",
+		},
+		{
+			name: "not-exist",
+			key:  GCEKeyBase + `\Multi`,
+		},
 	}
 
-	val, err := ReadMultiString("", "testName")
-	if err != nil {
-		t.Fatalf("ReadMultiString(\"\", \"testName\") failed: %v", err)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			want := []string{"testValue"}
+			if err := WriteMultiString(tc.key, "testName", want); err != nil {
+				t.Fatalf("WriteMultiString(%q, \"testName\", %v}) failed: %v", tc.key, want, err)
+			}
 
-	if len(val) != 1 || val[0] != "testValue" {
-		t.Fatalf("ReadMultiString() = %v, want %v", val, want)
+			val, err := ReadMultiString(tc.key, "testName")
+			if err != nil {
+				t.Fatalf("ReadMultiString(%q, \"testName\") failed: %v", tc.key, err)
+			}
+
+			if len(val) != 1 || val[0] != "testValue" {
+				t.Fatalf("ReadMultiString(%q, \"testName\") = %v, want %v", tc.key, val, want)
+			}
+		})
 	}
 }
