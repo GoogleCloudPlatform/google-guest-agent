@@ -31,7 +31,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
-	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
 const (
@@ -50,69 +49,6 @@ type PluginManagerInterface interface {
 	ListPluginStates(context.Context, *acpb.ListPluginStates) *acpb.CurrentPluginStates
 	// ConfigurePluginStates configures the plugin states as stated in the request.
 	ConfigurePluginStates(context.Context, *acpb.ConfigurePluginStates, bool)
-}
-
-// verifyPluginRunning verifies the plugin [name] is in running state.
-func verifyPluginRunning(ctx context.Context, pm PluginManagerInterface, name, revision string) error {
-	states := pm.ListPluginStates(ctx, &acpb.ListPluginStates{})
-	var foundState *acpb.CurrentPluginStates_DaemonPluginState_Status
-	for _, s := range states.GetDaemonPluginStates() {
-		if s.GetName() == name {
-			if s.GetCurrentPluginStatus().GetStatus() == acpb.CurrentPluginStates_DaemonPluginState_RUNNING && s.GetCurrentRevisionId() == revision {
-				return nil
-			}
-			foundState = s.GetCurrentPluginStatus()
-		}
-	}
-
-	if foundState == nil {
-		return fmt.Errorf("core plugin %s not found, current plugins: %+v", name, states)
-	}
-
-	return fmt.Errorf("core plugin failed to start, found in state: %+v", foundState)
-}
-
-// install installs the core plugin and verifies if its running.
-func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
-	// If guest-agent is restarting and previously had installed core-plugin once
-	// it will reconnect on [InitPluginManager]. Verify and return if running.
-	// Requesting install again would be a no-op but will generate unnecessary
-	// [PLUGIN_INSTALL_FAILED] event as plugin will be already present.
-	err := verifyPluginRunning(ctx, pm, manager.CorePluginName, c.Version)
-	if err == nil {
-		galog.Debugf("Core plugin found in running state, skipping installation")
-		return nil
-	}
-
-	galog.Infof("Current plugin state: %v installing core plugin...", err)
-
-	req := &acpb.ConfigurePluginStates{
-		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
-			&acpb.ConfigurePluginStates_ConfigurePlugin{
-				Action: acpb.ConfigurePluginStates_INSTALL,
-				Plugin: &acpb.ConfigurePluginStates_Plugin{
-					Name:       manager.CorePluginName,
-					RevisionId: c.Version,
-					EntryPoint: c.CorePluginPath,
-				},
-				Manifest: &acpb.ConfigurePluginStates_Manifest{
-					StartAttemptCount: 5,
-					StartTimeout:      &dpb.Duration{Seconds: 30},
-					StopTimeout:       &dpb.Duration{Seconds: 30},
-				},
-			},
-		},
-	}
-
-	// ConfigurePluginStates will launch the core plugin. This is blocking call
-	// and would wait until request is completed.
-	// Note that core plugin is already present on disk and must pass [true]
-	// to indicate local plugin.
-	pm.ConfigurePluginStates(ctx, req, true)
-
-	// As above request is completed this check should pass/fail right away
-	// no need to retry or wait.
-	return verifyPluginRunning(ctx, pm, manager.CorePluginName, c.Version)
 }
 
 // coreReady executes components that are dependent/waiting on core plugin to be ready.
@@ -236,11 +172,17 @@ func Run(ctx context.Context, c Config) error {
 	if c.SkipCorePlugin {
 		galog.Debug("Skipping core plugin initialization")
 		coreReady(ctx, c)
-		return nil
 	}
 
-	if err := install(ctx, pm, c); err != nil {
-		return fmt.Errorf("core plugin installation: %w", err)
+	if err := pm.StartLocalPlugins(ctx, map[string]manager.LocalPluginInstallation{
+		manager.CorePluginName: manager.LocalPluginInstallation{
+			Enable: !c.SkipCorePlugin,
+			OnReady: func(ctx context.Context) {
+				coreReady(ctx, c)
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("start local plugins: %w", err)
 	}
 
 	events.FetchManager().Subscribe(manager.EventID, events.EventSubscriber{Name: "GuestAgent", Data: c, Callback: handlePluginEvent, MetricName: acpb.GuestAgentModuleMetric_CORE_PLUGIN_INITIALIZATION})
