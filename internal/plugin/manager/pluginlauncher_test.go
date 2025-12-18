@@ -185,10 +185,8 @@ func TestLauncherStep(t *testing.T) {
 	tr := setupFakeRunner(t)
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 
-	plugin := &Plugin{Name: "pluginA", Revision: "revisionA", RuntimeInfo: &RuntimeInfo{statusMu: sync.RWMutex{}}, Manifest: &Manifest{StartTimeout: time.Second * 5}}
 	wantMaxMemoryUsage := step.maxMemoryUsage
 	wantMaxCPUUsage := step.maxCPUUsage
-	wantPluginName := plugin.FullName()
 	cfg.Retrieve().Core.ACSClient = false
 
 	tests := []struct {
@@ -232,6 +230,9 @@ func TestLauncherStep(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			plugin := &Plugin{Name: "pluginA", Revision: "revisionA", RuntimeInfo: &RuntimeInfo{statusMu: sync.RWMutex{}}, Manifest: &Manifest{StartTimeout: time.Second * 5}}
+			wantPluginName := plugin.FullName()
+
 			t.Cleanup(func() {
 				plugin.setState(acmpb.CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED)
 			})

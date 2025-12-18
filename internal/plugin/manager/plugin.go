@@ -40,6 +40,8 @@ const (
 	// waiting for a response forever.
 	defaultApplyRPCTimeout  = time.Second * 5
 	defaultStatusRPCTimeout = time.Second * 2
+	// defaultConnectTimeoutTries is the default number of tries for connecting to a plugin.
+	defaultConnectTimeoutTries = 30
 )
 
 // PluginService returns the underlying plugin service client.

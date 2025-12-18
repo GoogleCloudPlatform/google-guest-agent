@@ -154,6 +154,23 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 
 	galog.Debugf("Launched a plugin process from %q with pid %d", p.EntryPath, pluginPid)
 
+	// Wait for the socket to be verified if the protocol is UDS. This simply
+	// checks to see if the socket file exists up until the default connect
+	// timeout is reached. If the timeout is reached, we can assume that
+	// something is wrong, as the plugin shouldn't take that long to start.
+	if p.Protocol == udsProtocol {
+		socketPolicy := retry.Policy{MaxAttempts: defaultConnectTimeoutTries, BackoffFactor: 1, Jitter: time.Second * 1}
+		if err := retry.Run(ctx, socketPolicy, func() error {
+			if file.Exists(p.Address, file.TypeFile) {
+				return nil
+			}
+			return fmt.Errorf("socket %q does not exist for plugin %q", p.Address, p.FullName())
+		}); err != nil {
+			p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+			return fmt.Errorf("failed to verify socket %q for plugin %q: %w", p.Address, p.FullName(), err)
+		}
+	}
+
 	if err := p.Connect(ctx); err != nil {
 		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
 		return fmt.Errorf("failed to connect plugin %s: %w", p.FullName(), err)
