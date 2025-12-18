@@ -185,7 +185,7 @@ func (f *dataFetchers) configurePluginStates(ctx context.Context, msg *acpb.Mess
 		return
 	}
 
-	f.pluginManager.ConfigurePluginStates(ctx, req, false)
+	f.pluginManager.ConfigurePluginStates(ctx, req, nil, false)
 }
 
 func (f *dataFetchers) listPluginStates(ctx context.Context, msg *acpb.MessageBody) *acppb.CurrentPluginStates {
