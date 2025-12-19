@@ -34,7 +34,9 @@ const (
 )
 
 // Watcher is the ACS event watcher implementation.
-type Watcher struct{}
+type Watcher struct {
+	checkedGDUUniverse bool
+}
 
 // New allocates and initializes a new ACS Watcher.
 func New() *Watcher {
@@ -58,10 +60,12 @@ func (w *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
 
 	// In test environment we don't want to check GDU universe as we know the test
 	// is running in GDU universe.
-	if !skipGDUUnverseCheck {
+	if !skipGDUUnverseCheck && !w.checkedGDUUniverse {
 		// Only enable ACS watcher in GDU universe.
 		runningInGDU := metadata.New().IsGDUUniverse(ctx)
 		galog.Infof("Running in GDU universe: %t", runningInGDU)
+		// Set checkedGDUUniverse to true so that the check is only performed once.
+		w.checkedGDUUniverse = true
 
 		if !runningInGDU {
 			galog.V(2).Debugf("ACS watcher is disabled in non-GDU universe, removing watcher")
