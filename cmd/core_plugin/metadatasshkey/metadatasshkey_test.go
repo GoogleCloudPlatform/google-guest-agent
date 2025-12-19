@@ -292,9 +292,10 @@ func TestHandleMetadataChangeInputValidity(t *testing.T) {
 
 func TestFindValidKeys(t *testing.T) {
 	tests := []struct {
-		name     string
-		descJSON string
-		want     userKeyMap
+		name            string
+		descJSON        string
+		want            userKeyMap
+		wantInvalidKeys map[string]bool
 	}{
 		{
 			name: "get_user_keys",
@@ -318,6 +319,9 @@ func TestFindValidKeys(t *testing.T) {
 					"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIhv/faXnlsh3DnFb29wXET7lAsLDaNZ+MNny8p10sez testuser@fakehost",
 				},
 			},
+			wantInvalidKeys: map[string]bool{
+				"testuser:invalidkey": true,
+			},
 		},
 		{
 			name: "block_project_keys",
@@ -340,6 +344,7 @@ func TestFindValidKeys(t *testing.T) {
 					"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIECi36p6+wxL2B/f4/EBn49ucI3creKuVEH9IhLt6gDM testuser@fakehost",
 				},
 			},
+			wantInvalidKeys: map[string]bool{},
 		},
 		{
 			name: "deprecated_ssh_keys",
@@ -361,15 +366,24 @@ func TestFindValidKeys(t *testing.T) {
 					"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIECi36p6+wxL2B/f4/EBn49ucI3creKuVEH9IhLt6gDM testuser@fakehost",
 				},
 			},
+			wantInvalidKeys: map[string]bool{},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			oldInvalidKeys := invalidKeys
+			t.Cleanup(func() { invalidKeys = oldInvalidKeys })
+			invalidKeys = make(map[string]bool)
+
 			desc := descriptorFromJSON(t, tc.descJSON)
 			got := findValidKeys(desc)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("findValidKeys(%v) returned an unexpected diff (-want +got):\n%v", tc.descJSON, diff)
+			}
+
+			if diff := cmp.Diff(tc.wantInvalidKeys, invalidKeys); diff != "" {
+				t.Errorf("findValidKeys(%v) returned an unexpected diff for invalidKeys (-want +got):\n%v", tc.descJSON, diff)
 			}
 		})
 	}

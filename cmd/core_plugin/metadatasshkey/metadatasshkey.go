@@ -56,6 +56,10 @@ var (
 	// lastEnabled is the last seen value of whether metadata ssh key was
 	// enabled.
 	lastEnabled bool
+
+	// invalidKeys is a list of invalid keys that should be ignored. This is to
+	// prevent spam from invalid keys that are not actionable.
+	invalidKeys = make(map[string]bool)
 )
 
 // ensureGroupExists will check if a group exists, and create it locally if it
@@ -208,12 +212,21 @@ func findValidKeys(desc *metadata.Descriptor) userKeyMap {
 		if key == "" {
 			continue
 		}
+
+		// Ignore invalid keys that we've already seen.
+		if _, ok := invalidKeys[key]; ok {
+			continue
+		}
+
+		// Parse the key and validate the user and key.
 		username, keycontent, err := ssh.GetUserKey(key)
 		if err != nil {
 			galog.Warnf("Incorrectly formatted key %q in metadata: %v.", key, err)
 			continue
 		}
 		if err := ssh.ValidateUserKey(username, keycontent); err != nil {
+			// Add the key to the invalid keys list so we don't spam the logs with it.
+			invalidKeys[key] = true
 			galog.Warnf("Invalid user %q or key %q in metadata: %v.", username, keycontent, err)
 			continue
 		}

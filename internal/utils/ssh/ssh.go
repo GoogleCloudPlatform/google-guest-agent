@@ -34,6 +34,11 @@ type sshExpiration struct {
 	UserName string
 }
 
+var (
+	// ErrExpiredKey is an error type for expired keys.
+	ErrExpiredKey = errors.New("invalid ssh key entry - expired key")
+)
+
 // CheckExpiredKey validates whether a key has expired.
 // Keys with invalid expiration formats will result in an error.
 func CheckExpiredKey(key string) error {
@@ -64,7 +69,7 @@ func CheckExpiredKey(key string) error {
 		return err
 	}
 	if expired {
-		return errors.New("invalid ssh key entry - expired key")
+		return ErrExpiredKey
 	}
 	return nil
 }
