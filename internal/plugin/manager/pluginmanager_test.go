@@ -570,11 +570,14 @@ func TestSetMetricConfig(t *testing.T) {
 func TestInstallPlugin(t *testing.T) {
 	connections := t.TempDir()
 	state := t.TempDir()
-	setBaseStateDir(t, state)
 	setupConstraintTestClient(t)
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
-	cfg.Retrieve().Plugin.SocketConnectionsDir = connections
-	cfg.Retrieve().Core.ACSClient = false
+
+	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\nsocket_connections_dir = %s\n[Core]\nacs_client = false\n", state, connections)
+	if err := cfg.Load([]byte(tmp)); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
 	addr := filepath.Join(connections, "PluginA_RevisionA.sock")
 	ps := &testPluginServer{ctrs: make(map[string]int)}
 	server, hash, runner, seenPendingPlugins := installSetup(t, ps, addr)
@@ -1451,17 +1454,15 @@ func TestAdHocStopPlugin(t *testing.T) {
 
 func TestApplyConfig(t *testing.T) {
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
-	if err := cfg.Load(nil); err != nil {
-		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
-	}
 
 	stateDir := t.TempDir()
 	connDir := t.TempDir()
 	infoDir := filepath.Join(stateDir, "test-instance-id", agentStateDir, pluginInfoDir)
 
-	cfg.Retrieve().Plugin.SocketConnectionsDir = connDir
-	cfg.Retrieve().Plugin.StateDir = stateDir
-	cfg.Retrieve().Core.ACSClient = false
+	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\nsocket_connections_dir = %s\n[Core]\nacs_client = false\n", stateDir, connDir)
+	if err := cfg.Load([]byte(tmp)); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
 
 	addr := filepath.Join(connDir, "PluginA_RevisionA.sock")
 
