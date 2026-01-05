@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -125,6 +126,21 @@ func main() {
 	if err := logger.Init(ctx, logOpts); err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to initialize logger:", err)
 		os.Exit(1)
+	}
+
+	// Log the config read by the guest agent to debug.
+	cfgStr, err := cfg.ToString()
+	if err != nil {
+		galog.Debugf("Failed to convert config to string: %v", err)
+	} else {
+		newLine := "\n"
+		if runtime.GOOS == "windows" {
+			newLine = "\r\n"
+		}
+
+		for _, str := range strings.Split(cfgStr, newLine) {
+			galog.Debugf("CFG: %s", str)
+		}
 	}
 
 	if err := service.Init(ctx, func() {

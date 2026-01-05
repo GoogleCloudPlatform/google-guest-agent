@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -534,4 +535,25 @@ func Retrieve() *Sections {
 		panicFc("cfg package was not initialized, Load() should be called in the early initialization code path")
 	}
 	return instance
+}
+
+// ToString returns the configuration's instance previously loaded with Load()
+// as a string. This splits it up as a slice of strings separated by sections.
+func ToString() (string, error) {
+	buffer := new(bytes.Buffer)
+
+	// Marshal the configuration to ini.
+	cfg := ini.Empty()
+	if err := ini.ReflectFrom(cfg, instance); err != nil {
+		return "", fmt.Errorf("failed to reflect configuration to object: %w", err)
+	}
+
+	// Write the configuration to a buffer.
+	if _, err := cfg.WriteTo(buffer); err != nil {
+		return "", fmt.Errorf("failed to write configuration to buffer: %w", err)
+	}
+	configString := strings.TrimSpace(buffer.String())
+
+	// The ini string splits sections by two new lines.
+	return configString, nil
 }
