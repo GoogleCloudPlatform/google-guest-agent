@@ -34,6 +34,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
@@ -301,6 +302,31 @@ func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string,
 	return mod.osloginSetup(ctx, desc)
 }
 
+func (mod *osloginModule) setupUsrEtcOSLoginDirs(ctx context.Context) error {
+	info := osinfo.Read()
+	galog.Infof("OS info name: %s, version: %d", info.OS, info.Version.Major)
+
+	if !strings.Contains(info.OS, "sles") || info.Version.Major != 16 {
+		galog.Infof("Skipping setupUsrEtcOSLoginDirs for non-sles16")
+		return nil
+	}
+
+	dir := map[string]string{
+		"/usr/etc/ssh/sshd_config":     "/etc/ssh/sshd_config",
+		"/usr/etc/nsswitch.conf":       "/etc/nsswitch.conf",
+		"/usr/lib/pam.d/sshd":          "/etc/pam.d/sshd",
+		"/usr/etc/security/group.conf": "/etc/security/group.conf",
+	}
+
+	for k, v := range dir {
+		galog.Debugf("Copying %s -> %s", k, v)
+		if err := file.CopyFile(ctx, k, v, file.Options{Perm: 0640}); err != nil {
+			return fmt.Errorf("failed to copy %q -> %q: %w", k, v, err)
+		}
+	}
+	return nil
+}
+
 // osloginSetup is the actual oslogin's configuration entry point.
 func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descriptor) (bool, bool, error) {
 	defer func() {
@@ -363,44 +389,50 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 
 	var failed bool
 	var errs error
+
+	if err := mod.setupUsrEtcOSLoginDirs(ctx); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("failed to setup /usr/etc/OSLogin directories for SLES 16: %w", err))
+		failed = true
+	}
+
 	// Write SSH config.
 	if err := mod.setupOpenSSH(desc); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup openssh: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup openssh: %w", err))
 		failed = true
 	}
 
 	// Write NSSwitch config.
 	if err := mod.setupNSSwitch(false); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup nsswitch: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup nsswitch: %w", err))
 		failed = true
 	}
 
 	// Write PAM config.
 	if err := mod.setupPAM(desc); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup pam: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup pam: %w", err))
 		failed = true
 	}
 
 	// Write Group config.
 	if err := mod.setupGroup(); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup group: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup group: %w", err))
 		failed = true
 	}
 
 	// Restart services. This is not a blocker.
 	if err := mod.restartServices(ctx); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to restart services: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to restart services: %w", err))
 		failed = true
 	}
 
 	// Create the necessary OSLogin directories and other files.
 	if err := mod.setupOSLoginDirs(ctx); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup OSLogin directories: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup OSLogin directories: %w", err))
 		failed = true
 	}
 
 	if err := mod.setupOSLoginSudoers(); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to create OSLogin sudoers file: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to create OSLogin sudoers file: %w", err))
 		failed = true
 	}
 
@@ -409,7 +441,7 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		Name:       "google_oslogin_nss_cache",
 		OutputType: run.OutputNone,
 	}); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to fill NSS cache: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to fill NSS cache: %w", err))
 		failed = true
 	}
 
@@ -462,9 +494,9 @@ func (mod *osloginModule) setupOpenSSH(desc *metadata.Descriptor) error {
 	}
 
 	// Source per-user config from /var/google-users.d.
-	block.Append("Include", "/var/google-users.d/*")
+	// block.Append("Include", "/var/google-users.d/*")
 	// Per-user configs will use "Match User <user>"; "Match all" ends those Match blocks.
-	block.Append("Match", "all")
+	// block.Append("Match", "all")
 
 	if err := sshdCfg.Apply(); err != nil {
 		return fmt.Errorf("failed to apply openssh config: %w", err)
@@ -769,7 +801,7 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 						mod.permanentFailure.Store(true)
 					}
 
-					return errors.Join(fmt.Errorf("Failed to restart one of: %v", serviceConfig.services), errs)
+					return errors.Join(fmt.Errorf("failed to restart one of: %v", serviceConfig.services), errs)
 				}
 				// Only log a debug message if the restart is optional.
 				galog.Debugf("Failed to restart optional services: %v", serviceConfig.services)
