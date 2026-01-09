@@ -91,7 +91,7 @@ func TestHealthCheck(t *testing.T) {
 	tests := []struct {
 		name           string
 		want           *pcpb.Status
-		status         acpb.CurrentPluginStates_DaemonPluginState_StatusValue
+		status         acpb.CurrentPluginStates_StatusValue
 		wantStatusCall bool
 		wantCmd        string
 	}{
@@ -99,23 +99,23 @@ func TestHealthCheck(t *testing.T) {
 			name:           "success",
 			want:           &pcpb.Status{Code: 0, Results: []string{"running ok"}},
 			wantStatusCall: true,
-			status:         acpb.CurrentPluginStates_DaemonPluginState_RUNNING,
+			status:         acpb.CurrentPluginStates_RUNNING,
 		},
 		{
 			name:           "stopping_plugin",
 			wantStatusCall: false,
-			status:         acpb.CurrentPluginStates_DaemonPluginState_STOPPING,
+			status:         acpb.CurrentPluginStates_STOPPING,
 		},
 		{
 			name:           "stopped_plugin",
 			wantStatusCall: false,
-			status:         acpb.CurrentPluginStates_DaemonPluginState_STOPPED,
+			status:         acpb.CurrentPluginStates_STOPPED,
 		},
 		{
 			name:           "failure",
 			wantCmd:        "startbinary",
 			wantStatusCall: true,
-			status:         acpb.CurrentPluginStates_DaemonPluginState_RUNNING,
+			status:         acpb.CurrentPluginStates_RUNNING,
 		},
 	}
 
@@ -126,7 +126,7 @@ func TestHealthCheck(t *testing.T) {
 			addr := filepath.Join(t.TempDir(), "A_12.sock")
 			cfg.Retrieve().Plugin.SocketConnectionsDir = filepath.Dir(addr)
 			startTestServer(t, ts, udsProtocol, addr)
-			p := &Plugin{Name: "A", Revision: "12", Address: addr, Protocol: udsProtocol, EntryPath: "startbinary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: test.status}, Manifest: &Manifest{StartAttempts: 2, StartConfig: &ServiceConfig{}}, InstallPath: t.TempDir()}
+			p := &Plugin{Name: "A", Revision: "12", Address: addr, Protocol: udsProtocol, EntryPath: "startbinary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: test.status}, Manifest: &Manifest{StartAttempts: 2, StartConfig: &ServiceConfig{}, PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION}, InstallPath: t.TempDir()}
 			if err := p.Connect(ctx); err != nil {
 				t.Fatalf("Failed to connect to plugin: %v", err)
 			}
