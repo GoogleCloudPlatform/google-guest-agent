@@ -450,21 +450,19 @@ func (mod *osloginModule) setupOpenSSH(desc *metadata.Descriptor) error {
 		block.Append("AuthorizedKeysCommandUser", "root")
 	}
 
+	bottomBlock := textconfig.NewBlock(textconfig.Bottom)
+	// Source per-user config from /var/google-users.d.
+	bottomBlock.Append("Include", "/var/google-users.d/*")
+	sshdCfg.AddBlock(bottomBlock)
+
 	// Add two-factor authentication configuration if enabled.
 	if desc.TwoFactorEnabled() {
 		block.Append("AuthenticationMethods", "publickey,keyboard-interactive")
 		block.Append("ChallengeResponseAuthentication", "yes")
 
-		twoFABlock := textconfig.NewBlock(textconfig.Bottom)
-		sshdCfg.AddBlock(twoFABlock)
-		twoFABlock.Append("Match", "User sa_*")
-		twoFABlock.Append("AuthenticationMethods", "publickey")
+		bottomBlock.Append("Match", "User sa_*")
+		bottomBlock.Append("AuthenticationMethods", "publickey")
 	}
-
-	// Source per-user config from /var/google-users.d.
-	block.Append("Include", "/var/google-users.d/*")
-	// Per-user configs will use "Match User <user>"; "Match all" ends those Match blocks.
-	block.Append("Match", "all")
 
 	if err := sshdCfg.Apply(); err != nil {
 		return fmt.Errorf("failed to apply openssh config: %w", err)

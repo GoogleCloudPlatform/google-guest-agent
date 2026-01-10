@@ -751,7 +751,6 @@ func TestSetupOpenSSH(t *testing.T) {
 				fmt.Sprintf("AuthorizedKeysCommand %s", module.authorizedKeysCommandPaths[0]),
 				"AuthorizedKeysCommandUser root",
 				"Include /var/google-users.d/*",
-				"Match all",
 			},
 		},
 		{
@@ -771,7 +770,6 @@ func TestSetupOpenSSH(t *testing.T) {
 				"AuthorizedPrincipalsCommand /usr/bin/google_authorized_principals %u %k",
 				"AuthorizedPrincipalsCommandUser root",
 				"Include /var/google-users.d/*",
-				"Match all",
 			},
 		},
 		{
@@ -795,7 +793,6 @@ func TestSetupOpenSSH(t *testing.T) {
 				"AuthenticationMethods publickey,keyboard-interactive",
 				"ChallengeResponseAuthentication yes",
 				"Include /var/google-users.d/*",
-				"Match all",
 				"Match User sa_*",
 				"AuthenticationMethods publickey",
 			},
@@ -820,7 +817,6 @@ func TestSetupOpenSSH(t *testing.T) {
 				"AuthenticationMethods publickey,keyboard-interactive",
 				"ChallengeResponseAuthentication yes",
 				"Include /var/google-users.d/*",
-				"Match all",
 				"Match User sa_*",
 				"AuthenticationMethods publickey",
 			},
@@ -844,7 +840,6 @@ func TestSetupOpenSSH(t *testing.T) {
 				fmt.Sprintf("AuthorizedKeysCommand %s", module.authorizedKeysCommandSKPaths[0]),
 				"AuthorizedKeysCommandUser root",
 				"Include /var/google-users.d/*",
-				"Match all",
 			},
 		},
 	}
@@ -1238,7 +1233,6 @@ func TestRetryFailConfiguration(t *testing.T) {
 				fmt.Sprintf("AuthorizedKeysCommand %s", module.authorizedKeysCommandPaths[0]),
 				"AuthorizedKeysCommandUser root",
 				"Include /var/google-users.d/*",
-				"Match all",
 			})
 			checkTestFile(t, module.nsswitchConfigPath, []string{
 				"passwd: files cache_oslogin oslogin",
