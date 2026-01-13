@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"text/template"
@@ -537,9 +538,9 @@ func Retrieve() *Sections {
 	return instance
 }
 
-// ToString returns the configuration's instance previously loaded with Load()
+// toString returns the configuration's instance previously loaded with Load()
 // as a string. This splits it up as a slice of strings separated by sections.
-func ToString() (string, error) {
+func toString() (string, error) {
 	buffer := new(bytes.Buffer)
 
 	// Marshal the configuration to ini.
@@ -556,4 +557,22 @@ func ToString() (string, error) {
 
 	// The ini string splits sections by two new lines.
 	return configString, nil
+}
+
+// Log logs the configuration's instance previously loaded with Load() to the
+// debug log. Make sure this function is called after logger is initialized.
+func Log() {
+	cfgStr, err := toString()
+	if err != nil {
+		galog.Debugf("Failed to convert config to string: %v", err)
+	} else {
+		newLine := "\n"
+		if runtime.GOOS == "windows" {
+			newLine = "\r\n"
+		}
+
+		for _, str := range strings.Split(cfgStr, newLine) {
+			galog.Debugf("CFG: %s", str)
+		}
+	}
 }

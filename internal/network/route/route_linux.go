@@ -169,6 +169,8 @@ func (lc *linuxClient) listRoutes(ctx context.Context, cmdOpts Options, args []s
 		return nil, err
 	}
 
+	galog.V(2).Debugf("Current routes:\n %s", res.Output)
+
 	var routes []Handle
 	for _, line := range strings.Split(res.Output, "\n") {
 		line = strings.TrimSpace(line)
@@ -276,7 +278,7 @@ func (lc *linuxClient) MissingRoutes(ctx context.Context, iface string, addresse
 		Device: iface,
 	}
 
-	ipv6Routes, err := Find(ctx, opts)
+	ipv6Routes, err := lc.Find(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find IPv6 routes: %w", err)
 	}
@@ -286,7 +288,7 @@ func (lc *linuxClient) MissingRoutes(ctx context.Context, iface string, addresse
 	}
 
 	opts.Scope = "host"
-	ipv4Routes, err := Find(ctx, opts)
+	ipv4Routes, err := lc.Find(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find IPv4 routes: %w", err)
 	}
@@ -336,7 +338,7 @@ func (lc *linuxClient) ExtraRoutes(ctx context.Context, iface string, wantedRout
 		Proto:  config.IPForwarding.EthernetProtoID,
 	}
 
-	allRoutes, err := Find(ctx, opts)
+	allRoutes, err := lc.Find(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find routes: %w", err)
 	}
@@ -368,25 +370,25 @@ func (lc *linuxClient) RemoveRoutes(ctx context.Context, iface string) error {
 		Device: iface,
 	}
 
-	ipv6Routes, err := Find(ctx, opts)
+	ipv6Routes, err := lc.Find(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("failed to find IPv6 routes: %w", err)
 	}
 
 	for _, deleteMe := range ipv6Routes {
-		if err := Delete(ctx, deleteMe); err != nil {
+		if err := lc.Delete(ctx, deleteMe); err != nil {
 			return fmt.Errorf("failed to delete route: %v", err)
 		}
 	}
 
 	opts.Scope = "host"
-	ipv4Routes, err := Find(ctx, opts)
+	ipv4Routes, err := lc.Find(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("failed to find IPv4 routes: %w", err)
 	}
 
 	for _, deleteMe := range ipv4Routes {
-		if err := Delete(ctx, deleteMe); err != nil {
+		if err := lc.Delete(ctx, deleteMe); err != nil {
 			return fmt.Errorf("failed to delete route: %v", err)
 		}
 	}
@@ -423,7 +425,7 @@ func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
 		}
 
 		if len(extraRoutes) == 0 {
-			galog.Debugf("No extra routes for interface %q", nic.Interface.Name())
+			galog.Debugf("No extra routes to delete for interface %q", nic.Interface.Name())
 		} else {
 			galog.Infof("Deleting extra routes %v for interface %q", extraRoutes, nic.Interface.Name())
 			for _, r := range extraRoutes {
@@ -441,7 +443,7 @@ func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
 		}
 
 		if len(missingRoutes) == 0 {
-			galog.Debugf("No missing routes for interface %q", nic.Interface.Name())
+			galog.Debugf("No missing routes to add for interface %q", nic.Interface.Name())
 			continue
 		}
 		galog.Infof("Adding routes %v for interface %q", missingRoutes, nic.Interface.Name())

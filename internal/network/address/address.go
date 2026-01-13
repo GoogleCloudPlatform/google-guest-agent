@@ -157,6 +157,7 @@ func NewExtraAddresses(nic *metadata.NetworkInterface, config *cfg.Sections, ign
 	// IPForwarding is not being honored the guest agent will make sure to have
 	// the routes removed.
 	if !config.NetworkInterfaces.IPForwarding {
+		galog.V(1).Debugf("IP forwarding is disabled, skipping extra addresses setup")
 		return &ExtraAddresses{
 			ForwardedIPs:      make(IPAddressMap),
 			TargetInstanceIPs: make(IPAddressMap),

@@ -199,7 +199,7 @@ func TestToString(t *testing.T) {
 		},
 	}
 
-	got, err := ToString()
+	got, err := toString()
 	if err != nil {
 		t.Fatalf("ToString() failed unexpectedly; err = %s", err)
 	}

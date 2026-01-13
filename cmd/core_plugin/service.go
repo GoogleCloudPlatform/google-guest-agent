@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/early"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/late"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
@@ -203,6 +204,9 @@ func (ps *PluginServer) Start(ctx context.Context, msg *pb.StartRequest) (*pb.St
 		return nil, status.Errorf(1, "failed to initialize logger: %v", err)
 	}
 	loggerInitialized.Store(true)
+
+	// Log the config read by the core plugin to debug.
+	cfg.Log()
 
 	galog.Debugf("Handling start request %+v", msg)
 
