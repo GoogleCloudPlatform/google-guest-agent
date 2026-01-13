@@ -34,6 +34,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
@@ -168,6 +169,17 @@ var (
 
 	// execLookPath is stubbed out for testing.
 	execLookPath = exec.LookPath
+
+	// osinfoRead is stubbed out for testing.
+	osinfoRead = osinfo.Read
+
+	// sles16Map contains mapping of files to be copied from /usr to /etc for SLES 16.
+	sles16Map = map[string]string{
+		"/usr/etc/ssh/sshd_config":     defaultSSHDConfigPath,
+		"/usr/etc/nsswitch.conf":       defaultNSSwitchConfigPath,
+		"/usr/lib/pam.d/sshd":          defaultPAMConfigPath,
+		"/usr/etc/security/group.conf": defaultGroupConfigPath,
+	}
 )
 
 // osloginModule is the OS Login module.
@@ -209,6 +221,10 @@ type osloginModule struct {
 	sudoers string
 	// deprecatedEntries are the deprecated files to clean up.
 	deprecatedEntries map[string][]*textconfig.Entry
+	// sles16Setup is true if the SLES 16 setup has been done, this is to avoid
+	// doing the setup multiple times if the module is enabled/disabled multiple
+	// times or reties.
+	sles16Setup atomic.Bool
 }
 
 // serviceRestartProtocol is the protocol to use when restarting a service.
@@ -301,6 +317,39 @@ func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string,
 	return mod.osloginSetup(ctx, desc)
 }
 
+// setupSles16OSLoginDirs copies files from /usr to /etc for SLES 16. This is
+// only needed for OSLogin required files that are installed in /usr but not
+// /etc on SLES 16.
+// https://documentation.suse.com/releasenotes/sles/html/releasenotes_sles_16.0/index.html#jsc-PED-4963
+func (mod *osloginModule) setupSles16OSLoginDirs(ctx context.Context) error {
+	if mod.sles16Setup.Load() {
+		galog.V(2).Debugf("Skipping OSLogin SLES 16 specific setup")
+		return nil
+	}
+
+	info := osinfoRead()
+
+	if !strings.Contains(info.OS, "sles") || info.Version.Major != 16 {
+		galog.Infof("Skipping OSLogin SLES 16 specific setup on %s %d", info.OS, info.Version.Major)
+		mod.sles16Setup.Store(true)
+		return nil
+	}
+
+	for k, v := range sles16Map {
+		if file.Exists(v, file.TypeFile) {
+			galog.Infof("File %q already exists, skipping copy from %q", v, k)
+			continue
+		}
+
+		galog.Infof("Copying file %q -> %q", k, v)
+		if err := file.CopyFile(ctx, k, v, file.Options{Perm: 0644}); err != nil {
+			return fmt.Errorf("failed to copy %q -> %q: %w", k, v, err)
+		}
+	}
+	mod.sles16Setup.Store(true)
+	return nil
+}
+
 // osloginSetup is the actual oslogin's configuration entry point.
 func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descriptor) (bool, bool, error) {
 	defer func() {
@@ -363,44 +412,56 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 
 	var failed bool
 	var errs error
+
+	// Attempt to copy files from /usr to /etc for SLES 16 first time we enable
+	// OSLogin.
+	if err := mod.setupSles16OSLoginDirs(ctx); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("failed to setup OSLogin directories for SLES 16: %w", err))
+		mod.enabled.Store(false)
+		mod.failedConfiguration.Store(true)
+		// Don't attempt to continue the setup if this fails, return early. Expected
+		// files don't exist, half setup could leave the system in a bad state.
+		return true, false, errs
+	}
+
 	// Write SSH config.
 	if err := mod.setupOpenSSH(desc); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup openssh: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup openssh: %w", err))
 		failed = true
 	}
 
 	// Write NSSwitch config.
 	if err := mod.setupNSSwitch(false); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup nsswitch: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup nsswitch: %w", err))
 		failed = true
 	}
 
 	// Write PAM config.
 	if err := mod.setupPAM(desc); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup pam: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup pam: %w", err))
 		failed = true
 	}
 
 	// Write Group config.
 	if err := mod.setupGroup(); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup group: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup group: %w", err))
 		failed = true
 	}
 
 	// Restart services. This is not a blocker.
 	if err := mod.restartServices(ctx); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to restart services: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to restart services: %w", err))
 		failed = true
 	}
 
 	// Create the necessary OSLogin directories and other files.
 	if err := mod.setupOSLoginDirs(ctx); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to setup OSLogin directories: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to setup OSLogin directories: %w", err))
 		failed = true
 	}
 
 	if err := mod.setupOSLoginSudoers(); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to create OSLogin sudoers file: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to create OSLogin sudoers file: %w", err))
 		failed = true
 	}
 
@@ -409,7 +470,7 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		Name:       "google_oslogin_nss_cache",
 		OutputType: run.OutputNone,
 	}); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("Failed to fill NSS cache: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to fill NSS cache: %w", err))
 		failed = true
 	}
 
@@ -767,7 +828,7 @@ func (mod *osloginModule) restartServices(ctx context.Context) error {
 						mod.permanentFailure.Store(true)
 					}
 
-					return errors.Join(fmt.Errorf("Failed to restart one of: %v", serviceConfig.services), errs)
+					return errors.Join(fmt.Errorf("failed to restart one of: %v", serviceConfig.services), errs)
 				}
 				// Only log a debug message if the restart is optional.
 				galog.Debugf("Failed to restart optional services: %v", serviceConfig.services)

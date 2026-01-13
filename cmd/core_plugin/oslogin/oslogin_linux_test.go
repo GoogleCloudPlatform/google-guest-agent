@@ -30,6 +30,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
@@ -1111,7 +1112,201 @@ func TestRemoveDeprecatedEntries(t *testing.T) {
 	checkTestFile(t, testFile, []string{"notDepKey notDepEntry"})
 }
 
-// TestRetryFailConfiguration tests that the retry logic works as expected.
+func TestSetupUsrEtcOSLoginDirs(t *testing.T) {
+	oldSles16Map := sles16Map
+	oldOsinfoRead := osinfoRead
+	t.Cleanup(func() {
+		sles16Map = oldSles16Map
+		osinfoRead = oldOsinfoRead
+	})
+
+	wantMap := map[string]string{
+		"/usr/etc/ssh/sshd_config":     "/etc/ssh/sshd_config",
+		"/usr/etc/nsswitch.conf":       "/etc/nsswitch.conf",
+		"/usr/lib/pam.d/sshd":          "/etc/pam.d/sshd",
+		"/usr/etc/security/group.conf": "/etc/security/group.conf",
+	}
+	if diff := cmp.Diff(wantMap, sles16Map); diff != "" {
+		t.Fatalf("sles16Map unexpected diff (-want +got):\n%s", diff)
+	}
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name           string
+		info           osinfo.OSInfo
+		createSrc      bool
+		createDst      bool
+		dstContent     string
+		dstShouldExist bool
+		prevSetup      bool
+	}{
+		{
+			name:           "debian12-no-copy",
+			info:           osinfo.OSInfo{OS: "debian", Version: osinfo.Ver{Major: 12}},
+			createSrc:      true,
+			createDst:      false,
+			dstShouldExist: false,
+		},
+		{
+			name:           "sles15-no-copy",
+			info:           osinfo.OSInfo{OS: "sles", Version: osinfo.Ver{Major: 15}},
+			createSrc:      true,
+			createDst:      false,
+			dstShouldExist: false,
+		},
+		{
+			name:           "sles16-copy",
+			info:           osinfo.OSInfo{OS: "sles", Version: osinfo.Ver{Major: 16}},
+			createSrc:      true,
+			createDst:      false,
+			dstShouldExist: true,
+			dstContent:     "test",
+		},
+		{
+			name:           "sles16-no-copy-if-exists",
+			info:           osinfo.OSInfo{OS: "sles", Version: osinfo.Ver{Major: 16}},
+			createSrc:      false,
+			createDst:      true,
+			dstContent:     "exists",
+			dstShouldExist: true,
+		},
+		{
+			name:           "sles16-no-copy-if-already-setup",
+			info:           osinfo.OSInfo{OS: "sles", Version: osinfo.Ver{Major: 16}},
+			createSrc:      false,
+			createDst:      true,
+			dstContent:     "exists",
+			dstShouldExist: true,
+			prevSetup:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mod := &osloginModule{}
+			mod.sles16Setup.Store(tt.prevSetup)
+
+			usrDir := t.TempDir()
+			etcDir := t.TempDir()
+			src := filepath.Join(usrDir, "nsswitch.conf")
+			dst := filepath.Join(etcDir, "nsswitch.conf")
+			sles16Map = map[string]string{
+				src: dst,
+			}
+
+			if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+				t.Fatalf("Failed to create dir for %s: %v", src, err)
+			}
+			if tt.createSrc {
+				if err := os.WriteFile(src, []byte("test"), 0644); err != nil {
+					t.Fatalf("Failed to write to %s: %v", src, err)
+				}
+			}
+
+			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+				t.Fatalf("Failed to create dir for %s: %v", dst, err)
+			}
+			if tt.createDst {
+				if err := os.WriteFile(dst, []byte(tt.dstContent), 0644); err != nil {
+					t.Fatalf("Failed to write to %s: %v", dst, err)
+				}
+			}
+
+			osinfoRead = func() osinfo.OSInfo {
+				return tt.info
+			}
+
+			if err := mod.setupSles16OSLoginDirs(ctx); err != nil {
+				t.Fatalf("setupUsrEtcOSLoginDirs() returned err: %v, want nil", err)
+			}
+
+			if got := file.Exists(dst, file.TypeFile); got != tt.dstShouldExist {
+				t.Errorf("Destination file %s exists: %t, want: %t", dst, got, tt.dstShouldExist)
+			}
+			if tt.dstShouldExist {
+				got, err := os.ReadFile(dst)
+				if err != nil {
+					t.Fatalf("Failed to read destination file %s: %v", dst, err)
+				}
+				if string(got) != tt.dstContent {
+					t.Errorf("Destination file %s content changed to %s, want %s", dst, string(got), tt.dstContent)
+				}
+			}
+			if got := mod.sles16Setup.Load(); !got {
+				t.Errorf("sles16Setup is %t, want true", got)
+			}
+		})
+	}
+}
+
+func TestOSLoginSetupSLES16Failure(t *testing.T) {
+	oldSles16Map := sles16Map
+	oldOsinfoRead := osinfoRead
+	t.Cleanup(func() {
+		sles16Map = oldSles16Map
+		osinfoRead = oldOsinfoRead
+	})
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	mod := createTestModule(t)
+	mod.enabled.Store(true)
+	usrDir := t.TempDir()
+
+	// sles16Map source files are not created, so copy will fail.
+	sles16Map = map[string]string{
+		filepath.Join(usrDir, "sshd_config"): mod.sshdConfigPath,
+	}
+
+	osinfoRead = func() osinfo.OSInfo {
+		return osinfo.OSInfo{OS: "sles", Version: osinfo.Ver{Major: 16}}
+	}
+
+	enabledMDSJSON := `
+	{
+		"instance":  {
+			"attributes": {
+				"enable-oslogin": "true"
+			}
+		}
+	}`
+	enabledDesc, err := metadata.UnmarshalDescriptor(enabledMDSJSON)
+	if err != nil {
+		t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", enabledMDSJSON, err)
+	}
+
+	ctx := context.Background()
+
+	shouldContinue, noop, err := mod.osloginSetup(ctx, enabledDesc)
+	if err == nil {
+		t.Fatalf("osloginSetup(ctx, %+v) succeeded, want error", enabledDesc)
+	}
+
+	wantErr := "failed to setup OSLogin directories"
+	if !strings.Contains(err.Error(), wantErr) {
+		t.Fatalf("osloginSetup(ctx, %+v) error is %q, want error to contain %q", enabledDesc, err.Error(), wantErr)
+	}
+
+	if !mod.failedConfiguration.Load() {
+		t.Errorf("osloginSetup(ctx, %+v) failedConfiguration is false, want true", enabledDesc)
+	}
+	if mod.enabled.Load() {
+		t.Errorf("osloginSetup(ctx, %+v) enabled is true, want false", enabledDesc)
+	}
+	if !shouldContinue {
+		t.Errorf("osloginSetup(ctx, %+v) shouldContinue is %t, want true", enabledDesc, shouldContinue)
+	}
+	if noop {
+		t.Errorf("osloginSetup(ctx, %+v) noop is %t, want false", enabledDesc, noop)
+	}
+	if mod.sles16Setup.Load() {
+		t.Errorf("osloginSetup(ctx, %+v) sles16Setup is true, want false", enabledDesc)
+	}
+}
+
 func TestRetryFailConfiguration(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("failed to load config: %v", err)
