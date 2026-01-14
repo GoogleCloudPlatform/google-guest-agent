@@ -835,9 +835,6 @@ func TestSetupOpenSSH(t *testing.T) {
 			}
 			`,
 			expectedLines: []string{
-				"TrustedUserCAKeys /etc/ssh/oslogin_trustedca.pub",
-				"AuthorizedPrincipalsCommand /usr/bin/google_authorized_principals %u %k",
-				"AuthorizedPrincipalsCommandUser root",
 				fmt.Sprintf("AuthorizedKeysCommand %s", module.authorizedKeysCommandSKPaths[0]),
 				"AuthorizedKeysCommandUser root",
 				"Include /var/google-users.d/*",
