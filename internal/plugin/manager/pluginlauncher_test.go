@@ -167,8 +167,8 @@ func TestLauncherStep(t *testing.T) {
 	startTestServer(t, ts, udsProtocol, addr)
 
 	wantName := "LaunchPluginStep"
-	wantStatus := acmpb.CurrentPluginStates_DaemonPluginState_STARTING
-	wantErrorStatus := acmpb.CurrentPluginStates_DaemonPluginState_CRASHED
+	wantStatus := acmpb.CurrentPluginStates_STARTING
+	wantErrorStatus := acmpb.CurrentPluginStates_CRASHED
 
 	if step.Name() != wantName {
 		t.Errorf("launchStep.Name() = %s, want %s", step.Name(), wantName)
@@ -190,41 +190,41 @@ func TestLauncherStep(t *testing.T) {
 	cfg.Retrieve().Core.ACSClient = false
 
 	tests := []struct {
-		name       string
-		path       string
-		pluginType PluginType
-		serviceCfg string
-		status     acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
-		launchFail bool
-		shouldFail bool
+		name                   string
+		path                   string
+		pluginInstallationType acmpb.PluginInstallationType
+		serviceCfg             string
+		status                 acmpb.CurrentPluginStates_StatusValue
+		launchFail             bool
+		shouldFail             bool
 	}{
 		{
-			name:       "success_core_plugin",
-			path:       t.TempDir(),
-			pluginType: PluginTypeCore,
-			status:     acmpb.CurrentPluginStates_DaemonPluginState_RUNNING,
+			name:                   "success_core_plugin",
+			path:                   t.TempDir(),
+			pluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+			status:                 acmpb.CurrentPluginStates_RUNNING,
 		},
 		{
-			name:       "success_dynamic_plugin",
-			path:       t.TempDir(),
-			pluginType: PluginTypeDynamic,
-			status:     acmpb.CurrentPluginStates_DaemonPluginState_RUNNING,
+			name:                   "success_dynamic_plugin",
+			path:                   t.TempDir(),
+			pluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+			status:                 acmpb.CurrentPluginStates_RUNNING,
 		},
 		{
-			name:       "launch_failure",
-			path:       t.TempDir(),
-			pluginType: PluginTypeDynamic,
-			status:     acmpb.CurrentPluginStates_DaemonPluginState_CRASHED,
-			shouldFail: true,
-			launchFail: true,
+			name:                   "launch_failure",
+			path:                   t.TempDir(),
+			pluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+			status:                 acmpb.CurrentPluginStates_CRASHED,
+			shouldFail:             true,
+			launchFail:             true,
 		},
 		{
-			name:       "start_failure",
-			path:       t.TempDir(),
-			serviceCfg: "error",
-			pluginType: PluginTypeDynamic,
-			status:     acmpb.CurrentPluginStates_DaemonPluginState_CRASHED,
-			shouldFail: true,
+			name:                   "start_failure",
+			path:                   t.TempDir(),
+			serviceCfg:             "error",
+			pluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+			status:                 acmpb.CurrentPluginStates_CRASHED,
+			shouldFail:             true,
 		},
 	}
 
@@ -234,13 +234,13 @@ func TestLauncherStep(t *testing.T) {
 			wantPluginName := plugin.FullName()
 
 			t.Cleanup(func() {
-				plugin.setState(acmpb.CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED)
+				plugin.setState(acmpb.CurrentPluginStates_STATE_VALUE_UNSPECIFIED)
 			})
 
 			cfg.Retrieve().Plugin.StateDir = stateDir
 			cfg.Retrieve().Plugin.SocketConnectionsDir = filepath.Dir(addr)
 			plugin.InstallPath = tc.path
-			plugin.PluginType = tc.pluginType
+			plugin.Manifest.PluginInstallationType = tc.pluginInstallationType
 			wantArgs := []string{"--foo=bar", fmt.Sprintf("--protocol=%s", udsProtocol), fmt.Sprintf("--address=%s", addr), fmt.Sprintf("--errorlogfile=%s", plugin.logfile())}
 
 			plugin.Manifest.StartConfig = &ServiceConfig{Simple: tc.serviceCfg}
@@ -271,7 +271,27 @@ func TestLauncherStep(t *testing.T) {
 				t.Errorf("launchStep.Run(ctx, %+v) executed unexpectedly with diff (-want +got):\n%s", plugin, diff)
 			}
 
-			wantPlugin := &Plugin{Name: plugin.Name, Revision: plugin.Revision, Address: addr, Manifest: &Manifest{LaunchArguments: []string{"--foo=bar"}, MaxMemoryUsage: 10, MaxCPUUsage: 20, StartAttempts: 3, StartTimeout: time.Second * 5, StartConfig: &ServiceConfig{Simple: tc.serviceCfg}}, EntryPath: entryPath, RuntimeInfo: &RuntimeInfo{Pid: tr.pid, status: tc.status}, InstallPath: tc.path, Protocol: step.protocol, PluginType: tc.pluginType}
+			wantPlugin := &Plugin{
+				Name:     plugin.Name,
+				Revision: plugin.Revision,
+				Address:  addr,
+				Manifest: &Manifest{
+					LaunchArguments:        []string{"--foo=bar"},
+					MaxMemoryUsage:         10,
+					MaxCPUUsage:            20,
+					StartAttempts:          3,
+					StartTimeout:           time.Second * 5,
+					StartConfig:            &ServiceConfig{Simple: tc.serviceCfg},
+					PluginInstallationType: tc.pluginInstallationType,
+				},
+				EntryPath: entryPath,
+				RuntimeInfo: &RuntimeInfo{
+					Pid:    tr.pid,
+					status: tc.status,
+				},
+				InstallPath: tc.path,
+				Protocol:    step.protocol,
+			}
 			if diff := cmp.Diff(wantPlugin, plugin, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}), cmpopts.IgnoreFields(Plugin{}, "client"), cmpopts.IgnoreUnexported(Manifest{})); diff != "" {
 				t.Errorf("launchStep.Run(ctx, %+v) executed unexpectedly with diff (-want +got):\n%s", plugin, diff)
 			}
@@ -289,7 +309,7 @@ func TestLauncherStep(t *testing.T) {
 
 			// Test symlink points to right target directory.
 			got, err := os.Readlink(plugin.staticInstallPath())
-			if tc.pluginType == PluginTypeCore {
+			if tc.pluginInstallationType == acmpb.PluginInstallationType_LOCAL_INSTALLATION {
 				if err == nil {
 					t.Fatalf("os.Readlink(%s) succeeded, should have failed for core plugin", plugin.staticInstallPath())
 				}

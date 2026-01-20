@@ -1,0 +1,9 @@
+#!/bin/sh -e
+
+if [ "$1" = "purge" -o "$1" = "remove" ] ; then
+    systemctl stop google-guest-agent >/dev/null 2>&1 || :
+    ggactl_plugin coreplugin stop >/dev/null 2>&1 || :
+    ggactl_plugin dynamic-cleanup >/dev/null 2>&1 || :
+fi
+
+#DEBHELPER#

@@ -53,12 +53,12 @@ func TestDownloadStep(t *testing.T) {
 		attempts: 1,
 	}
 
-	wantStatus := acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING
+	wantStatus := acmpb.CurrentPluginStates_INSTALLING
 	if got := step.Status(); got != wantStatus {
 		t.Errorf("downloadStep.Status() = %q, want %q", got, wantStatus)
 	}
 
-	wantErrorStatus := acmpb.CurrentPluginStates_DaemonPluginState_INSTALL_FAILED
+	wantErrorStatus := acmpb.CurrentPluginStates_INSTALL_FAILED
 	if got := step.ErrorStatus(); got != wantErrorStatus {
 		t.Errorf("downloadStep.ErrorStatus() = %s, want %s", got, wantErrorStatus)
 	}
@@ -133,8 +133,8 @@ func TestDownloadStepError(t *testing.T) {
 type testStep struct {
 	executedAt  time.Time
 	throwError  error
-	status      acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
-	errorStatus acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
+	status      acmpb.CurrentPluginStates_StatusValue
+	errorStatus acmpb.CurrentPluginStates_StatusValue
 }
 
 func (t *testStep) Run(context.Context, *Plugin) error {
@@ -145,11 +145,11 @@ func (t *testStep) Run(context.Context, *Plugin) error {
 	return nil
 }
 
-func (t *testStep) Status() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
+func (t *testStep) Status() acmpb.CurrentPluginStates_StatusValue {
 	return t.status
 }
 
-func (t *testStep) ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
+func (t *testStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
 	return t.errorStatus
 }
 
@@ -222,8 +222,8 @@ func TestPluginState(t *testing.T) {
 func TestRunSteps(t *testing.T) {
 	plugin := &Plugin{RuntimeInfo: &RuntimeInfo{statusMu: sync.RWMutex{}}}
 
-	step1 := &testStep{status: acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING}
-	wantState := acmpb.CurrentPluginStates_DaemonPluginState_RUNNING
+	step1 := &testStep{status: acmpb.CurrentPluginStates_INSTALLING}
+	wantState := acmpb.CurrentPluginStates_RUNNING
 	step2 := &testStep{status: wantState}
 
 	if err := plugin.runSteps(context.Background(), []Step{step1, step2}); err != nil {
@@ -252,26 +252,26 @@ func TestRunStepsError(t *testing.T) {
 		steps         []Step
 		wantError     error
 		cancelContext bool
-		wantState     acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
+		wantState     acmpb.CurrentPluginStates_StatusValue
 	}{
 		{
 			desc:      "fail_at_first_step",
-			steps:     []Step{&testStep{status: acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING, errorStatus: acmpb.CurrentPluginStates_DaemonPluginState_INSTALL_FAILED, throwError: context.DeadlineExceeded}},
+			steps:     []Step{&testStep{status: acmpb.CurrentPluginStates_INSTALLING, errorStatus: acmpb.CurrentPluginStates_INSTALL_FAILED, throwError: context.DeadlineExceeded}},
 			wantError: context.DeadlineExceeded,
-			wantState: acmpb.CurrentPluginStates_DaemonPluginState_INSTALL_FAILED,
+			wantState: acmpb.CurrentPluginStates_INSTALL_FAILED,
 		},
 		{
 			desc:      "fail_after_first_step",
-			steps:     []Step{&testStep{status: acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING, errorStatus: acmpb.CurrentPluginStates_DaemonPluginState_INSTALL_FAILED}, &testStep{status: acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING, errorStatus: acmpb.CurrentPluginStates_DaemonPluginState_CRASHED, throwError: fmt.Errorf("test error")}},
+			steps:     []Step{&testStep{status: acmpb.CurrentPluginStates_INSTALLING, errorStatus: acmpb.CurrentPluginStates_INSTALL_FAILED}, &testStep{status: acmpb.CurrentPluginStates_INSTALLING, errorStatus: acmpb.CurrentPluginStates_CRASHED, throwError: fmt.Errorf("test error")}},
 			wantError: fmt.Errorf("test error"),
-			wantState: acmpb.CurrentPluginStates_DaemonPluginState_CRASHED,
+			wantState: acmpb.CurrentPluginStates_CRASHED,
 		},
 		{
 			desc:          "fail_immediately",
-			steps:         []Step{&testStep{status: acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING}},
+			steps:         []Step{&testStep{status: acmpb.CurrentPluginStates_INSTALLING}},
 			wantError:     context.Canceled,
 			cancelContext: true,
-			wantState:     acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING,
+			wantState:     acmpb.CurrentPluginStates_INSTALLING,
 		},
 	}
 
@@ -427,12 +427,12 @@ func TestUnpackStepRun(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			step := tc.step
-			wantStatus := acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING
+			wantStatus := acmpb.CurrentPluginStates_INSTALLING
 			if got := step.Status(); got != wantStatus {
 				t.Errorf("downloadStep.Status() = %q, want %q", got, wantStatus)
 			}
 
-			wantErrorStatus := acmpb.CurrentPluginStates_DaemonPluginState_INSTALL_FAILED
+			wantErrorStatus := acmpb.CurrentPluginStates_INSTALL_FAILED
 			if got := step.ErrorStatus(); got != wantErrorStatus {
 				t.Errorf("downloadStep.ErrorStatus() = %s, want %s", got, wantErrorStatus)
 			}

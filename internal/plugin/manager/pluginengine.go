@@ -22,34 +22,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/boundedlist"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
-	structpb "google.golang.org/protobuf/types/known/structpb"
 )
 
-// PluginType is the type of plugin.
-type PluginType int
-
 const (
-	// PluginTypeCore represents plugin is a core plugin. These are generally
-	// packaged with the Guest Agent and installed by package mangers and offer
-	// core Guest Agent functionality and are required to support various GCE
-	// features.
-	PluginTypeCore PluginType = iota
-	// PluginTypeDynamic represents plugin is a dynamic plugin. These type of
-	// plugins are optional plugins that are dynamically downloaded and installed
-	// by the Guest Agent.
-	PluginTypeDynamic
-
 	// pluginInstallDir is the directory under the agent base state directory
 	// where all plugins are installed.
 	pluginInstallDir = "plugins"
@@ -57,218 +39,6 @@ const (
 	// all plugins store their state and is persisted across revisions.
 	pluginStateDir = "plugin_state"
 )
-
-// Plugin struct represents the plugin information.
-type Plugin struct {
-	// PluginType identifies if the plugin type.
-	PluginType PluginType
-	// Name is the current plugin name.
-	Name string
-	// Revision is the current plugin revision.
-	Revision string
-	// Address is the current address plugin is listening on.
-	Address string
-	// InstallPath is the path to the directory where plugin is
-	// installed/unpacked.
-	InstallPath string
-	// EntryPath is the path to the plugin/binary entry point from which its spun
-	// up.
-	EntryPath string
-	// Protocol is the protocol used for communication with the plugin.
-	Protocol string
-	// client is grpc client connection with the plugin.
-	client *grpc.ClientConn
-	// Manifest is plugin configuration defining various agent/plugin behavior.
-	Manifest *Manifest
-	// RuntimeInfo holds plugin runtime information.
-	RuntimeInfo *RuntimeInfo
-}
-
-// RuntimeInfo represent plugin metrics and health check information captured at
-// run time. Expect info here to change during plugin execution.
-type RuntimeInfo struct {
-	// statusMu mutex protects concurrent updates to plugin status.
-	statusMu sync.RWMutex
-	// status is the current plugin status.
-	status acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
-	// healthMu mutex protects plugin health check information.
-	healthMu sync.Mutex
-	// health is the current plugin health check information.
-	health *healthCheck
-	// metricsMu is a mutex that protects the metrics field.
-	metricsMu sync.Mutex
-	// metrics is a list of metrics reported by the plugin.
-	metrics *boundedlist.List[Metric]
-	// pidMu mutex protects plugin pid.
-	pidMu sync.RWMutex
-	// Pid is the process id of the plugin.
-	Pid int
-	// pendingStatusMu mutex protects pendingPluginStatus.
-	pendingStatusMu sync.Mutex
-	// pendingPluginStatus is the status of pending plugin revision. This is the
-	// new revision that is being installed.
-	pendingPluginStatus *pendingPluginStatus
-}
-
-// Manifest is the plugin specific static config agent received from ACP.
-type Manifest struct {
-	// StartAttempts is the number of times to try launching the plugin.
-	StartAttempts int
-	// MaxMemoryUsage is the maximum allowed memory usage of the plugin, in bytes.
-	MaxMemoryUsage int64
-	// MaxCPUUsage is the maximum allowed percent CPU usage of the plugin.
-	MaxCPUUsage int32
-	// MaxMetricDatapoints is the maximum number of datapoints to report/collect.
-	// Metrics are collected every [MetricsInterval] but are flushed from memory
-	// only when reported back to the service. This count limits datapoints from
-	// growing indefinitely.
-	MaxMetricDatapoints uint
-	// MetricsInterval is the interval at which metrics are collected.
-	MetricsInterval time.Duration
-	// StopTimeout is the timeout set on plugin stop request before process is
-	// killed.
-	StopTimeout time.Duration
-	// StartTimeout is the timeout set on plugin start request.
-	StartTimeout time.Duration
-	// StartConfig is the config service has sent down for passing down to the
-	// plugin on each start RPC request.
-	StartConfig *ServiceConfig
-	// startConfigMu mutex protects concurrent updates to startConfig.
-	startConfigMu sync.Mutex
-	// startConfigHash is the hash of the start config. This is reported back to
-	// the control plane to determine if there's a new config or not and applied
-	// accordingly.
-	startConfigHash string
-	// LaunchArguments are extra arguments specified by plugin owners to pass down
-	// during process launch.
-	LaunchArguments []string
-}
-
-// ServiceConfig is agent agnostic data that is passed to the plugin on every
-// start rpc request. At any given time only one of this can be set.
-type ServiceConfig struct {
-	// Simple is simple string form of the config.
-	Simple string
-	// Structured is structured [*structpb.Struct] config message. It is marshaled
-	// to a byte array to persist across agent restarts and reuse on every plugin
-	// start request. Agent will unmarshal using [toProto] method before sending
-	// it to plugins on Start RPC.
-	Structured []byte
-}
-
-// toProto unmarshals bytes and returns struct proto message representation.
-func (c *ServiceConfig) toProto() (*structpb.Struct, error) {
-	cfg := &structpb.Struct{}
-	if err := proto.Unmarshal(c.Structured, cfg); err != nil {
-		return nil, fmt.Errorf("unable to unmarshal struct config bytes: %w", err)
-	}
-	return cfg, nil
-}
-
-func (p *Plugin) resetPendingStatus() {
-	p.RuntimeInfo.pendingStatusMu.Lock()
-	defer p.RuntimeInfo.pendingStatusMu.Unlock()
-	p.RuntimeInfo.pendingPluginStatus = nil
-}
-
-func (p *Plugin) setPendingStatus(revision string, status acmpb.CurrentPluginStates_DaemonPluginState_StatusValue) {
-	p.RuntimeInfo.pendingStatusMu.Lock()
-	defer p.RuntimeInfo.pendingStatusMu.Unlock()
-	p.RuntimeInfo.pendingPluginStatus = &pendingPluginStatus{
-		revision: revision,
-		status:   status,
-	}
-}
-
-func (p *Plugin) pendingStatus() *pendingPluginStatus {
-	p.RuntimeInfo.pendingStatusMu.Lock()
-	defer p.RuntimeInfo.pendingStatusMu.Unlock()
-	return p.RuntimeInfo.pendingPluginStatus
-}
-
-// pendingPluginStatus struct represents the pending plugin status. This is
-// set only when a plugin revision is being changed.
-type pendingPluginStatus struct {
-	// revision is the pending plugin revision.
-	revision string
-	// status is the pending plugin status.
-	status acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
-}
-
-// healthCheck struct represents the health check information.
-type healthCheck struct {
-	// responseCode is the response code returned by plugin during health check.
-	responseCode int32
-	// messages is the list of messages returned by plugin during health check.
-	// This could include potential error reasons or any info plugins might want
-	// to report to the service.
-	messages []string
-	// timestamp is the timestamp at which the health check was executed.
-	timestamp time.Time
-}
-
-// healthInfo returns the current cached plugin health check information.
-func (p *Plugin) healthInfo() *healthCheck {
-	p.RuntimeInfo.healthMu.Lock()
-	defer p.RuntimeInfo.healthMu.Unlock()
-	return p.RuntimeInfo.health
-}
-
-// setHealthInfo sets the plugin health check information.
-func (p *Plugin) setHealthInfo(h *healthCheck) {
-	p.RuntimeInfo.healthMu.Lock()
-	defer p.RuntimeInfo.healthMu.Unlock()
-	p.RuntimeInfo.health = h
-}
-
-// FullName returns the full name of the plugin including name and revision.
-func (p *Plugin) FullName() string {
-	return fmt.Sprintf("%s_%s", p.Name, p.Revision)
-}
-
-// setPid sets the current plugin process id.
-func (p *Plugin) setPid(pid int) {
-	p.RuntimeInfo.pidMu.Lock()
-	defer p.RuntimeInfo.pidMu.Unlock()
-	p.RuntimeInfo.Pid = pid
-}
-
-// pid returns the current plugin process id.
-func (p *Plugin) pid() int {
-	p.RuntimeInfo.pidMu.RLock()
-	defer p.RuntimeInfo.pidMu.RUnlock()
-	return p.RuntimeInfo.Pid
-}
-
-// setState sets the plugin status.
-func (p *Plugin) setState(s acmpb.CurrentPluginStates_DaemonPluginState_StatusValue) {
-	p.RuntimeInfo.statusMu.Lock()
-	defer p.RuntimeInfo.statusMu.Unlock()
-	p.RuntimeInfo.status = s
-}
-
-// State returns the plugin status.
-func (p *Plugin) State() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	p.RuntimeInfo.statusMu.RLock()
-	defer p.RuntimeInfo.statusMu.RUnlock()
-	return p.RuntimeInfo.status
-}
-
-// runSteps runs the steps in the order they are given.
-func (p *Plugin) runSteps(ctx context.Context, steps []Step) error {
-	for _, step := range steps {
-		galog.Debugf("Running %q on plugin %q", step.Name(), p.FullName())
-		p.setState(step.Status())
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("%q failed, context error: %w", step.Name(), err)
-		}
-		if err := step.Run(ctx, p); err != nil {
-			p.setState(step.ErrorStatus())
-			return fmt.Errorf("%q failed with error: %w", step.Name(), err)
-		}
-	}
-	return nil
-}
 
 // baseState returns the base path where the agent and all plugins state is
 // stored.
@@ -288,9 +58,9 @@ type Step interface {
 	// The name of the step.
 	Name() string
 	// Status returns the plugin state for current step.
-	Status() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
+	Status() acmpb.CurrentPluginStates_StatusValue
 	// ErrorStatus returns the plugin state if current step fails.
-	ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue
+	ErrorStatus() acmpb.CurrentPluginStates_StatusValue
 	// Performs the step.
 	Run(context.Context, *Plugin) error
 }
@@ -314,13 +84,13 @@ type downloadStep struct {
 func (d *downloadStep) Name() string { return "DownloadPluginStep" }
 
 // Status returns the plugin state for current step.
-func (d *downloadStep) Status() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	return acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING
+func (d *downloadStep) Status() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_INSTALLING
 }
 
 // ErrorStatus returns the plugin state if download step fails.
-func (d *downloadStep) ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	return acmpb.CurrentPluginStates_DaemonPluginState_INSTALL_FAILED
+func (d *downloadStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_INSTALL_FAILED
 }
 
 // Run downloads a package from GCS and validates the checksum.
@@ -389,13 +159,13 @@ type unpackStep struct {
 func (u *unpackStep) Name() string { return "UnpackPluginArchiveStep" }
 
 // Status returns the plugin state for current step.
-func (u *unpackStep) Status() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	return acmpb.CurrentPluginStates_DaemonPluginState_INSTALLING
+func (u *unpackStep) Status() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_INSTALLING
 }
 
 // ErrorStatus returns the plugin state if unpack step fails.
-func (u *unpackStep) ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	return acmpb.CurrentPluginStates_DaemonPluginState_INSTALL_FAILED
+func (u *unpackStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_INSTALL_FAILED
 }
 
 // Run unpacks to the target directory and deletes the archive file.
