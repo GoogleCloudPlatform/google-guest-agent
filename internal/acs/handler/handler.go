@@ -150,6 +150,7 @@ func (f *dataFetchers) agentInfo() *acppb.AgentInfo {
 			acppb.AgentInfo_GET_OS_INFO,
 			acppb.AgentInfo_LIST_PLUGIN_STATES,
 			acppb.AgentInfo_CONFIGURE_PLUGIN_STATES,
+			acppb.AgentInfo_APPLY_PLUGIN_CONFIG,
 		},
 		Version: f.clientVersion,
 	}

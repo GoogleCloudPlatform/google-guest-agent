@@ -101,6 +101,7 @@ func TestHandleMessage(t *testing.T) {
 			acmpb.AgentInfo_GET_OS_INFO,
 			acmpb.AgentInfo_LIST_PLUGIN_STATES,
 			acmpb.AgentInfo_CONFIGURE_PLUGIN_STATES,
+			acmpb.AgentInfo_APPLY_PLUGIN_CONFIG,
 		},
 		Version: v,
 	}
