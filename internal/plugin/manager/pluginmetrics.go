@@ -73,7 +73,7 @@ func (*PluginMetrics) ShouldEnable(ctx context.Context) bool {
 // Run gets and caches the plugin's metrics.
 func (p *PluginMetrics) Run(ctx context.Context) (bool, error) {
 	currentState := p.plugin.State()
-	if currentState != acpb.CurrentPluginStates_DaemonPluginState_RUNNING {
+	if currentState != acpb.CurrentPluginStates_RUNNING {
 		// Skip metric collection if process is not in running state. Reading
 		// [/proc] for example on Linux would fail anyways.
 		return true, fmt.Errorf("plugin %q found in state %v, skipping metric collection", p.plugin.FullName(), currentState)

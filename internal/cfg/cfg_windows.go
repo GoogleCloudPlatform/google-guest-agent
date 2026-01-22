@@ -40,4 +40,6 @@ const (
 	// defaultIPAliasesEnabled is the default value for the IPAliases
 	// enabled configuration knob.
 	defaultIPAliasesEnabled = false
+	// defaultLocalPluginDir is the directory on Windows where local plugins are installed.
+	defaultLocalPluginDir = `C:\Program Files\Google\Compute Engine\agent`
 )
