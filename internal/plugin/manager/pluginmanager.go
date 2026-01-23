@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -128,40 +127,6 @@ func init() {
 	}
 }
 
-func (m *PluginManager) cleanupOldState(ctx context.Context, path string) error {
-	re := regexp.MustCompile("^[0-9]+$")
-
-	if !file.Exists(path, file.TypeDir) {
-		// This is not an error, it just means there's nothing to clean up, which
-		// can happen if the agent is started for the first time or plugins were
-		// never installed.
-		galog.Debugf("Plugin state directory %q does not exist, skipping cleanup", path)
-		return nil
-	}
-
-	dirs, err := os.ReadDir(path)
-	if err != nil {
-		return fmt.Errorf("failed to read directory %q: %w", path, err)
-	}
-
-	currentID := m.currentInstanceID()
-
-	for _, dir := range dirs {
-		absPath := filepath.Join(path, dir.Name())
-		// Skip the current instance directory and any non-numeric directories,
-		// these are most likely not agent created.
-		if !dir.IsDir() || dir.Name() == currentID || !re.MatchString(dir.Name()) {
-			galog.V(2).Debugf("Skipping %q from plugin manager old state cleanup", absPath)
-			continue
-		}
-		galog.Debugf("Removing previous plugin state %q", absPath)
-		if err := os.RemoveAll(absPath); err != nil {
-			return fmt.Errorf("failed to remove file %q: %w", absPath, err)
-		}
-	}
-	return nil
-}
-
 func (m *PluginManager) setInstanceID(id string) {
 	m.instanceIDMu.Lock()
 	defer m.instanceIDMu.Unlock()
@@ -229,12 +194,17 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 		}
 	}()
 
+	// Load the existing plugin state.
 	plugins, err := load(agentPluginState())
 	if err != nil {
 		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
 	}
 
 	pluginManager.plugins = plugins
+
+	// Subscribe to cleanup event. This needs to happen after plugin manager is
+	// initialized, or we may accidentally cleanup plugins that shouldn't be removed.
+	scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(pluginManager)}, false)
 
 	if err := RegisterCmdHandler(ctx); err != nil {
 		return nil, fmt.Errorf("failed to register plugin command handler: %w", err)

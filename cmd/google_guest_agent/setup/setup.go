@@ -216,7 +216,6 @@ func Run(ctx context.Context, c Config) error {
 		galog.Infof("Registered ACS watcher and handler")
 	} else {
 		galog.Infof("ACS watcher config enabled: %t, service account is present: %t, skipping ACS watcher and handler initialization. On Demand plugins will not be available.", c.EnableACSWatcher, conf.svcActPresent)
-
 	}
 
 	pm, err := manager.InitPluginManager(ctx, conf.id)

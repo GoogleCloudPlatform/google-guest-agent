@@ -16,11 +16,13 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
 
@@ -91,7 +93,10 @@ func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 	}
 
 	// Make sure plugin process exited by attempting to kill.
-	if err := ps.KillProcess(pluginPid, ps.KillModeWait); err != nil {
+	// When waiting for the process to exit, once all child processes have exited,
+	// the ECHILD error is returned. This can also happen if the process has
+	// already exited, or the process is not a child of the current process.
+	if err := ps.KillProcess(pluginPid, ps.KillModeWait); err != nil && !errors.Is(err, syscall.ECHILD) {
 		return fmt.Errorf("kill %s plugin process (%d) completed with error: %v", p.FullName(), pluginPid, err)
 	}
 
@@ -132,32 +137,33 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 // Cleanup removes all known paths associated with this plugin.
 func cleanup(ctx context.Context, p *Plugin) error {
 	galog.Infof("Cleaning up %q plugin state", p.FullName())
+	var errs []error
 
 	// Remove resource constraint first before attempting any file removal.
 	// On windows [JobObjects] are used for setting resource limits that can
 	// prevent manager from cleanup/removing files.
 	if err := resource.RemoveConstraint(ctx, p.FullName()); err != nil {
-		return fmt.Errorf("resource constraint removal failed: %w", err)
+		errs = append(errs, fmt.Errorf("resource constraint removal failed: %w", err))
 	}
 
 	// Files paths of core plugins are managed by package manager do not remove.
 	if p.PluginType != PluginTypeCore {
 		if err := os.RemoveAll(p.InstallPath); err != nil {
-			return fmt.Errorf("%s plugin install path (%s) removal failed with error: %w", p.FullName(), p.InstallPath, err)
+			errs = append(errs, fmt.Errorf("%s plugin install path (%s) removal failed with error: %w", p.FullName(), p.InstallPath, err))
 		}
 	}
 
 	if p.Protocol == udsProtocol {
 		if err := os.RemoveAll(p.Address); err != nil {
-			return fmt.Errorf("%s plugin socket file (%s) removal failed with error: %w", p.FullName(), p.Address, err)
+			errs = append(errs, fmt.Errorf("%s plugin socket file (%s) removal failed with error: %w", p.FullName(), p.Address, err))
 		}
 	}
 
 	stateFile := p.stateFile()
 	if err := os.RemoveAll(stateFile); err != nil {
-		return fmt.Errorf("%s plugin state (%s) removal failed with error: %w", p.FullName(), stateFile, err)
+		errs = append(errs, fmt.Errorf("%s plugin state (%s) removal failed with error: %w", p.FullName(), stateFile, err))
 	}
 
 	p.Address = ""
-	return nil
+	return errors.Join(errs...)
 }
