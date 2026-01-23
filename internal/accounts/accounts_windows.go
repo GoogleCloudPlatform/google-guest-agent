@@ -39,11 +39,13 @@ type windowsUserInfo struct {
 
 var (
 	// AdminGroup is the administrator group.
-	AdminGroup = &Group{Name: "Administrators"}
+	// https://learn.microsoft.com/en-us/windows/win32/secauthz/well-known-sids
+	AdminGroup = &Group{GID: "S-1-5-32-544"}
 
 	// The following has been stubbed out for error injection testing.
-	lookupSID   = syscall.LookupSID
-	lookupGroup = user.LookupGroup
+	lookupSID       = syscall.LookupSID
+	lookupGroup     = user.LookupGroup
+	lookupGroupByID = user.LookupGroupId
 
 	netUserAdd         = defaultNetUserAdd
 	netUserDel         = defaultNetUserDel
@@ -119,6 +121,24 @@ func DelUser(_ context.Context, u *User) error {
 	return nil
 }
 
+// handleGroup handles the group name and ID. If the name is empty, then it will
+// look up the group by ID. If neither are provided, then an error is returned.
+func handleGroup(ctx context.Context, g *Group) (*Group, error) {
+	// Name takes precedence over ID, since syscalls use the name.
+	if g.Name != "" {
+		return g, nil
+	}
+	if g.GID == "" {
+		return nil, fmt.Errorf("group name and id are empty")
+	}
+	group, err := FindGroupByID(ctx, g.GID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find group with SID %s: %w", g.GID, err)
+	}
+	galog.Debugf("Resolved group with SID %q to group %q", g.GID, group.Name)
+	return group, nil
+}
+
 // CreateGroup creates a new group with the given name.
 func CreateGroup(_ context.Context, group string) error {
 	galog.V(1).Debugf("Creating group %s", group)
@@ -130,15 +150,20 @@ func CreateGroup(_ context.Context, group string) error {
 }
 
 // DelGroup deletes the group from the system.
-func DelGroup(_ context.Context, g *Group) error {
+func DelGroup(ctx context.Context, g *Group) error {
 	if g == nil {
 		return fmt.Errorf("group is nil")
 	}
-	galog.V(1).Debugf("Deleting group %s", g.Name)
-	if err := netLocalGroupDel(g.Name); err != nil {
+	group, err := handleGroup(ctx, g)
+	if err != nil {
+		return fmt.Errorf("failed to handle group: %w", err)
+	}
+	galog.V(1).Debugf("Deleting group %s", group.Name)
+
+	if err := netLocalGroupDel(group.Name); err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
 	}
-	galog.V(1).Debugf("Successfully deleted group %s", g.Name)
+	galog.V(1).Debugf("Successfully deleted group %s", group.Name)
 	return nil
 }
 
@@ -152,8 +177,18 @@ func FindGroup(_ context.Context, name string) (*Group, error) {
 	return &Group{Name: groupInfo.Name, GID: groupInfo.Gid}, nil
 }
 
+// FindGroupByID returns the group with the given ID. If the group does not exist,
+// it returns an error.
+func FindGroupByID(_ context.Context, id string) (*Group, error) {
+	groupInfo, err := lookupGroupByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find group: %w", err)
+	}
+	return &Group{Name: groupInfo.Name, GID: groupInfo.Gid}, nil
+}
+
 // AddUserToGroup adds the user to the given group.
-func AddUserToGroup(_ context.Context, u *User, g *Group) error {
+func AddUserToGroup(ctx context.Context, u *User, g *Group) error {
 	if u == nil && g == nil {
 		return fmt.Errorf("user and group are nil")
 	}
@@ -168,17 +203,23 @@ func AddUserToGroup(_ context.Context, u *User, g *Group) error {
 	if !ok {
 		return fmt.Errorf("failed to get os specific user info for user")
 	}
-	galog.V(1).Debugf("Adding user %s to group %s", u.Name, g.Name)
-	if err := netLocalGroupAddMembers(osSpecific.SID, g.Name); err != nil {
-		return fmt.Errorf("failed to add user %s to group %v: %w", u.Username, g.Name, err)
+	// If the group name is empty, we need to look it up by id.
+	group, err := handleGroup(ctx, g)
+	if err != nil {
+		return fmt.Errorf("failed to handle group: %w", err)
 	}
-	galog.V(1).Debugf("Successfully added user %s to group %s", u.Name, g.Name)
+	galog.V(1).Debugf("Adding user %s to group %s", u.Name, group.Name)
+
+	if err := netLocalGroupAddMembers(osSpecific.SID, group.Name); err != nil {
+		return fmt.Errorf("failed to add user %s to group %v: %w", u.Username, group.Name, err)
+	}
+	galog.V(1).Debugf("Successfully added user %s to group %s", u.Name, group.Name)
 	return nil
 }
 
 // RemoveUserFromGroup removes the provided user from the given group. If the
 // user is not a member of the group, this is a no-op.
-func RemoveUserFromGroup(_ context.Context, u *User, g *Group) error {
+func RemoveUserFromGroup(ctx context.Context, u *User, g *Group) error {
 	if u == nil && g == nil {
 		return fmt.Errorf("user and group are nil")
 	}
@@ -194,11 +235,17 @@ func RemoveUserFromGroup(_ context.Context, u *User, g *Group) error {
 		return fmt.Errorf("failed to get os specific user info for user")
 	}
 
-	galog.V(1).Debugf("Removing user %s from group %s", u.Name, g.Name)
-	if err := netLocalGroupDelMembers(osSpecific.SID, g.Name); err != nil {
-		return fmt.Errorf("failed to remove user %s from group %v: %w", u.Username, g.Name, err)
+	// If the group name is empty, we need to look it up by id.
+	group, err := handleGroup(ctx, g)
+	if err != nil {
+		return fmt.Errorf("failed to handle group: %w", err)
 	}
-	galog.V(1).Debugf("Successfully removed user %s from group %s", u.Name, g.Name)
+	galog.V(1).Debugf("Removing user %s from group %s", u.Name, group.Name)
+
+	if err := netLocalGroupDelMembers(osSpecific.SID, group.Name); err != nil {
+		return fmt.Errorf("failed to remove user %s from group %v: %w", u.Username, group.Name, err)
+	}
+	galog.V(1).Debugf("Successfully removed user %s from group %s", u.Name, group.Name)
 	return nil
 }
 
