@@ -40,12 +40,12 @@ const emptyJSON = `
 	}
 }`
 
-func TestEarlyModule(t *testing.T) {
+func TestModule(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("Load(nil) returned an unexpected error: %v", err)
 	}
 
-	mod := NewEarlyModule(context.Background())
+	mod := NewModule(context.Background())
 	if mod.ID == "" {
 		t.Errorf("NewEarlyModule() returned module with empty ID")
 	}
@@ -55,21 +55,7 @@ func TestEarlyModule(t *testing.T) {
 	}
 }
 
-func TestLateModule(t *testing.T) {
-	if err := cfg.Load(nil); err != nil {
-		t.Fatalf("cfg.Load(nil) failed with error: %v", err)
-	}
-	mod := NewLateModule(context.Background())
-	if mod.ID == "" {
-		t.Errorf("NewLateModule() returned module with empty ID")
-	}
-
-	if mod.Setup == nil {
-		t.Errorf("NewLateModule() returned module with nil Setup")
-	}
-}
-
-func TestLateInitFailure(t *testing.T) {
+func TestInitFailure(t *testing.T) {
 	mds, err := metadata.UnmarshalDescriptor(mdsJSON)
 	if err != nil {
 		t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", mdsJSON, err)
@@ -106,15 +92,15 @@ func TestLateInitFailure(t *testing.T) {
 				})
 			}
 
-			mod := &lateModule{}
-			if err := mod.moduleSetup(context.Background(), tc.mds); (err == nil) == tc.wantError {
-				t.Errorf("lateInit() returned error %v, want error %t", err, tc.wantError)
+			mod := &module{}
+			if err := mod.setup(context.Background(), tc.mds); (err == nil) == tc.wantError {
+				t.Errorf("setup() returned error %v, want error %t", err, tc.wantError)
 			}
 		})
 	}
 }
 
-func TestLateInitSuccess(t *testing.T) {
+func TestInitSuccess(t *testing.T) {
 	mds, err := metadata.UnmarshalDescriptor(mdsJSON)
 	if err != nil {
 		t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", mdsJSON, err)
@@ -124,9 +110,9 @@ func TestLateInitSuccess(t *testing.T) {
 		t.Fatalf("Load(nil) returned an unexpected error: %v", err)
 	}
 
-	mod := &lateModule{}
-	if err := mod.moduleSetup(context.Background(), mds); err != nil {
-		t.Errorf("lateInit() returned an unexpected error: %v", err)
+	mod := &module{}
+	if err := mod.setup(context.Background(), mds); err != nil {
+		t.Errorf("setup() returned an unexpected error: %v", err)
 	}
 }
 
@@ -202,7 +188,7 @@ func TestMetadataSubscriberFailure(t *testing.T) {
 				evdata.Error = errors.New("test error")
 			}
 
-			mod := &lateModule{}
+			mod := &module{}
 
 			if tc.sameMDS {
 				mds, ok := tc.mds.(*metadata.Descriptor)
@@ -237,7 +223,7 @@ func TestMetadataSubscriberSuccess(t *testing.T) {
 
 	evdata := &events.EventData{Data: mds}
 
-	mod := &lateModule{prevMetadata: mds}
+	mod := &module{prevMetadata: mds}
 	got, noop, err := mod.metadataSubscriber(context.Background(), metadata.LongpollEvent, nil, evdata)
 	if err != nil {
 		t.Errorf("metadataSubscriber() returned an unexpected error: %v, want nil", err)
@@ -331,7 +317,7 @@ func TestNetworkMetadataChanged(t *testing.T) {
 				t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", tc.newMDSJSON, err)
 			}
 
-			mod := &lateModule{prevMetadata: prevDesc, wsfcEnabled: tc.prevWSFCEnabled}
+			mod := &module{prevMetadata: prevDesc, wsfcEnabled: tc.prevWSFCEnabled}
 			got := mod.networkMetadataChanged(newDesc, config)
 			if got != tc.want {
 				t.Errorf("metadataChanged(%v) = %t, want %t", newDesc, got, tc.want)
