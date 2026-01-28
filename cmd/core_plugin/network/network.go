@@ -46,6 +46,9 @@ type module struct {
 	wsfcEnabled bool
 	// failedConfiguration indicates if the last setup has failed.
 	failedConfiguration bool
+	// skipMDS skips the metadata fetch if set to true. This is used for testing
+	// purposes only.
+	skipMDS bool
 }
 
 // NewModule returns the network early initialization module.
@@ -62,9 +65,20 @@ func NewModule(_ context.Context) *manager.Module {
 // setup is the setup function for the late network module.
 func (mod *module) setup(ctx context.Context, data any) error {
 	galog.Debugf("Initializing %s module", networkModuleID)
+	var err error
+
+	// In normal use cases, the data is not a metadata descriptor. This is just
+	// used for testing so we can avoid doing an actual metadata fetch.
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
-		return fmt.Errorf("network module expects a metadata descriptor in the data pointer")
+		// This error case should only ever be hit in tests.
+		if mod.skipMDS {
+			return fmt.Errorf("failed to get a metadata descriptor")
+		}
+		desc, err = metadata.New().Get(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get metadata descriptor: %v", err)
+		}
 	}
 
 	config := cfg.Retrieve()

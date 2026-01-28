@@ -96,6 +96,7 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 			errs = append(errs, err)
 		}
 	}
+	galog.Debugf("Finished cleaning up old/failed plugin states")
 	return noop, errors.Join(errs...)
 }
 

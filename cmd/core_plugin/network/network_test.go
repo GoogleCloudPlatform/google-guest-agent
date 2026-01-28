@@ -92,7 +92,7 @@ func TestInitFailure(t *testing.T) {
 				})
 			}
 
-			mod := &module{}
+			mod := &module{skipMDS: true}
 			if err := mod.setup(context.Background(), tc.mds); (err == nil) == tc.wantError {
 				t.Errorf("setup() returned error %v, want error %t", err, tc.wantError)
 			}
