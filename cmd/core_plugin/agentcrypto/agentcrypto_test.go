@@ -352,7 +352,7 @@ func TestShouldEnableMTLS(t *testing.T) {
 			name:   "defaults",
 			mds:    buildDescriptor(t, "", "", ""),
 			cfgVal: defCfg,
-			want:   false,
+			want:   true,
 		},
 		{
 			name:   "enable_from_cfg",
