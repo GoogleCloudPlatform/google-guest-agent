@@ -99,24 +99,26 @@ func NewConfigs(desc *metadata.Descriptor, config *cfg.Sections, ignore address.
 	}
 
 	// Initializes the VLAN interfaces and set them to their parent NIC.
-	for _, vlanSlice := range desc.Instance().VlanInterfaces() {
-		for _, vic := range vlanSlice {
-			parent, err := ethernet.VlanParentInterface(vic.ParentInterface())
-			if err != nil {
-				return nil, fmt.Errorf("failed to create VLAN config for VLAN (%d) %s: %w", vic.Vlan(), vic.MAC(), err)
-			}
+	if config.NetworkInterfaces.VlanSetupEnabled {
+		for _, vlanSlice := range desc.Instance().VlanInterfaces() {
+			for _, vic := range vlanSlice {
+				parent, err := ethernet.VlanParentInterface(vic.ParentInterface())
+				if err != nil {
+					return nil, fmt.Errorf("failed to create VLAN config for VLAN (%d) %s: %w", vic.Vlan(), vic.MAC(), err)
+				}
 
-			if parent < 0 || parent >= len(res) {
-				return nil, fmt.Errorf("VLAN interface's parent NIC (%d) is out of bounds", parent)
-			}
+				if parent < 0 || parent >= len(res) {
+					return nil, fmt.Errorf("VLAN interface's parent NIC (%d) is out of bounds", parent)
+				}
 
-			parentConfig := res[parent]
-			data, err := ethernet.NewVlanInterface(vic, parentConfig.Interface)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create VLAN config for VLAN (%d) %s: %w", vic.Vlan(), vic.MAC(), err)
-			}
+				parentConfig := res[parent]
+				data, err := ethernet.NewVlanInterface(vic, parentConfig.Interface)
+				if err != nil {
+					return nil, fmt.Errorf("failed to create VLAN config for VLAN (%d) %s: %w", vic.Vlan(), vic.MAC(), err)
+				}
 
-			parentConfig.VlanInterfaces = append(parentConfig.VlanInterfaces, data)
+				parentConfig.VlanInterfaces = append(parentConfig.VlanInterfaces, data)
+			}
 		}
 	}
 

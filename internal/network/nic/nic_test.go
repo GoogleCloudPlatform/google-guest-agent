@@ -170,11 +170,12 @@ func TestNewConfig(t *testing.T) {
 
 func TestNewConfigs(t *testing.T) {
 	tests := []struct {
-		name          string
-		mdsJSON       string
-		nicsDontExist bool
-		supportsIPv6  bool
-		wantError     bool
+		name             string
+		mdsJSON          string
+		nicsDontExist    bool
+		supportsIPv6     bool
+		disableVlanSetup bool
+		wantError        bool
 	}{
 		{
 			name:          "fail-nics-dont-exist",
@@ -314,6 +315,39 @@ func TestNewConfigs(t *testing.T) {
 				}
 			}`,
 		},
+		{
+			name:             "success-vlan-setup-disabled",
+			wantError:        false,
+			disableVlanSetup: true,
+			supportsIPv6:     true,
+			mdsJSON: `
+			{
+				"instance":  {
+					"networkInterfaces": [
+						{
+							"MAC": "00:00:5e:00:53:01",
+							"DHCPv6Refresh": "not-empty"
+						}
+					],
+					"vlanNetworkInterfaces":
+						{
+							"0": {
+								"10": {
+									"parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+									"VLAN": 10,
+									"MAC": "00:00:5e:00:53:01",
+									"IP": "10.0.0.1",
+									"IPv6": [
+										"2001:db8:a0b:12f0::1"
+									],
+									"Gateway": "10.0.0.1",
+									"GatewayIPv6": "2001:db8:a0b:12f0::1"
+								}
+							}
+						}
+				}
+			}`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -323,6 +357,7 @@ func TestNewConfigs(t *testing.T) {
 				NetworkInterfaces: &cfg.NetworkInterfaces{
 					ManagePrimaryNIC: true,
 					IPForwarding:     false,
+					VlanSetupEnabled: !tc.disableVlanSetup,
 				},
 			}
 

@@ -412,6 +412,7 @@ type NetworkInterfaces struct {
 	IPForwarding                 bool   `ini:"ip_forwarding,omitempty"`
 	Setup                        bool   `ini:"setup,omitempty"`
 	ManagePrimaryNIC             bool   `ini:"manage_primary_nic,omitempty"`
+	VlanSetupEnabled             bool   `ini:"vlan_setup_enabled,omitempty"`
 	RestoreDebian12NetplanConfig bool   `ini:"restore_debian12_netplan_config,omitempty"`
 }
 
@@ -448,7 +449,6 @@ type Unstable struct {
 	// On Windows, members of Administrators can access the pipe using [ggactl].
 	CommandPipeMode  string `ini:"command_pipe_mode,omitempty"`
 	CommandPipeGroup string `ini:"command_pipe_group,omitempty"`
-	VlanSetupEnabled bool   `ini:"vlan_setup_enabled,omitempty"`
 	SystemdConfigDir string `ini:"systemd_config_dir,omitempty"`
 
 	SetHostname               bool   `ini:"set_hostname,omitempty"`

@@ -1292,6 +1292,7 @@ func TestRemoveVlanInterfaces(t *testing.T) {
 				IPForwarding: &cfg.IPForwarding{},
 				NetworkInterfaces: &cfg.NetworkInterfaces{
 					ManagePrimaryNIC: true,
+					VlanSetupEnabled: true,
 				},
 			}
 
@@ -1513,6 +1514,7 @@ func TestSetupVlanInterfaces(t *testing.T) {
 				IPForwarding: &cfg.IPForwarding{},
 				NetworkInterfaces: &cfg.NetworkInterfaces{
 					ManagePrimaryNIC: true,
+					VlanSetupEnabled: true,
 				},
 			}
 
