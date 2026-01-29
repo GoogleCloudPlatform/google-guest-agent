@@ -48,7 +48,7 @@ var (
 	// modules are registered so the well crafted slice here.
 	modsFcs = []stages.ModuleFc{
 		firstboot.NewEarlyModule,
-		network.NewModule,
+		network.NewEarlyModule,
 		iosched.NewModule,
 		agentcrypto.NewModule,
 	}

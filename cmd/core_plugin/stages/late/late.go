@@ -29,6 +29,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/firstboot"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/metadatasshkey"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/hostname"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/oslogin"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/platscript"
@@ -61,6 +62,8 @@ var (
 		firstboot.NewModule,
 		hostname.NewModule,
 		metadatasshkey.NewModule,
+		// Network subsystem exports 2 modules hence the naming inconsistency.
+		network.NewLateModule,
 		oslogin.NewModule,
 		platscript.NewModule,
 		snapshot.NewModule,
