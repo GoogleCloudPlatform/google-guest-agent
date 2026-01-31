@@ -27,11 +27,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
 	"os"
+	"time"
 
+	"github.com/GoogleCloudPlatform/galog"
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 	"google.golang.org/grpc"
 )
@@ -61,6 +64,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to remove %q: %v\n", address, err)
 			os.Exit(1)
 		}
+	}
+
+	if logfile != "" {
+		galog.RegisterBackend(context.Background(), galog.NewFileBackend(logfile))
+		defer galog.Shutdown(time.Second * 5)
 	}
 
 	listener, err := net.Listen(protocol, address)

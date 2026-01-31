@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 
+	"github.com/GoogleCloudPlatform/galog"
 	"google.golang.org/grpc"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
@@ -33,6 +34,7 @@ type PluginServer struct {
 // between Plugin and the server itself. For e.g. service might want to update
 // plugin config to enable/disable feature here plugins can react to such requests.
 func (ps *PluginServer) Apply(ctx context.Context, msg *pb.ApplyRequest) (*pb.ApplyResponse, error) {
+	galog.Infof("Received apply request: %+v", msg)
 	return &pb.ApplyResponse{}, nil
 }
 
@@ -40,6 +42,7 @@ func (ps *PluginServer) Apply(ctx context.Context, msg *pb.ApplyRequest) (*pb.Ap
 // Until plugin receives Start request plugin is expected to be not functioning
 // and just listening on the address handed off waiting for the request.
 func (ps *PluginServer) Start(ctx context.Context, msg *pb.StartRequest) (*pb.StartResponse, error) {
+	galog.Infof("Received start request: %+v", msg)
 	return &pb.StartResponse{}, nil
 }
 
@@ -48,6 +51,7 @@ func (ps *PluginServer) Start(ctx context.Context, msg *pb.StartRequest) (*pb.St
 // For e.g. if plugins want to stop some task it was performing or remove some
 // state before exiting it can be done on this request.
 func (ps *PluginServer) Stop(ctx context.Context, msg *pb.StopRequest) (*pb.StopResponse, error) {
+	galog.Infof("Received stop request: %+v", msg)
 	return &pb.StopResponse{}, nil
 }
 
@@ -57,5 +61,6 @@ func (ps *PluginServer) Stop(ctx context.Context, msg *pb.StopRequest) (*pb.Stop
 // plugins detect some non-fatal errors causing it unable to offer some features
 // it can reported in status which is sent back to the service by agent.
 func (ps *PluginServer) GetStatus(ctx context.Context, msg *pb.GetStatusRequest) (*pb.Status, error) {
+	galog.Infof("Received get status request: %+v", msg)
 	return &pb.Status{Code: 0, Results: []string{"Plugin is running ok"}}, nil
 }

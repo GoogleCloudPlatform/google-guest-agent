@@ -156,23 +156,57 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		fmt.Print("Enter command(install, remove or list): ")
+		fmt.Print("Enter command(install, remove, apply <text_config>, or list): ")
 		text, err := reader.ReadString('\n')
 		if err != nil {
 			galog.Fatalf("Failed to read command: %v", err)
 		}
 
 		text = strings.TrimSpace(text)
-		switch text {
+		inputs := strings.Split(text, " ")
+		var config string
+		if len(inputs) == 2 {
+			config = inputs[1]
+		}
+
+		switch inputs[0] {
 		case "install":
 			install(s, url, cksum)
 		case "remove":
 			remove(s)
 		case "list":
 			list(s)
+		case "apply":
+			apply(s, config)
 		default:
 			fmt.Println("Unknown command:", text)
 		}
+	}
+}
+
+func apply(s *testserver.Server, config string) {
+	req := &acmpb.ConfigurePluginStates{
+		ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{
+			&acmpb.ConfigurePluginStates_ConfigurePlugin{
+				Action: acmpb.ConfigurePluginStates_APPLY,
+				Plugin: &acmpb.ConfigurePluginStates_Plugin{
+					Name:       "test_plugin",
+					RevisionId: "1",
+				},
+				Manifest: &acmpb.ConfigurePluginStates_Manifest{
+					Config: &acmpb.ConfigurePluginStates_Manifest_StringConfig{StringConfig: config},
+				},
+			},
+		},
+	}
+
+	if config == "" {
+		req.GetConfigurePlugins()[0].GetManifest().Config = nil
+	}
+
+	labels := map[string]string{"message_type": "agent_controlplane.ConfigurePluginStates"}
+	if err := s.SendToAgent(req, labels); err != nil {
+		galog.Errorf("Failed to send ConfigurePluginStates apply request: %v", err)
 	}
 }
 
