@@ -1409,13 +1409,14 @@ func TestApplyConfig(t *testing.T) {
 	pluginManager = pm
 
 	tests := []struct {
-		name         string
-		plugin       string
-		config       string
-		wantErr      bool
-		wantCTR      int
-		wantHash     string
-		wantRelaunch bool
+		name              string
+		plugin            string
+		config            string
+		wantErr           bool
+		wantCTR           int
+		wantHash          string
+		wantRelaunch      bool
+		nonExistentplugin bool
 	}{
 		{
 			name:     "success",
@@ -1423,6 +1424,12 @@ func TestApplyConfig(t *testing.T) {
 			config:   "success",
 			wantCTR:  1,
 			wantHash: computeHash("success"),
+		},
+		{
+			name:     "success_no_config",
+			plugin:   "PluginA",
+			wantCTR:  1,
+			wantHash: "",
 		},
 		{
 			name:     "apply_fails",
@@ -1442,11 +1449,12 @@ func TestApplyConfig(t *testing.T) {
 			wantRelaunch: true,
 		},
 		{
-			name:    "plugin_not_found",
-			plugin:  "PluginB",
-			config:  "nopluginfound",
-			wantErr: true,
-			wantCTR: 0,
+			name:              "plugin_not_found",
+			plugin:            "PluginB",
+			config:            "nopluginfound",
+			wantErr:           true,
+			wantCTR:           0,
+			nonExistentplugin: true,
 		},
 	}
 
@@ -1470,24 +1478,24 @@ func TestApplyConfig(t *testing.T) {
 				t.Errorf("applyConfig(ctx, %s) = %d, want %d", tc.name, ps.ctrs[tc.config], tc.wantCTR)
 			}
 
-			if tc.wantHash == "" {
-				return
-			}
-
-			if plugin.Manifest.startConfigHash != tc.wantHash {
-				t.Errorf("applyConfig(ctx, %s) did not reset start config hash, got %q, want %q", tc.name, plugin.Manifest.startConfigHash, tc.wantHash)
-			}
-
 			pluginMap, err := load(infoDir)
 			if err != nil {
 				t.Fatalf("load(%s) failed unexpectedly with error: %v", infoDir, err)
 			}
 
-			if got := pluginMap[tc.plugin].Manifest.StartConfig.Simple; got != tc.config {
-				t.Errorf("applyConfig(ctx, %s) did not update plugin state file with new config, got %q, want %q", tc.name, got, tc.config)
+			if tc.nonExistentplugin {
+				if p, ok := pluginMap[tc.plugin]; ok {
+					t.Errorf("non-existing plugin %+v was added to the plugin state after applyConfig", p)
+				}
+			} else {
+				if plugin.Manifest.startConfigHash != tc.wantHash {
+					t.Errorf("applyConfig(ctx, %s) did not reset start config hash, got %q, want %q", tc.name, plugin.Manifest.startConfigHash, tc.wantHash)
+				}
+				if got := pluginMap[tc.plugin].Manifest.StartConfig.Simple; got != tc.config {
+					t.Errorf("applyConfig(ctx, %s) did not update plugin state file with new config, got %q, want %q", tc.name, got, tc.config)
+				}
+				validatePluginRelaunched(t, tc.wantRelaunch, plugin, tr, ps)
 			}
-
-			validatePluginRelaunched(t, tc.wantRelaunch, plugin, tr, ps)
 		})
 	}
 }
@@ -1513,5 +1521,62 @@ func validatePluginRelaunched(t *testing.T, wantRelaunch bool, plugin *Plugin, t
 		if startReq != nil {
 			t.Errorf("applyConfig for %s attempted to start plugin with new config, got %v, want nil", plugin.FullName(), startReq)
 		}
+	}
+}
+
+func TestSetConfig(t *testing.T) {
+	structCfg := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"name": structpb.NewStringValue("plugin-config"),
+		},
+	}
+	structBytes, err := proto.Marshal(structCfg)
+	if err != nil {
+		t.Fatalf("Failed to marshal struct config: %v", err)
+	}
+
+	testCases := []struct {
+		name string
+		req  *acpb.ConfigurePluginStates_ConfigurePlugin
+		want *ServiceConfig
+	}{
+		{
+			name: "nil-config",
+			req: &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Manifest: &acpb.ConfigurePluginStates_Manifest{},
+			},
+			want: &ServiceConfig{},
+		},
+		{
+			name: "string-config",
+			req: &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Manifest: &acpb.ConfigurePluginStates_Manifest{
+					Config: &acpb.ConfigurePluginStates_Manifest_StringConfig{StringConfig: "test-config"},
+				},
+			},
+			want: &ServiceConfig{Simple: "test-config"},
+		},
+		{
+			name: "struct-config",
+			req: &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Manifest: &acpb.ConfigurePluginStates_Manifest{
+					Config: &acpb.ConfigurePluginStates_Manifest_StructConfig{StructConfig: structCfg},
+				},
+			},
+			want: &ServiceConfig{Structured: structBytes},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := &Manifest{}
+			err := setConfig(manifest, tc.req)
+			if err != nil {
+				t.Errorf("setConfig(%v) returned unexpected error: %v", tc.req, err)
+			}
+			if diff := cmp.Diff(tc.want, manifest.StartConfig); diff != "" {
+				t.Errorf("setConfig(%v) returned diff (-want +got):\n%s", tc.req, diff)
+			}
+		})
 	}
 }

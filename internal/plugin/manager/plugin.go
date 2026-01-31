@@ -292,6 +292,7 @@ func (p *Plugin) configHash() string {
 	defer p.Manifest.startConfigMu.Unlock()
 
 	if p.Manifest.startConfigHash != "" || p.Manifest.StartConfig == nil {
+		galog.V(2).Debugf("Returning cached start config hash or start config is nil for plugin %q, hash: %q", p.FullName(), p.Manifest.startConfigHash)
 		return p.Manifest.startConfigHash
 	}
 
@@ -305,6 +306,7 @@ func (p *Plugin) configHash() string {
 		data = p.Manifest.StartConfig.Structured
 		galog.Debugf("Computing start config hash from structured config for plugin %q", p.FullName())
 	} else {
+		galog.Debugf("Start config is empty for plugin %q, skipping hash computation", p.FullName())
 		return ""
 	}
 

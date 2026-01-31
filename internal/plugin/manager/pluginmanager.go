@@ -493,15 +493,17 @@ func (p *Plugin) setMetricConfig(req *acpb.ConfigurePluginStates_ConfigurePlugin
 }
 
 func setConfig(manifest *Manifest, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
+	manifest.StartConfig = &ServiceConfig{}
+
 	// If no config is provided, return early.
 	if req.GetManifest().Config == nil {
+		galog.Infof("No config provided for plugin %q, setting empty config", req.GetPlugin().GetName())
 		return nil
 	}
 
-	manifest.StartConfig = &ServiceConfig{}
-
 	switch req.GetManifest().Config.(type) {
 	case *acpb.ConfigurePluginStates_Manifest_StringConfig:
+		galog.Infof("Setting string config for plugin %q", req.GetPlugin().GetName())
 		manifest.StartConfig.Simple = req.GetManifest().GetStringConfig()
 	case *acpb.ConfigurePluginStates_Manifest_StructConfig:
 		// Marshal the service config to a byte array to persist it on disk. This
@@ -510,6 +512,7 @@ func setConfig(manifest *Manifest, req *acpb.ConfigurePluginStates_ConfigurePlug
 		if err != nil {
 			return fmt.Errorf("unable to marshal service config: %w", err)
 		}
+		galog.Infof("Setting structured config for plugin %q", req.GetPlugin().GetName())
 		manifest.StartConfig.Structured = bytes
 	}
 	return nil
@@ -729,7 +732,9 @@ func (m *PluginManager) applyConfig(ctx context.Context, req *acpb.ConfigurePlug
 	}
 
 	// Reset start config hash.
+	p.Manifest.startConfigMu.Lock()
 	p.Manifest.startConfigHash = ""
+	p.Manifest.startConfigMu.Unlock()
 	p.configHash()
 
 	_, status := p.Apply(ctx, p.Manifest.StartConfig)
