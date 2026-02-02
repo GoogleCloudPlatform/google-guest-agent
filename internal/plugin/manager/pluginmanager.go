@@ -204,7 +204,7 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 
 	// Subscribe to cleanup event. This needs to happen after plugin manager is
 	// initialized, or we may accidentally cleanup plugins that shouldn't be removed.
-	scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(pluginManager)}, false)
+	// scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(pluginManager)}, false)
 
 	if err := RegisterCmdHandler(ctx); err != nil {
 		return nil, fmt.Errorf("failed to register plugin command handler: %w", err)
