@@ -22,8 +22,10 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"unsafe"
 
@@ -58,6 +60,52 @@ var (
 	defaultCredsDir = filepath.Join(os.Getenv("ProgramData"), "Google", "Compute Engine")
 	prevCtx         *windows.CertContext
 )
+
+// cleanupCreds cleans up the credentials directory. This is done to ensure
+// that any stale credentials are removed.
+func cleanupCreds(ctx context.Context, credsDir string) {
+	removeFromStore := map[string]string{
+		rootCACertFileName:  root,
+		clientCredsFileName: my,
+	}
+
+	removeFiles := append([]string{pfxFile}, slices.Collect(maps.Keys(removeFromStore))...)
+
+	for f, store := range removeFromStore {
+		fp := filepath.Join(credsDir, f)
+		if !file.Exists(fp, file.TypeFile) {
+			galog.Debugf("File %q does not exist, skipping cleanup.", fp)
+			continue
+		}
+
+		galog.Infof("Removing MDS credential %q from store %q", fp, store)
+		num, err := serialNumber(fp)
+		if err != nil {
+			galog.Warnf("Failed to get serial number for file %q, error: %v", fp, err)
+			continue
+		}
+
+		certCtx, err := findCert(store, certificateIssuer, num)
+		if err != nil {
+			galog.Warnf("Failed to find previous certificate with error: %v", err)
+			continue
+		}
+		if err := deleteCert(certCtx, store); err != nil {
+			galog.Warnf("Failed to delete previous certificate(%s) from store %s with error: %v", num, store, err)
+		}
+	}
+
+	for _, f := range removeFiles {
+		fp := filepath.Join(credsDir, f)
+		if !file.Exists(fp, file.TypeFile) {
+			galog.Debugf("File %q does not exist, skipping cleanup.", fp)
+			continue
+		}
+		if err := os.Remove(fp); err != nil {
+			galog.Warnf("Failed to remove file %q, error: %v", fp, err)
+		}
+	}
+}
 
 // writeRootCACert writes Root CA cert from UEFI variable to output file.
 func (j *CredsJob) writeRootCACert(ctx context.Context, cacert []byte, outputFile string) error {

@@ -52,6 +52,22 @@ var (
 	}
 )
 
+// cleanupCreds cleans up the credentials directory. This is done to ensure
+// that any stale credentials are removed.
+func cleanupCreds(ctx context.Context, credsDir string) {
+	if !file.Exists(credsDir, file.TypeDir) {
+		galog.Debugf("Credentials directory %q does not exist, skipping cleanup.", credsDir)
+		return
+	}
+
+	updateSystemStore(ctx, filepath.Join(credsDir, rootCACertFileName), false)
+
+	galog.Infof("Cleaning up MDS credentials directory: %q", credsDir)
+	if err := os.RemoveAll(credsDir); err != nil {
+		galog.Warnf("Failed to clean up credentials directory: %v", err)
+	}
+}
+
 // writeRootCACert writes Root CA cert from UEFI variable to output file.
 func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFile string) error {
 	galog.Debugf("Writing root CA cert to %q", outputFile)
@@ -68,8 +84,8 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFi
 	}
 
 	// Best effort to update system store, don't fail.
-	if err := updateSystemStore(ctx, outputFile); err != nil {
-		galog.Warnf("Failed add Root MDS cert to system trust store with error: %v", err)
+	if err := updateSystemStore(ctx, outputFile, true); err != nil {
+		galog.Warnf("Failed to add Root MDS cert to system trust store with error: %v", err)
 	}
 
 	return nil
@@ -127,8 +143,12 @@ func certificateDirFromUpdater(updater string) (string, error) {
 }
 
 // updateSystemStore updates the local system store with the cert.
-func updateSystemStore(ctx context.Context, cert string) error {
-	galog.Infof("Updating local system store with the cert %q", cert)
+func updateSystemStore(ctx context.Context, cert string, add bool) error {
+	action := "add"
+	if !add {
+		action = "remove"
+	}
+	galog.Infof("Performing %q action for cert %q on local system store.", action, cert)
 
 	cmd, err := getCAStoreUpdater()
 	if err != nil {
@@ -142,8 +162,18 @@ func updateSystemStore(ctx context.Context, cert string) error {
 
 	dest := filepath.Join(dir, filepath.Base(cert))
 
-	if err := file.CopyFile(ctx, cert, dest, file.Options{Perm: 0644}); err != nil {
-		return err
+	if add {
+		if err := file.CopyFile(ctx, cert, dest, file.Options{Perm: 0644}); err != nil {
+			return err
+		}
+	} else {
+		if !file.Exists(dest, file.TypeFile) {
+			galog.Debugf("Certificate %q not found in system store, skipping removal.", dest)
+			return nil
+		}
+		if err := os.Remove(dest); err != nil {
+			return fmt.Errorf("failed to remove certificate %q from system store: %w", dest, err)
+		}
 	}
 
 	opts := run.Options{Name: cmd, OutputType: run.OutputStdout}
@@ -152,6 +182,6 @@ func updateSystemStore(ctx context.Context, cert string) error {
 		return fmt.Errorf("command %q failed with error: %w", cmd, err)
 	}
 
-	galog.Infof("Successfully added certificate %q to local system store: %s", cert, res.Output)
+	galog.Infof("Successfully updated local system store for %q: %s", cert, res.Output)
 	return nil
 }

@@ -38,7 +38,7 @@ const (
 
 // NewModule returns agentcrypto early initialization module.
 func NewModule(_ context.Context) *manager.Module {
-	handler := &moduleHandler{metadata: metadata.New()}
+	handler := &moduleHandler{metadata: metadata.New(), credsDir: defaultCredsDir}
 	return &manager.Module{
 		ID:          moduleID,
 		BlockSetup:  handler.setup,
@@ -50,12 +50,18 @@ func NewModule(_ context.Context) *manager.Module {
 type moduleHandler struct {
 	metadata       metadata.MDSClientInterface
 	failedPrevious atomic.Bool
+	credsDir       string
 }
 
 // setup is the early initialization function for agentcrypto module.
 func (m *moduleHandler) setup(ctx context.Context, _ any) error {
 	galog.Debugf("Initializing %s module", moduleID)
 	mds, err := m.metadata.Get(ctx)
+
+	// If MDS mTLS is not enabled it ensures if any previous stale credentials
+	// are present they are cleared. If MDS mTLS is enabled, the credentials will
+	// anyways be generated in eventCallback.
+	cleanupCreds(ctx, m.credsDir)
 
 	// Schedules jobs that need to be started before notifying systemd Agent
 	// process has started.

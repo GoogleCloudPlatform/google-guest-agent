@@ -17,12 +17,16 @@ package agentcrypto
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 func TestNewModule(t *testing.T) {
@@ -534,18 +538,56 @@ func TestSetup(t *testing.T) {
 	}
 
 	desc := buildDescriptor(t, "false", "", instanceHTTPSTemplate)
-	m := &moduleHandler{metadata: &MDSClient{desc: desc}}
+	credsDir := t.TempDir()
+	m := &moduleHandler{metadata: &MDSClient{desc: desc}, credsDir: credsDir}
 	ctx := context.Background()
 
 	t.Cleanup(scheduler.Instance().Stop)
 
+	files := []string{rootCACertFileName, clientCredsFileName}
+	var presentAfterCleanup []string
+
+	if runtime.GOOS == "windows" {
+		files = append(files, "mds-mtls-client.key.pfx")
+		presentAfterCleanup = []string{"other_file"}
+	}
+
+	credsExist := func() bool {
+		if runtime.GOOS == "linux" {
+			return file.Exists(credsDir, file.TypeDir)
+		}
+
+		for _, f := range files {
+			if file.Exists(filepath.Join(credsDir, f), file.TypeFile) {
+				t.Logf("File %q exists", filepath.Join(credsDir, f))
+				return true
+			}
+		}
+		return false
+	}
+
+	createCreds := func() {
+		for _, f := range files {
+			if err := os.WriteFile(filepath.Join(credsDir, f), []byte("test"), 0644); err != nil {
+				t.Fatalf("os.WriteFile() failed unexpectedly with error: %v", err)
+			}
+		}
+		for _, f := range presentAfterCleanup {
+			if err := os.WriteFile(filepath.Join(credsDir, f), []byte("test"), 0644); err != nil {
+				t.Fatalf("os.WriteFile() failed unexpectedly with error: %v", err)
+			}
+		}
+	}
+
 	tests := []struct {
 		name        string
 		overrideKey string
+		credsExist  bool
 	}{
 		{
 			name:        "success",
 			overrideKey: "succeed",
+			credsExist:  true,
 		},
 		{
 			name:        "error",
@@ -556,11 +598,23 @@ func TestSetup(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx = context.WithValue(ctx, MDSOverride, tc.overrideKey)
+			if tc.credsExist {
+				createCreds()
+			}
+
 			if err := m.setup(ctx, nil); err != nil {
 				t.Errorf("Setup() failed unexpectedly with error: %v", err)
 			}
 			if !events.FetchManager().IsSubscribed(metadata.LongpollEvent, moduleID) {
 				t.Errorf("Setup() did not subscribe to longpoll event")
+			}
+			if credsExist() {
+				t.Errorf("Setup() did not clean up credentials directory: %q", credsDir)
+			}
+			for _, f := range presentAfterCleanup {
+				if !file.Exists(filepath.Join(credsDir, f), file.TypeFile) {
+					t.Errorf("Setup() did not preserve file: %q", f)
+				}
 			}
 		})
 	}
