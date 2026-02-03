@@ -16,9 +16,13 @@ package networkd
 
 import (
 	"testing"
+
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 func TestDefaultModule(t *testing.T) {
+	cfg.Load(nil)
+
 	mod := DefaultModule()
 	if mod.priority != defaultSystemdNetworkdPriority {
 		t.Errorf("defaultModule() priority = %d, want %d", mod.priority, defaultSystemdNetworkdPriority)

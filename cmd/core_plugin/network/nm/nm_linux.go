@@ -49,6 +49,11 @@ func NewService() *service.Handle {
 	}
 }
 
+// Configure configures the NetworkManager service. This is currently no-op.
+func (sn *serviceNetworkManager) Configure(ctx context.Context) error {
+	return nil
+}
+
 // IsManaging returns true if the service is managing the network interface.
 func (sn *serviceNetworkManager) IsManaging(ctx context.Context, opts *service.Options) (bool, error) {
 	galog.Debugf("Checking if NetworkManager is managing the network interfaces.")

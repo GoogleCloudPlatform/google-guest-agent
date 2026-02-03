@@ -35,6 +35,10 @@ type Handle struct {
 	// ID is the the network manager identifier.
 	ID string
 
+	// Configure allows the network manager to adjust its configuration based on
+	// the guest agent configuration.
+	Configure func(context.Context) error
+
 	// IsManaging checks whether this network manager service is managing the
 	// network interfaces.
 	IsManaging func(context.Context, *Options) (bool, error)

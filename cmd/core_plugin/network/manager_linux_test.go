@@ -223,6 +223,9 @@ func TestRunManagerSetup(t *testing.T) {
 				[]*service.Handle{
 					{
 						ID: "manager-1",
+						Configure: func(ctx context.Context) error {
+							return nil
+						},
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
@@ -250,6 +253,9 @@ func TestRunManagerSetup(t *testing.T) {
 			opts: service.NewOptions([]*service.Handle{
 				{
 					ID: "manager-1",
+					Configure: func(ctx context.Context) error {
+						return nil
+					},
 					IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 						return true, nil
 					},
@@ -269,6 +275,9 @@ func TestRunManagerSetup(t *testing.T) {
 				[]*service.Handle{
 					{
 						ID: "manager-1",
+						Configure: func(ctx context.Context) error {
+							return nil
+						},
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, errors.New("error")
 						},
@@ -297,6 +306,9 @@ func TestRunManagerSetup(t *testing.T) {
 				[]*service.Handle{
 					{
 						ID: "manager-1",
+						Configure: func(ctx context.Context) error {
+							return nil
+						},
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
@@ -309,6 +321,9 @@ func TestRunManagerSetup(t *testing.T) {
 					},
 					{
 						ID: "manager-2",
+						Configure: func(ctx context.Context) error {
+							return nil
+						},
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return false, nil
 						},
@@ -333,6 +348,9 @@ func TestRunManagerSetup(t *testing.T) {
 				[]*service.Handle{
 					{
 						ID: "manager-1",
+						Configure: func(ctx context.Context) error {
+							return nil
+						},
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
@@ -356,11 +374,45 @@ func TestRunManagerSetup(t *testing.T) {
 			wantError: true,
 		},
 		{
+			name: "error-configure",
+			opts: service.NewOptions(
+				[]*service.Handle{
+					{
+						ID: "manager-1",
+						Configure: func(ctx context.Context) error {
+							return errors.New("error")
+						},
+						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
+							return true, nil
+						},
+						Setup: func(ctx context.Context, opts *service.Options) error {
+							return nil
+						},
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
+							return nil
+						},
+					},
+				},
+				[]*nic.Configuration{
+					{
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "eth0" },
+						},
+						Index: 1,
+					},
+				},
+			),
+			wantError: true,
+		},
+		{
 			name: "success",
 			opts: service.NewOptions(
 				[]*service.Handle{
 					{
 						ID: "manager-1",
+						Configure: func(ctx context.Context) error {
+							return nil
+						},
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
@@ -412,6 +464,9 @@ func TestManagerSetup(t *testing.T) {
 				[]*service.Handle{
 					{
 						ID: "manager-1",
+						Configure: func(ctx context.Context) error {
+							return nil
+						},
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},

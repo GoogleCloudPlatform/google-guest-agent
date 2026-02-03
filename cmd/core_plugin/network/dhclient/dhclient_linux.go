@@ -114,6 +114,11 @@ func NewService() *service.Handle {
 	}
 }
 
+// Configure configures the dhclient service. This is currently no-op.
+func (ds *dhclientService) Configure(ctx context.Context) error {
+	return nil
+}
+
 // IsManaging checks whether dhclient managing the network interfaces.
 func (ds *dhclientService) IsManaging(_ context.Context, _ *service.Options) (bool, error) {
 	return dhclientInstalled()

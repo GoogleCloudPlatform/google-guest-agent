@@ -83,6 +83,11 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 		return fmt.Errorf("failed to get active manager: %w", err)
 	}
 
+	// Configure the active manager.
+	if err := active.Configure(ctx); err != nil {
+		return fmt.Errorf("failed to configure active manager(%q): %w", active.ID, err)
+	}
+
 	// Attempt to rollback the configuration of all the managers except the active
 	// one. As it's a non-fatal error we log it and proceed with the setup.
 	rolledBack, err := rollback(ctx, managers, active.ID, opts)

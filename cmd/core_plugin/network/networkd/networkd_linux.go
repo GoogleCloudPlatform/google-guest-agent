@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
@@ -57,6 +58,17 @@ func NewService() *service.Handle {
 // ID returns the service ID.
 func (sn *Module) ID() string {
 	return ServiceID
+}
+
+// Configure configures the systemd-networkd service. This updates the config
+// directory based on the guest agent configuration.
+func (sn *Module) Configure(ctx context.Context) error {
+	configDir := cfg.Retrieve().Unstable.SystemdConfigDir
+	if configDir != "" {
+		// Ignore empty config directory.
+		sn.configDir = configDir
+	}
+	return nil
 }
 
 // IsManaging is the module's implementation of service.IsManaging and checks

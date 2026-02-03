@@ -46,6 +46,7 @@ var (
 // NewService returns a new netplan service handler.
 func NewService() *service.Handle {
 	mod := defaultModule()
+
 	return &service.Handle{
 		ID:         serviceID,
 		IsManaging: mod.IsManaging,
@@ -62,6 +63,11 @@ func isUbuntu1804() bool {
 		return true
 	}
 	return false
+}
+
+// Configure configures the netplan service. This is currently no-op.
+func (sn *serviceNetplan) Configure(ctx context.Context) error {
+	return nil
 }
 
 // IsManaging returns true if the netplan service is managing the network

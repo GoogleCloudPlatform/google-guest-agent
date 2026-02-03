@@ -249,6 +249,40 @@ func TestNewService(t *testing.T) {
 	}
 }
 
+func TestConfigure(t *testing.T) {
+	tests := []struct {
+		name        string
+		dir         string
+		expectedDir string
+	}{
+		{
+			name:        "default",
+			expectedDir: DefaultConfigDir,
+		},
+		{
+			name:        "custom",
+			dir:         "/test/dir",
+			expectedDir: "/test/dir",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg.Load(nil)
+
+			if tc.dir != "" {
+				cfg.Retrieve().Unstable.SystemdConfigDir = tc.dir
+			}
+			mod := DefaultModule()
+			mod.Configure(context.Background())
+
+			if mod.configDir != tc.expectedDir {
+				t.Errorf("defaultModule() configDir = %s, want %s", mod.configDir, tc.expectedDir)
+			}
+		})
+	}
+}
+
 // TestSystemdNetworkdIsManaging tests whether IsManaging behaves correctly given some
 // mock environment setup.
 func TestSystemdNetworkdIsManaging(t *testing.T) {
