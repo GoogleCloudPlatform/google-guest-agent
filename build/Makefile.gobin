@@ -2,7 +2,8 @@ PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
 	internal/acp/proto/agent_controlplane.pb.go \
-	cmd/core_plugin/workloadcertrefresh/proto/workload_identity.pb.go
+	cmd/core_plugin/workloadcertrefresh/proto/workload_identity.pb.go \
+	pkg/proto/plugin_comm.pb.go
 
 GO_BINARIES = \
 	cmd/core_plugin/core_plugin \
@@ -57,15 +58,6 @@ $(PBGO_FILES): fetch-go-tpm-tools fetch-mwlid-proto
 	$(Q)protoc --go_out=$(dir $(@)) --go-grpc_out=$(dir $(@)) --proto_path=proto_deps \
 		--experimental_allow_proto3_optional --proto_path=$(dir $(@)) $(M_FLAG) $(SOURCE)
 
-PLUGIN_PROTO = pkg/proto/plugin_comm.proto
-
-pkg/proto/plugin_comm/plugin_comm.pb.go: $(PLUGIN_PROTO)
-	$(Q)echo "Building plugin_comm.proto..."
-	$(Q)protoc --go_out=$(dir $(PLUGIN_PROTO)) --go-grpc_out=$(dir $(PLUGIN_PROTO)) \
-		--experimental_allow_proto3_optional \
-		--proto_path=$(dir $(PLUGIN_PROTO)) \
-		$(PLUGIN_PROTO)
-
 print-go-env:
 	$(Q)echo "golang build environment:"
 	$(Q)echo "#########################"
@@ -89,8 +81,10 @@ go-unit-tests: $(PBGO_FILES)
 	$(Q)echo "Artifacts written to: $(DEST)"
 
 clean-pbgo:
-	$(Q)echo "Cleaning up generated pb.go files..."
-	$(Q)rm -f $(PBGO_FILES)
+	$(Q)echo "Cleaning up all generated pb.go and _grpc.pb.go files..."
+	$(Q)find . -type f \( -name "*.pb.go" -o -name "*_grpc.pb.go" \) -not -path "./vendor/*" \
+		-exec echo "[CLEAN] {}" \; \
+		-delete
 	$(Q)rm -Rf proto_deps
 
 clean-go-binaries:
