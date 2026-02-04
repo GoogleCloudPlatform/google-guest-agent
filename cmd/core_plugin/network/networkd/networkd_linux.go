@@ -49,6 +49,7 @@ func NewService() *service.Handle {
 	mod := DefaultModule()
 	return &service.Handle{
 		ID:         ServiceID,
+		Configure:  mod.Configure,
 		IsManaging: mod.IsManaging,
 		Setup:      mod.Setup,
 		Rollback:   mod.Rollback,
@@ -64,8 +65,9 @@ func (sn *Module) ID() string {
 // directory based on the guest agent configuration.
 func (sn *Module) Configure(ctx context.Context) error {
 	configDir := cfg.Retrieve().Unstable.SystemdConfigDir
+	// Ignore empty config directory.
 	if configDir != "" {
-		// Ignore empty config directory.
+		galog.Debugf("Configuring systemd-networkd with config directory: %q", configDir)
 		sn.configDir = configDir
 	}
 	return nil

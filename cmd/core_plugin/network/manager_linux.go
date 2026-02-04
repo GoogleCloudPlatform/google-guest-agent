@@ -84,8 +84,13 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 	}
 
 	// Configure the active manager.
-	if err := active.Configure(ctx); err != nil {
-		return fmt.Errorf("failed to configure active manager(%q): %w", active.ID, err)
+	if active.Configure != nil {
+		galog.Debugf("Running pre-setup configuration for active manager %v", active.ID)
+		if err := active.Configure(ctx); err != nil {
+			return fmt.Errorf("failed to configure active manager(%q): %w", active.ID, err)
+		}
+	} else {
+		galog.Debugf("Active manager(%q) has nothing to configure.", active.ID)
 	}
 
 	// Attempt to rollback the configuration of all the managers except the active

@@ -65,11 +65,6 @@ func isUbuntu1804() bool {
 	return false
 }
 
-// Configure configures the netplan service. This is currently no-op.
-func (sn *serviceNetplan) Configure(ctx context.Context) error {
-	return nil
-}
-
 // IsManaging returns true if the netplan service is managing the network
 // configuration.
 func (sn *serviceNetplan) IsManaging(ctx context.Context, opts *service.Options) (bool, error) {
