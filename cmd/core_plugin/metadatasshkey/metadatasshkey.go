@@ -221,6 +221,7 @@ func findValidKeys(desc *metadata.Descriptor) userKeyMap {
 		// Parse the key and validate the user and key.
 		username, keycontent, err := ssh.GetUserKey(key)
 		if err != nil {
+			invalidKeys[key] = true
 			galog.Warnf("Incorrectly formatted key %q in metadata: %v.", key, err)
 			continue
 		}
