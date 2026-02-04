@@ -65,7 +65,7 @@ print-go-env:
 	$(Q)echo "  VERSION=$(VERSION)"
 	$(Q)echo "#########################"
 
-$(GO_BINARIES): print-go-env $(PBGO_FILES)
+$(GO_BINARIES): print-go-env
 	$(Q)echo "[BIN] $(@)"
 	$(Q)cd $(dir $(@)) && go build -o $(@F) -ldflags "-X main.version=$(VERSION)"
 
@@ -93,7 +93,7 @@ clean-go-binaries:
 
 # go-lint runs golint on all packages but ignores proto_deps as it contains
 # generated code and third party dependencies.
-go-lint: $(PBGO_FILES)
+go-lint: init-git $(PBGO_FILES) check-protos
 	$(Q)echo "Running golint..."
 	$(Q)go list ./... | grep -v proto_deps | xargs golint -set_exit_status
 	$(Q)echo "Running gofmt..."
@@ -101,5 +101,20 @@ go-lint: $(PBGO_FILES)
 		xargs gofmt -d
 	$(Q)echo "Running go vet..."
 	$(Q)go list ./... | grep -v proto_deps | xargs go vet --structtag=false
+
+init-git:
+	$(Q)echo "Initializing git repository..."
+	$(Q)git init && git add .
+	$(Q)git diff-index --quiet HEAD || git commit -m "Baseline"
+
+check-protos:
+	$(Q)echo "Checking for uncommitted proto changes..."
+	$(Q)if git status --porcelain | grep ".pb.go$$"; then \
+		echo "Error: The proto files above are out of sync. Re-generate them and commit the changes."; \
+		git --no-pager diff; \
+		exit 1; \
+	else \
+		echo "Proto files are clean."; \
+	fi
 
 PHONY += $(GO_BINARIES) $(PBGO_FILES)
