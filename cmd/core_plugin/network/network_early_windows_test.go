@@ -25,7 +25,7 @@ import (
 )
 
 func TestEarlyWindows(t *testing.T) {
-	if err := platformEarlyInit(context.Background(), nil); err != nil {
+	if err := platformEarlyInit(context.Background()); err != nil {
 		t.Errorf("platformEarlyInit() = %v, want nil", err)
 	}
 }
