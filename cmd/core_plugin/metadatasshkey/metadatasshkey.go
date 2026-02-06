@@ -122,18 +122,22 @@ func handleMetadataChange(ctx context.Context, evType string, data any, evData *
 func metadataSSHKeySetup(ctx context.Context, config *cfg.Sections, desc *metadata.Descriptor) (bool, []error) {
 	metadataSSHKeyMu.Lock()
 	defer metadataSSHKeyMu.Unlock()
+
 	if !metadataChanged(config, desc, lastUserKeyMap, lastEnabled) {
 		galog.V(2).Debugf("Metadata ssh key has no difference from enablement or keys on disk, nothing to do.")
 		return true, nil
 	}
+
 	enabled := enableMetadataSSHKey(config, desc)
 	lastEnabled = enabled
 	newKeys := findValidKeys(desc)
 	lastUserKeyMap = newKeys
+
 	if !enabled {
 		galog.Debugf("Accounts management is disabled or oslogin is enabled, disabling metadata ssh key.")
 		return false, deprovisionUnusedUsers(ctx, config, make(userKeyMap))
 	}
+
 	var errs []error
 	if !onetimePlatformSetupFinished.Load() {
 		galog.Debug("Setting platform configuration")
@@ -155,7 +159,6 @@ func addSystemUsers(ctx context.Context, config *cfg.Sections, newKeys userKeyMa
 		userAccount, err := ensureUserExists(ctx, username)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("giving up on ssh keys for %s, failed to find or create user: %v", username, err))
-			delete(newKeys, username)
 			continue
 		}
 
