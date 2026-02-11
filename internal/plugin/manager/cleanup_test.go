@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
@@ -73,7 +74,7 @@ func TestRetryFailedRemovals(t *testing.T) {
 	// plugin is cached in the plugin manager.
 	plugins := make(map[string]*Plugin)
 	for _, p := range []cleanupTestPlugin{runningPlugin} {
-		plugins[p.String()] = &Plugin{Name: p.name, Revision: p.revision, InstallPath: filepath.Join(pluginDir, p.String()), PluginType: PluginTypeDynamic}
+		plugins[p.String()] = &Plugin{Name: p.name, Revision: p.revision, InstallPath: filepath.Join(pluginDir, p.String()), Manifest: &Manifest{PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 	}
 	pm := &PluginManager{instanceID: "1234567890", plugins: plugins}
 

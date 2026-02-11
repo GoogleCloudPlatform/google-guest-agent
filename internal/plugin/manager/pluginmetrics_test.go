@@ -85,7 +85,7 @@ func TestPluginMetrics(t *testing.T) {
 	addr := filepath.Join(t.TempDir(), "A_12.sock")
 	startTestServer(t, ts, udsProtocol, addr)
 	// Uses random value for pid as collection is mocked and skipped if pid is 0.
-	p := &Plugin{Name: "A", Revision: "12", Address: addr, Protocol: udsProtocol, RuntimeInfo: &RuntimeInfo{status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING, metrics: boundedlist.New[Metric](2), Pid: 1234}}
+	p := &Plugin{Name: "A", Revision: "12", Address: addr, Protocol: udsProtocol, RuntimeInfo: &RuntimeInfo{status: acpb.CurrentPluginStates_RUNNING, metrics: boundedlist.New[Metric](2), Pid: 1234}}
 	if err := p.Connect(ctx); err != nil {
 		t.Fatalf("Failed to connect to plugin: %v", err)
 	}
@@ -141,19 +141,19 @@ func TestPluginMetricsError(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		state       acpb.CurrentPluginStates_DaemonPluginState_StatusValue
+		state       acpb.CurrentPluginStates_StatusValue
 		pid         int
 		continueRun bool
 	}{
 		{
 			name:        "plugin_not_running",
-			state:       acpb.CurrentPluginStates_DaemonPluginState_CRASHED,
+			state:       acpb.CurrentPluginStates_CRASHED,
 			pid:         1234,
 			continueRun: true,
 		},
 		{
 			name:        "plugin_pid_0",
-			state:       acpb.CurrentPluginStates_DaemonPluginState_RUNNING,
+			state:       acpb.CurrentPluginStates_RUNNING,
 			pid:         0,
 			continueRun: false,
 		},

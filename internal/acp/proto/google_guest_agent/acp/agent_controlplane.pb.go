@@ -1,11 +1,11 @@
 //  Copyright 2024 Google LLC
-
+//
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at
-
+//
 //     https://www.apache.org/licenses/LICENSE-2.0
-
+//
 //  Unless required by applicable law or agreed to in writing, software
 //  distributed under the License is distributed on an "AS IS" BASIS,
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -40,6 +40,108 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+// Type of the plugin.
+type PluginType int32
+
+const (
+	// Unspecified plugin type.
+	PluginType_PLUGIN_TYPE_UNSPECIFIED PluginType = 0
+	// Daemon plugin type.
+	PluginType_DAEMON PluginType = 1
+	// One-shot plugin type.
+	PluginType_ONE_SHOT PluginType = 2
+)
+
+// Enum value maps for PluginType.
+var (
+	PluginType_name = map[int32]string{
+		0: "PLUGIN_TYPE_UNSPECIFIED",
+		1: "DAEMON",
+		2: "ONE_SHOT",
+	}
+	PluginType_value = map[string]int32{
+		"PLUGIN_TYPE_UNSPECIFIED": 0,
+		"DAEMON":                  1,
+		"ONE_SHOT":                2,
+	}
+)
+
+func (x PluginType) Enum() *PluginType {
+	p := new(PluginType)
+	*p = x
+	return p
+}
+
+func (x PluginType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PluginType) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_controlplane_proto_enumTypes[0].Descriptor()
+}
+
+func (PluginType) Type() protoreflect.EnumType {
+	return &file_agent_controlplane_proto_enumTypes[0]
+}
+
+func (x PluginType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PluginType.Descriptor instead.
+func (PluginType) EnumDescriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{0}
+}
+
+// Plugin installation type.
+type PluginInstallationType int32
+
+const (
+	// Plugin needs to be dynamically downloaded. This is the default type.
+	PluginInstallationType_DYNAMIC_INSTALLATION PluginInstallationType = 0
+	// Plugin is located in a local directory.
+	PluginInstallationType_LOCAL_INSTALLATION PluginInstallationType = 1
+)
+
+// Enum value maps for PluginInstallationType.
+var (
+	PluginInstallationType_name = map[int32]string{
+		0: "DYNAMIC_INSTALLATION",
+		1: "LOCAL_INSTALLATION",
+	}
+	PluginInstallationType_value = map[string]int32{
+		"DYNAMIC_INSTALLATION": 0,
+		"LOCAL_INSTALLATION":   1,
+	}
+)
+
+func (x PluginInstallationType) Enum() *PluginInstallationType {
+	p := new(PluginInstallationType)
+	*p = x
+	return p
+}
+
+func (x PluginInstallationType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PluginInstallationType) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_controlplane_proto_enumTypes[1].Descriptor()
+}
+
+func (PluginInstallationType) Type() protoreflect.EnumType {
+	return &file_agent_controlplane_proto_enumTypes[1]
+}
+
+func (x PluginInstallationType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PluginInstallationType.Descriptor instead.
+func (PluginInstallationType) EnumDescriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{1}
+}
 
 type AgentInfo_AgentCapability int32
 
@@ -89,11 +191,11 @@ func (x AgentInfo_AgentCapability) String() string {
 }
 
 func (AgentInfo_AgentCapability) Descriptor() protoreflect.EnumDescriptor {
-	return file_agent_controlplane_proto_enumTypes[0].Descriptor()
+	return file_agent_controlplane_proto_enumTypes[2].Descriptor()
 }
 
 func (AgentInfo_AgentCapability) Type() protoreflect.EnumType {
-	return &file_agent_controlplane_proto_enumTypes[0]
+	return &file_agent_controlplane_proto_enumTypes[2]
 }
 
 func (x AgentInfo_AgentCapability) Number() protoreflect.EnumNumber {
@@ -122,24 +224,24 @@ func (AgentInfo_AgentCapability) EnumDescriptor() ([]byte, []int) {
 // CRASHED and INSTALL_FAILED statuses expect a non-zero response code
 // indicating an error. Other statuses might have a non-zero response code
 // indicating a non-fatal error.
-type CurrentPluginStates_DaemonPluginState_StatusValue int32
+type CurrentPluginStates_StatusValue int32
 
 const (
-	CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED CurrentPluginStates_DaemonPluginState_StatusValue = 0
+	CurrentPluginStates_STATE_VALUE_UNSPECIFIED CurrentPluginStates_StatusValue = 0
 	// Life cycle of a plugin after installed.
-	CurrentPluginStates_DaemonPluginState_STARTING CurrentPluginStates_DaemonPluginState_StatusValue = 1
-	CurrentPluginStates_DaemonPluginState_RUNNING  CurrentPluginStates_DaemonPluginState_StatusValue = 2
-	CurrentPluginStates_DaemonPluginState_STOPPING CurrentPluginStates_DaemonPluginState_StatusValue = 3
-	CurrentPluginStates_DaemonPluginState_STOPPED  CurrentPluginStates_DaemonPluginState_StatusValue = 4
-	CurrentPluginStates_DaemonPluginState_CRASHED  CurrentPluginStates_DaemonPluginState_StatusValue = 5
+	CurrentPluginStates_STARTING CurrentPluginStates_StatusValue = 1
+	CurrentPluginStates_RUNNING  CurrentPluginStates_StatusValue = 2
+	CurrentPluginStates_STOPPING CurrentPluginStates_StatusValue = 3
+	CurrentPluginStates_STOPPED  CurrentPluginStates_StatusValue = 4
+	CurrentPluginStates_CRASHED  CurrentPluginStates_StatusValue = 5
 	// Installing or failed to install.
-	CurrentPluginStates_DaemonPluginState_INSTALLING     CurrentPluginStates_DaemonPluginState_StatusValue = 6
-	CurrentPluginStates_DaemonPluginState_INSTALL_FAILED CurrentPluginStates_DaemonPluginState_StatusValue = 7
+	CurrentPluginStates_INSTALLING     CurrentPluginStates_StatusValue = 6
+	CurrentPluginStates_INSTALL_FAILED CurrentPluginStates_StatusValue = 7
 )
 
-// Enum value maps for CurrentPluginStates_DaemonPluginState_StatusValue.
+// Enum value maps for CurrentPluginStates_StatusValue.
 var (
-	CurrentPluginStates_DaemonPluginState_StatusValue_name = map[int32]string{
+	CurrentPluginStates_StatusValue_name = map[int32]string{
 		0: "STATE_VALUE_UNSPECIFIED",
 		1: "STARTING",
 		2: "RUNNING",
@@ -149,7 +251,7 @@ var (
 		6: "INSTALLING",
 		7: "INSTALL_FAILED",
 	}
-	CurrentPluginStates_DaemonPluginState_StatusValue_value = map[string]int32{
+	CurrentPluginStates_StatusValue_value = map[string]int32{
 		"STATE_VALUE_UNSPECIFIED": 0,
 		"STARTING":                1,
 		"RUNNING":                 2,
@@ -161,31 +263,31 @@ var (
 	}
 )
 
-func (x CurrentPluginStates_DaemonPluginState_StatusValue) Enum() *CurrentPluginStates_DaemonPluginState_StatusValue {
-	p := new(CurrentPluginStates_DaemonPluginState_StatusValue)
+func (x CurrentPluginStates_StatusValue) Enum() *CurrentPluginStates_StatusValue {
+	p := new(CurrentPluginStates_StatusValue)
 	*p = x
 	return p
 }
 
-func (x CurrentPluginStates_DaemonPluginState_StatusValue) String() string {
+func (x CurrentPluginStates_StatusValue) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (CurrentPluginStates_DaemonPluginState_StatusValue) Descriptor() protoreflect.EnumDescriptor {
-	return file_agent_controlplane_proto_enumTypes[1].Descriptor()
+func (CurrentPluginStates_StatusValue) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_controlplane_proto_enumTypes[3].Descriptor()
 }
 
-func (CurrentPluginStates_DaemonPluginState_StatusValue) Type() protoreflect.EnumType {
-	return &file_agent_controlplane_proto_enumTypes[1]
+func (CurrentPluginStates_StatusValue) Type() protoreflect.EnumType {
+	return &file_agent_controlplane_proto_enumTypes[3]
 }
 
-func (x CurrentPluginStates_DaemonPluginState_StatusValue) Number() protoreflect.EnumNumber {
+func (x CurrentPluginStates_StatusValue) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use CurrentPluginStates_DaemonPluginState_StatusValue.Descriptor instead.
-func (CurrentPluginStates_DaemonPluginState_StatusValue) EnumDescriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{6, 0, 0}
+// Deprecated: Use CurrentPluginStates_StatusValue.Descriptor instead.
+func (CurrentPluginStates_StatusValue) EnumDescriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{6, 0}
 }
 
 type ConfigurePluginStates_Action int32
@@ -235,11 +337,11 @@ func (x ConfigurePluginStates_Action) String() string {
 }
 
 func (ConfigurePluginStates_Action) Descriptor() protoreflect.EnumDescriptor {
-	return file_agent_controlplane_proto_enumTypes[2].Descriptor()
+	return file_agent_controlplane_proto_enumTypes[4].Descriptor()
 }
 
 func (ConfigurePluginStates_Action) Type() protoreflect.EnumType {
-	return &file_agent_controlplane_proto_enumTypes[2]
+	return &file_agent_controlplane_proto_enumTypes[4]
 }
 
 func (x ConfigurePluginStates_Action) Number() protoreflect.EnumNumber {
@@ -249,6 +351,219 @@ func (x ConfigurePluginStates_Action) Number() protoreflect.EnumNumber {
 // Deprecated: Use ConfigurePluginStates_Action.Descriptor instead.
 func (ConfigurePluginStates_Action) EnumDescriptor() ([]byte, []int) {
 	return file_agent_controlplane_proto_rawDescGZIP(), []int{7, 0}
+}
+
+type ExecutionModel_State int32
+
+const (
+	ExecutionModel_STATE_UNSPECIFIED ExecutionModel_State = 0
+	ExecutionModel_ENABLED           ExecutionModel_State = 1
+	ExecutionModel_DISABLED          ExecutionModel_State = 2
+)
+
+// Enum value maps for ExecutionModel_State.
+var (
+	ExecutionModel_State_name = map[int32]string{
+		0: "STATE_UNSPECIFIED",
+		1: "ENABLED",
+		2: "DISABLED",
+	}
+	ExecutionModel_State_value = map[string]int32{
+		"STATE_UNSPECIFIED": 0,
+		"ENABLED":           1,
+		"DISABLED":          2,
+	}
+)
+
+func (x ExecutionModel_State) Enum() *ExecutionModel_State {
+	p := new(ExecutionModel_State)
+	*p = x
+	return p
+}
+
+func (x ExecutionModel_State) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ExecutionModel_State) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_controlplane_proto_enumTypes[5].Descriptor()
+}
+
+func (ExecutionModel_State) Type() protoreflect.EnumType {
+	return &file_agent_controlplane_proto_enumTypes[5]
+}
+
+func (x ExecutionModel_State) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ExecutionModel_State.Descriptor instead.
+func (ExecutionModel_State) EnumDescriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{8, 0}
+}
+
+type ExecutionModel_MatchPolicy int32
+
+const (
+	ExecutionModel_MATCH_POLICY_UNSPECIFIED ExecutionModel_MatchPolicy = 0
+	// Logical AND
+	ExecutionModel_ALL ExecutionModel_MatchPolicy = 1
+	// Logical OR
+	ExecutionModel_ANY ExecutionModel_MatchPolicy = 2
+)
+
+// Enum value maps for ExecutionModel_MatchPolicy.
+var (
+	ExecutionModel_MatchPolicy_name = map[int32]string{
+		0: "MATCH_POLICY_UNSPECIFIED",
+		1: "ALL",
+		2: "ANY",
+	}
+	ExecutionModel_MatchPolicy_value = map[string]int32{
+		"MATCH_POLICY_UNSPECIFIED": 0,
+		"ALL":                      1,
+		"ANY":                      2,
+	}
+)
+
+func (x ExecutionModel_MatchPolicy) Enum() *ExecutionModel_MatchPolicy {
+	p := new(ExecutionModel_MatchPolicy)
+	*p = x
+	return p
+}
+
+func (x ExecutionModel_MatchPolicy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ExecutionModel_MatchPolicy) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_controlplane_proto_enumTypes[6].Descriptor()
+}
+
+func (ExecutionModel_MatchPolicy) Type() protoreflect.EnumType {
+	return &file_agent_controlplane_proto_enumTypes[6]
+}
+
+func (x ExecutionModel_MatchPolicy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ExecutionModel_MatchPolicy.Descriptor instead.
+func (ExecutionModel_MatchPolicy) EnumDescriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{8, 1}
+}
+
+// Enum for all supported comparison operators.
+type Rules_ComparisonOperator int32
+
+const (
+	Rules_OPERATOR_UNSPECIFIED Rules_ComparisonOperator = 0
+	Rules_EQUAL                Rules_ComparisonOperator = 1
+	Rules_NOT_EQUAL            Rules_ComparisonOperator = 2
+	Rules_CONTAINS             Rules_ComparisonOperator = 3
+)
+
+// Enum value maps for Rules_ComparisonOperator.
+var (
+	Rules_ComparisonOperator_name = map[int32]string{
+		0: "OPERATOR_UNSPECIFIED",
+		1: "EQUAL",
+		2: "NOT_EQUAL",
+		3: "CONTAINS",
+	}
+	Rules_ComparisonOperator_value = map[string]int32{
+		"OPERATOR_UNSPECIFIED": 0,
+		"EQUAL":                1,
+		"NOT_EQUAL":            2,
+		"CONTAINS":             3,
+	}
+)
+
+func (x Rules_ComparisonOperator) Enum() *Rules_ComparisonOperator {
+	p := new(Rules_ComparisonOperator)
+	*p = x
+	return p
+}
+
+func (x Rules_ComparisonOperator) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Rules_ComparisonOperator) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_controlplane_proto_enumTypes[7].Descriptor()
+}
+
+func (Rules_ComparisonOperator) Type() protoreflect.EnumType {
+	return &file_agent_controlplane_proto_enumTypes[7]
+}
+
+func (x Rules_ComparisonOperator) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Rules_ComparisonOperator.Descriptor instead.
+func (Rules_ComparisonOperator) EnumDescriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{9, 0}
+}
+
+// Enum defining the valid, known namespaces for rule evaluation.
+type Rules_Scope int32
+
+const (
+	// Default, unspecified value.
+	Rules_NAMESPACE_UNSPECIFIED Rules_Scope = 0
+	// For checking OS properties from /etc/os-release.
+	Rules_OS Rules_Scope = 1
+	// Source is instance properties from the metadata server, like machine
+	// type. Value is fetched from Metadata Server key “v1/instance/<attribute>”
+	// to compare.
+	Rules_INSTANCE Rules_Scope = 2
+	// Source is custom key-value pairs from the metadata server. The value is
+	// retrieved from "v1/instance/attributes/<key>" for comparison.
+	Rules_METADATA Rules_Scope = 3
+)
+
+// Enum value maps for Rules_Scope.
+var (
+	Rules_Scope_name = map[int32]string{
+		0: "NAMESPACE_UNSPECIFIED",
+		1: "OS",
+		2: "INSTANCE",
+		3: "METADATA",
+	}
+	Rules_Scope_value = map[string]int32{
+		"NAMESPACE_UNSPECIFIED": 0,
+		"OS":                    1,
+		"INSTANCE":              2,
+		"METADATA":              3,
+	}
+)
+
+func (x Rules_Scope) Enum() *Rules_Scope {
+	p := new(Rules_Scope)
+	*p = x
+	return p
+}
+
+func (x Rules_Scope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Rules_Scope) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_controlplane_proto_enumTypes[8].Descriptor()
+}
+
+func (Rules_Scope) Type() protoreflect.EnumType {
+	return &file_agent_controlplane_proto_enumTypes[8]
+}
+
+func (x Rules_Scope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Rules_Scope.Descriptor instead.
+func (Rules_Scope) EnumDescriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{9, 1}
 }
 
 // Enum for the types of events that can occur to a plugin or a CSE config.
@@ -343,11 +658,11 @@ func (x PluginEventMessage_PluginEventType) String() string {
 }
 
 func (PluginEventMessage_PluginEventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_agent_controlplane_proto_enumTypes[3].Descriptor()
+	return file_agent_controlplane_proto_enumTypes[9].Descriptor()
 }
 
 func (PluginEventMessage_PluginEventType) Type() protoreflect.EnumType {
-	return &file_agent_controlplane_proto_enumTypes[3]
+	return &file_agent_controlplane_proto_enumTypes[9]
 }
 
 func (x PluginEventMessage_PluginEventType) Number() protoreflect.EnumNumber {
@@ -356,7 +671,7 @@ func (x PluginEventMessage_PluginEventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PluginEventMessage_PluginEventType.Descriptor instead.
 func (PluginEventMessage_PluginEventType) EnumDescriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{8, 0}
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{10, 0}
 }
 
 type GuestAgentModuleMetric_Metric int32
@@ -443,11 +758,11 @@ func (x GuestAgentModuleMetric_Metric) String() string {
 }
 
 func (GuestAgentModuleMetric_Metric) Descriptor() protoreflect.EnumDescriptor {
-	return file_agent_controlplane_proto_enumTypes[4].Descriptor()
+	return file_agent_controlplane_proto_enumTypes[10].Descriptor()
 }
 
 func (GuestAgentModuleMetric_Metric) Type() protoreflect.EnumType {
-	return &file_agent_controlplane_proto_enumTypes[4]
+	return &file_agent_controlplane_proto_enumTypes[10]
 }
 
 func (x GuestAgentModuleMetric_Metric) Number() protoreflect.EnumNumber {
@@ -456,7 +771,7 @@ func (x GuestAgentModuleMetric_Metric) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use GuestAgentModuleMetric_Metric.Descriptor instead.
 func (GuestAgentModuleMetric_Metric) EnumDescriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{10, 0}
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{12, 0}
 }
 
 type GuestAgentModuleMetric_ModuleStatus int32
@@ -495,11 +810,11 @@ func (x GuestAgentModuleMetric_ModuleStatus) String() string {
 }
 
 func (GuestAgentModuleMetric_ModuleStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_agent_controlplane_proto_enumTypes[5].Descriptor()
+	return file_agent_controlplane_proto_enumTypes[11].Descriptor()
 }
 
 func (GuestAgentModuleMetric_ModuleStatus) Type() protoreflect.EnumType {
-	return &file_agent_controlplane_proto_enumTypes[5]
+	return &file_agent_controlplane_proto_enumTypes[11]
 }
 
 func (x GuestAgentModuleMetric_ModuleStatus) Number() protoreflect.EnumNumber {
@@ -508,7 +823,7 @@ func (x GuestAgentModuleMetric_ModuleStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use GuestAgentModuleMetric_ModuleStatus.Descriptor instead.
 func (GuestAgentModuleMetric_ModuleStatus) EnumDescriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{10, 1}
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{12, 1}
 }
 
 // PlatformInfo reports platform information based on a SMBIOS/DMI check.
@@ -868,8 +1183,10 @@ type CurrentPluginStates struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The states of all daemon plugins on the resource.
 	DaemonPluginStates []*CurrentPluginStates_DaemonPluginState `protobuf:"bytes,1,rep,name=daemon_plugin_states,json=daemonPluginStates,proto3" json:"daemon_plugin_states,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// The states of all one-shot plugins on the resource.
+	OneShotPluginStates []*CurrentPluginStates_OneShotPluginState `protobuf:"bytes,2,rep,name=one_shot_plugin_states,json=oneShotPluginStates,proto3" json:"one_shot_plugin_states,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *CurrentPluginStates) Reset() {
@@ -905,6 +1222,13 @@ func (*CurrentPluginStates) Descriptor() ([]byte, []int) {
 func (x *CurrentPluginStates) GetDaemonPluginStates() []*CurrentPluginStates_DaemonPluginState {
 	if x != nil {
 		return x.DaemonPluginStates
+	}
+	return nil
+}
+
+func (x *CurrentPluginStates) GetOneShotPluginStates() []*CurrentPluginStates_OneShotPluginState {
+	if x != nil {
+		return x.OneShotPluginStates
 	}
 	return nil
 }
@@ -957,6 +1281,208 @@ func (x *ConfigurePluginStates) GetConfigurePlugins() []*ConfigurePluginStates_C
 	return nil
 }
 
+type ExecutionModel struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The base state of the plugin before any rule evaluation.
+	OnDefault ExecutionModel_State `protobuf:"varint,1,opt,name=on_default,json=onDefault,proto3,enum=agent_controlplane.ExecutionModel_State" json:"on_default,omitempty"`
+	// The state of the plugin if the rule matches.
+	OnMatch ExecutionModel_State `protobuf:"varint,2,opt,name=on_match,json=onMatch,proto3,enum=agent_controlplane.ExecutionModel_State" json:"on_match,omitempty"`
+	// Determines how the rules are evaluated.
+	MatchPolicy ExecutionModel_MatchPolicy `protobuf:"varint,3,opt,name=match_policy,json=matchPolicy,proto3,enum=agent_controlplane.ExecutionModel_MatchPolicy" json:"match_policy,omitempty"`
+	// An array of rules object to evaluate against the host.
+	Rules []*Rules `protobuf:"bytes,4,rep,name=rules,proto3" json:"rules,omitempty"`
+	// Identifies if the plugin must run immediately at boot after agent is
+	// initialized.
+	BootCritical bool `protobuf:"varint,5,opt,name=boot_critical,json=bootCritical,proto3" json:"boot_critical,omitempty"`
+	// How to execute the plugin.
+	//
+	// Types that are valid to be assigned to Type:
+	//
+	//	*ExecutionModel_OneShot_
+	//	*ExecutionModel_Daemon_
+	Type          isExecutionModel_Type `protobuf_oneof:"type"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecutionModel) Reset() {
+	*x = ExecutionModel{}
+	mi := &file_agent_controlplane_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutionModel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutionModel) ProtoMessage() {}
+
+func (x *ExecutionModel) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutionModel.ProtoReflect.Descriptor instead.
+func (*ExecutionModel) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ExecutionModel) GetOnDefault() ExecutionModel_State {
+	if x != nil {
+		return x.OnDefault
+	}
+	return ExecutionModel_STATE_UNSPECIFIED
+}
+
+func (x *ExecutionModel) GetOnMatch() ExecutionModel_State {
+	if x != nil {
+		return x.OnMatch
+	}
+	return ExecutionModel_STATE_UNSPECIFIED
+}
+
+func (x *ExecutionModel) GetMatchPolicy() ExecutionModel_MatchPolicy {
+	if x != nil {
+		return x.MatchPolicy
+	}
+	return ExecutionModel_MATCH_POLICY_UNSPECIFIED
+}
+
+func (x *ExecutionModel) GetRules() []*Rules {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
+}
+
+func (x *ExecutionModel) GetBootCritical() bool {
+	if x != nil {
+		return x.BootCritical
+	}
+	return false
+}
+
+func (x *ExecutionModel) GetType() isExecutionModel_Type {
+	if x != nil {
+		return x.Type
+	}
+	return nil
+}
+
+func (x *ExecutionModel) GetOneShot() *ExecutionModel_OneShot {
+	if x != nil {
+		if x, ok := x.Type.(*ExecutionModel_OneShot_); ok {
+			return x.OneShot
+		}
+	}
+	return nil
+}
+
+func (x *ExecutionModel) GetDaemon() *ExecutionModel_Daemon {
+	if x != nil {
+		if x, ok := x.Type.(*ExecutionModel_Daemon_); ok {
+			return x.Daemon
+		}
+	}
+	return nil
+}
+
+type isExecutionModel_Type interface {
+	isExecutionModel_Type()
+}
+
+type ExecutionModel_OneShot_ struct {
+	OneShot *ExecutionModel_OneShot `protobuf:"bytes,6,opt,name=one_shot,json=oneShot,proto3,oneof"`
+}
+
+type ExecutionModel_Daemon_ struct {
+	Daemon *ExecutionModel_Daemon `protobuf:"bytes,7,opt,name=daemon,proto3,oneof"`
+}
+
+func (*ExecutionModel_OneShot_) isExecutionModel_Type() {}
+
+func (*ExecutionModel_Daemon_) isExecutionModel_Type() {}
+
+type Rules struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The scope of the rule.
+	Scope Rules_Scope `protobuf:"varint,1,opt,name=scope,proto3,enum=agent_controlplane.Rules_Scope" json:"scope,omitempty"`
+	// The attribute to compare against.
+	Attribute string `protobuf:"bytes,2,opt,name=attribute,proto3" json:"attribute,omitempty"`
+	// The operator to compare the attribute against the value.
+	ComparisonOperator Rules_ComparisonOperator `protobuf:"varint,3,opt,name=comparison_operator,json=comparisonOperator,proto3,enum=agent_controlplane.Rules_ComparisonOperator" json:"comparison_operator,omitempty"`
+	// The value to compare against.
+	Value         *structpb.Value `protobuf:"bytes,4,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Rules) Reset() {
+	*x = Rules{}
+	mi := &file_agent_controlplane_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Rules) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Rules) ProtoMessage() {}
+
+func (x *Rules) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Rules.ProtoReflect.Descriptor instead.
+func (*Rules) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *Rules) GetScope() Rules_Scope {
+	if x != nil {
+		return x.Scope
+	}
+	return Rules_NAMESPACE_UNSPECIFIED
+}
+
+func (x *Rules) GetAttribute() string {
+	if x != nil {
+		return x.Attribute
+	}
+	return ""
+}
+
+func (x *Rules) GetComparisonOperator() Rules_ComparisonOperator {
+	if x != nil {
+		return x.ComparisonOperator
+	}
+	return Rules_OPERATOR_UNSPECIFIED
+}
+
+func (x *Rules) GetValue() *structpb.Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
 type PluginEventMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// RevisionID is the ID of the plugin revision related to this event.
@@ -981,7 +1507,7 @@ type PluginEventMessage struct {
 
 func (x *PluginEventMessage) Reset() {
 	*x = PluginEventMessage{}
-	mi := &file_agent_controlplane_proto_msgTypes[8]
+	mi := &file_agent_controlplane_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -993,7 +1519,7 @@ func (x *PluginEventMessage) String() string {
 func (*PluginEventMessage) ProtoMessage() {}
 
 func (x *PluginEventMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[8]
+	mi := &file_agent_controlplane_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1006,7 +1532,7 @@ func (x *PluginEventMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginEventMessage.ProtoReflect.Descriptor instead.
 func (*PluginEventMessage) Descriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{8}
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PluginEventMessage) GetRevisionId() string {
@@ -1053,7 +1579,7 @@ type GuestAgentModuleMetrics struct {
 
 func (x *GuestAgentModuleMetrics) Reset() {
 	*x = GuestAgentModuleMetrics{}
-	mi := &file_agent_controlplane_proto_msgTypes[9]
+	mi := &file_agent_controlplane_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +1591,7 @@ func (x *GuestAgentModuleMetrics) String() string {
 func (*GuestAgentModuleMetrics) ProtoMessage() {}
 
 func (x *GuestAgentModuleMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[9]
+	mi := &file_agent_controlplane_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1604,7 @@ func (x *GuestAgentModuleMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GuestAgentModuleMetrics.ProtoReflect.Descriptor instead.
 func (*GuestAgentModuleMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{9}
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GuestAgentModuleMetrics) GetMetrics() []*GuestAgentModuleMetric {
@@ -1110,7 +1636,7 @@ type GuestAgentModuleMetric struct {
 
 func (x *GuestAgentModuleMetric) Reset() {
 	*x = GuestAgentModuleMetric{}
-	mi := &file_agent_controlplane_proto_msgTypes[10]
+	mi := &file_agent_controlplane_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1122,7 +1648,7 @@ func (x *GuestAgentModuleMetric) String() string {
 func (*GuestAgentModuleMetric) ProtoMessage() {}
 
 func (x *GuestAgentModuleMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[10]
+	mi := &file_agent_controlplane_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1135,7 +1661,7 @@ func (x *GuestAgentModuleMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GuestAgentModuleMetric.ProtoReflect.Descriptor instead.
 func (*GuestAgentModuleMetric) Descriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{10}
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GuestAgentModuleMetric) GetMetricName() GuestAgentModuleMetric_Metric {
@@ -1188,7 +1714,7 @@ type CurrentPluginStates_DaemonPluginState struct {
 	// "67C5640D"
 	CurrentRevisionId string `protobuf:"bytes,2,opt,name=current_revision_id,json=currentRevisionId,proto3" json:"current_revision_id,omitempty"`
 	// Status of the current plugin.
-	CurrentPluginStatus *CurrentPluginStates_DaemonPluginState_Status `protobuf:"bytes,3,opt,name=current_plugin_status,json=currentPluginStatus,proto3" json:"current_plugin_status,omitempty"`
+	CurrentPluginStatus *CurrentPluginStates_Status `protobuf:"bytes,3,opt,name=current_plugin_status,json=currentPluginStatus,proto3" json:"current_plugin_status,omitempty"`
 	// The revision id for the pending plugin. If this pending revision is
 	// installed and running, the field value should be empty and
 	// current_revision_id should be updated and status set to RUNNING. If
@@ -1197,9 +1723,9 @@ type CurrentPluginStates_DaemonPluginState struct {
 	PendingRevisionId string `protobuf:"bytes,4,opt,name=pending_revision_id,json=pendingRevisionId,proto3" json:"pending_revision_id,omitempty"`
 	// Status of the pending plugin. Available only if pending_revision_id has a
 	// value
-	PendingPluginStatus *CurrentPluginStates_DaemonPluginState_Status `protobuf:"bytes,5,opt,name=pending_plugin_status,json=pendingPluginStatus,proto3" json:"pending_plugin_status,omitempty"`
+	PendingPluginStatus *CurrentPluginStates_Status `protobuf:"bytes,5,opt,name=pending_plugin_status,json=pendingPluginStatus,proto3" json:"pending_plugin_status,omitempty"`
 	// The metrics of the current plugin.
-	CurrentPluginMetrics []*CurrentPluginStates_DaemonPluginState_Metric `protobuf:"bytes,6,rep,name=current_plugin_metrics,json=currentPluginMetrics,proto3" json:"current_plugin_metrics,omitempty"`
+	CurrentPluginMetrics []*CurrentPluginStates_Metric `protobuf:"bytes,6,rep,name=current_plugin_metrics,json=currentPluginMetrics,proto3" json:"current_plugin_metrics,omitempty"`
 	// The hash of the config applied to the plugin during the last start.
 	ConfigHash    string `protobuf:"bytes,7,opt,name=config_hash,json=configHash,proto3" json:"config_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1208,7 +1734,7 @@ type CurrentPluginStates_DaemonPluginState struct {
 
 func (x *CurrentPluginStates_DaemonPluginState) Reset() {
 	*x = CurrentPluginStates_DaemonPluginState{}
-	mi := &file_agent_controlplane_proto_msgTypes[11]
+	mi := &file_agent_controlplane_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1220,7 +1746,7 @@ func (x *CurrentPluginStates_DaemonPluginState) String() string {
 func (*CurrentPluginStates_DaemonPluginState) ProtoMessage() {}
 
 func (x *CurrentPluginStates_DaemonPluginState) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[11]
+	mi := &file_agent_controlplane_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1250,7 +1776,7 @@ func (x *CurrentPluginStates_DaemonPluginState) GetCurrentRevisionId() string {
 	return ""
 }
 
-func (x *CurrentPluginStates_DaemonPluginState) GetCurrentPluginStatus() *CurrentPluginStates_DaemonPluginState_Status {
+func (x *CurrentPluginStates_DaemonPluginState) GetCurrentPluginStatus() *CurrentPluginStates_Status {
 	if x != nil {
 		return x.CurrentPluginStatus
 	}
@@ -1264,14 +1790,14 @@ func (x *CurrentPluginStates_DaemonPluginState) GetPendingRevisionId() string {
 	return ""
 }
 
-func (x *CurrentPluginStates_DaemonPluginState) GetPendingPluginStatus() *CurrentPluginStates_DaemonPluginState_Status {
+func (x *CurrentPluginStates_DaemonPluginState) GetPendingPluginStatus() *CurrentPluginStates_Status {
 	if x != nil {
 		return x.PendingPluginStatus
 	}
 	return nil
 }
 
-func (x *CurrentPluginStates_DaemonPluginState) GetCurrentPluginMetrics() []*CurrentPluginStates_DaemonPluginState_Metric {
+func (x *CurrentPluginStates_DaemonPluginState) GetCurrentPluginMetrics() []*CurrentPluginStates_Metric {
 	if x != nil {
 		return x.CurrentPluginMetrics
 	}
@@ -1285,9 +1811,114 @@ func (x *CurrentPluginStates_DaemonPluginState) GetConfigHash() string {
 	return ""
 }
 
-type CurrentPluginStates_DaemonPluginState_Status struct {
-	state  protoimpl.MessageState                            `protogen:"open.v1"`
-	Status CurrentPluginStates_DaemonPluginState_StatusValue `protobuf:"varint,1,opt,name=status,proto3,enum=agent_controlplane.CurrentPluginStates_DaemonPluginState_StatusValue" json:"status,omitempty"`
+type CurrentPluginStates_OneShotPluginState struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The name of the plugin. e.g., "sap-hana-01"
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// A randomly generated 8 digit hexa string for current plugin. e.g.,
+	// "67C5640D"
+	CurrentRevisionId string `protobuf:"bytes,2,opt,name=current_revision_id,json=currentRevisionId,proto3" json:"current_revision_id,omitempty"`
+	// Status of the current plugin.
+	CurrentPluginStatus *CurrentPluginStates_Status `protobuf:"bytes,3,opt,name=current_plugin_status,json=currentPluginStatus,proto3" json:"current_plugin_status,omitempty"`
+	// The revision id for the pending plugin. If this pending revision is
+	// installed and running, the field value should be empty and
+	// current_revision_id should be updated and status set to RUNNING. If
+	// there's an error during the process, this value should remain as is and
+	// the pending_revision_status should update to an error status.
+	PendingRevisionId string `protobuf:"bytes,4,opt,name=pending_revision_id,json=pendingRevisionId,proto3" json:"pending_revision_id,omitempty"`
+	// Status of the pending plugin. Available only if pending_revision_id has a
+	// value
+	PendingPluginStatus *CurrentPluginStates_Status `protobuf:"bytes,5,opt,name=pending_plugin_status,json=pendingPluginStatus,proto3" json:"pending_plugin_status,omitempty"`
+	// The metrics of the current plugin.
+	CurrentPluginMetrics []*CurrentPluginStates_Metric `protobuf:"bytes,6,rep,name=current_plugin_metrics,json=currentPluginMetrics,proto3" json:"current_plugin_metrics,omitempty"`
+	// The hash of the config applied to the plugin during the last start.
+	ConfigHash    string `protobuf:"bytes,7,opt,name=config_hash,json=configHash,proto3" json:"config_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) Reset() {
+	*x = CurrentPluginStates_OneShotPluginState{}
+	mi := &file_agent_controlplane_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CurrentPluginStates_OneShotPluginState) ProtoMessage() {}
+
+func (x *CurrentPluginStates_OneShotPluginState) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CurrentPluginStates_OneShotPluginState.ProtoReflect.Descriptor instead.
+func (*CurrentPluginStates_OneShotPluginState) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{6, 1}
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) GetCurrentRevisionId() string {
+	if x != nil {
+		return x.CurrentRevisionId
+	}
+	return ""
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) GetCurrentPluginStatus() *CurrentPluginStates_Status {
+	if x != nil {
+		return x.CurrentPluginStatus
+	}
+	return nil
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) GetPendingRevisionId() string {
+	if x != nil {
+		return x.PendingRevisionId
+	}
+	return ""
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) GetPendingPluginStatus() *CurrentPluginStates_Status {
+	if x != nil {
+		return x.PendingPluginStatus
+	}
+	return nil
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) GetCurrentPluginMetrics() []*CurrentPluginStates_Metric {
+	if x != nil {
+		return x.CurrentPluginMetrics
+	}
+	return nil
+}
+
+func (x *CurrentPluginStates_OneShotPluginState) GetConfigHash() string {
+	if x != nil {
+		return x.ConfigHash
+	}
+	return ""
+}
+
+type CurrentPluginStates_Status struct {
+	state  protoimpl.MessageState          `protogen:"open.v1"`
+	Status CurrentPluginStates_StatusValue `protobuf:"varint,1,opt,name=status,proto3,enum=agent_controlplane.CurrentPluginStates_StatusValue" json:"status,omitempty"`
 	// The response code returned when agent checks plugin health.
 	// Zero indicates running normally. Non-zero code indicates an error.  If
 	// it's a non-fatal error, the status value should be RUNNING.
@@ -1302,21 +1933,21 @@ type CurrentPluginStates_DaemonPluginState_Status struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Status) Reset() {
-	*x = CurrentPluginStates_DaemonPluginState_Status{}
-	mi := &file_agent_controlplane_proto_msgTypes[12]
+func (x *CurrentPluginStates_Status) Reset() {
+	*x = CurrentPluginStates_Status{}
+	mi := &file_agent_controlplane_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Status) String() string {
+func (x *CurrentPluginStates_Status) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CurrentPluginStates_DaemonPluginState_Status) ProtoMessage() {}
+func (*CurrentPluginStates_Status) ProtoMessage() {}
 
-func (x *CurrentPluginStates_DaemonPluginState_Status) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[12]
+func (x *CurrentPluginStates_Status) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1327,33 +1958,33 @@ func (x *CurrentPluginStates_DaemonPluginState_Status) ProtoReflect() protorefle
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CurrentPluginStates_DaemonPluginState_Status.ProtoReflect.Descriptor instead.
-func (*CurrentPluginStates_DaemonPluginState_Status) Descriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{6, 0, 0}
+// Deprecated: Use CurrentPluginStates_Status.ProtoReflect.Descriptor instead.
+func (*CurrentPluginStates_Status) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{6, 2}
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Status) GetStatus() CurrentPluginStates_DaemonPluginState_StatusValue {
+func (x *CurrentPluginStates_Status) GetStatus() CurrentPluginStates_StatusValue {
 	if x != nil {
 		return x.Status
 	}
-	return CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED
+	return CurrentPluginStates_STATE_VALUE_UNSPECIFIED
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Status) GetResponseCode() int32 {
+func (x *CurrentPluginStates_Status) GetResponseCode() int32 {
 	if x != nil {
 		return x.ResponseCode
 	}
 	return 0
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Status) GetResults() []string {
+func (x *CurrentPluginStates_Status) GetResults() []string {
 	if x != nil {
 		return x.Results
 	}
 	return nil
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Status) GetUpdateTime() *timestamppb.Timestamp {
+func (x *CurrentPluginStates_Status) GetUpdateTime() *timestamppb.Timestamp {
 	if x != nil {
 		return x.UpdateTime
 	}
@@ -1361,7 +1992,7 @@ func (x *CurrentPluginStates_DaemonPluginState_Status) GetUpdateTime() *timestam
 }
 
 // The CPU and Memory usage of the plugin at a specific time.
-type CurrentPluginStates_DaemonPluginState_Metric struct {
+type CurrentPluginStates_Metric struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The time when the agent checks for metrics.
 	Timestamp *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
@@ -1374,21 +2005,21 @@ type CurrentPluginStates_DaemonPluginState_Metric struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Metric) Reset() {
-	*x = CurrentPluginStates_DaemonPluginState_Metric{}
-	mi := &file_agent_controlplane_proto_msgTypes[13]
+func (x *CurrentPluginStates_Metric) Reset() {
+	*x = CurrentPluginStates_Metric{}
+	mi := &file_agent_controlplane_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Metric) String() string {
+func (x *CurrentPluginStates_Metric) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CurrentPluginStates_DaemonPluginState_Metric) ProtoMessage() {}
+func (*CurrentPluginStates_Metric) ProtoMessage() {}
 
-func (x *CurrentPluginStates_DaemonPluginState_Metric) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[13]
+func (x *CurrentPluginStates_Metric) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1399,26 +2030,26 @@ func (x *CurrentPluginStates_DaemonPluginState_Metric) ProtoReflect() protorefle
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CurrentPluginStates_DaemonPluginState_Metric.ProtoReflect.Descriptor instead.
-func (*CurrentPluginStates_DaemonPluginState_Metric) Descriptor() ([]byte, []int) {
-	return file_agent_controlplane_proto_rawDescGZIP(), []int{6, 0, 1}
+// Deprecated: Use CurrentPluginStates_Metric.ProtoReflect.Descriptor instead.
+func (*CurrentPluginStates_Metric) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{6, 3}
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Metric) GetTimestamp() *timestamppb.Timestamp {
+func (x *CurrentPluginStates_Metric) GetTimestamp() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Timestamp
 	}
 	return nil
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Metric) GetCpuUsage() float32 {
+func (x *CurrentPluginStates_Metric) GetCpuUsage() float32 {
 	if x != nil {
 		return x.CpuUsage
 	}
 	return 0
 }
 
-func (x *CurrentPluginStates_DaemonPluginState_Metric) GetMemoryUsage() int64 {
+func (x *CurrentPluginStates_Metric) GetMemoryUsage() int64 {
 	if x != nil {
 		return x.MemoryUsage
 	}
@@ -1436,7 +2067,7 @@ type ConfigurePluginStates_ConfigurePlugin struct {
 
 func (x *ConfigurePluginStates_ConfigurePlugin) Reset() {
 	*x = ConfigurePluginStates_ConfigurePlugin{}
-	mi := &file_agent_controlplane_proto_msgTypes[14]
+	mi := &file_agent_controlplane_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1448,7 +2079,7 @@ func (x *ConfigurePluginStates_ConfigurePlugin) String() string {
 func (*ConfigurePluginStates_ConfigurePlugin) ProtoMessage() {}
 
 func (x *ConfigurePluginStates_ConfigurePlugin) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[14]
+	mi := &file_agent_controlplane_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1510,7 +2141,7 @@ type ConfigurePluginStates_Plugin struct {
 
 func (x *ConfigurePluginStates_Plugin) Reset() {
 	*x = ConfigurePluginStates_Plugin{}
-	mi := &file_agent_controlplane_proto_msgTypes[15]
+	mi := &file_agent_controlplane_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1522,7 +2153,7 @@ func (x *ConfigurePluginStates_Plugin) String() string {
 func (*ConfigurePluginStates_Plugin) ProtoMessage() {}
 
 func (x *ConfigurePluginStates_Plugin) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[15]
+	mi := &file_agent_controlplane_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1621,13 +2252,20 @@ type ConfigurePluginStates_Manifest struct {
 	// If the value is 2, then the first retry will be 1 second, the second
 	// retry will be 2 seconds, the third retry will be 4 seconds, etc.
 	StartExpBackoffFactor int32 `protobuf:"varint,12,opt,name=start_exp_backoff_factor,json=startExpBackoffFactor,proto3" json:"start_exp_backoff_factor,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// The type of the plugin.
+	PluginType PluginType `protobuf:"varint,13,opt,name=plugin_type,json=pluginType,proto3,enum=agent_controlplane.PluginType" json:"plugin_type,omitempty"`
+	// The installation type of the plugin.
+	PluginInstallationType PluginInstallationType `protobuf:"varint,14,opt,name=plugin_installation_type,json=pluginInstallationType,proto3,enum=agent_controlplane.PluginInstallationType" json:"plugin_installation_type,omitempty"`
+	// The execution model of the plugin. This is used to determine how the
+	// plugin should be executed.
+	ExecutionModel *ExecutionModel `protobuf:"bytes,15,opt,name=execution_model,json=executionModel,proto3" json:"execution_model,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ConfigurePluginStates_Manifest) Reset() {
 	*x = ConfigurePluginStates_Manifest{}
-	mi := &file_agent_controlplane_proto_msgTypes[16]
+	mi := &file_agent_controlplane_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1639,7 +2277,7 @@ func (x *ConfigurePluginStates_Manifest) String() string {
 func (*ConfigurePluginStates_Manifest) ProtoMessage() {}
 
 func (x *ConfigurePluginStates_Manifest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_controlplane_proto_msgTypes[16]
+	mi := &file_agent_controlplane_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1750,6 +2388,27 @@ func (x *ConfigurePluginStates_Manifest) GetStartExpBackoffFactor() int32 {
 	return 0
 }
 
+func (x *ConfigurePluginStates_Manifest) GetPluginType() PluginType {
+	if x != nil {
+		return x.PluginType
+	}
+	return PluginType_PLUGIN_TYPE_UNSPECIFIED
+}
+
+func (x *ConfigurePluginStates_Manifest) GetPluginInstallationType() PluginInstallationType {
+	if x != nil {
+		return x.PluginInstallationType
+	}
+	return PluginInstallationType_DYNAMIC_INSTALLATION
+}
+
+func (x *ConfigurePluginStates_Manifest) GetExecutionModel() *ExecutionModel {
+	if x != nil {
+		return x.ExecutionModel
+	}
+	return nil
+}
+
 type isConfigurePluginStates_Manifest_Config interface {
 	isConfigurePluginStates_Manifest_Config()
 }
@@ -1768,6 +2427,161 @@ type ConfigurePluginStates_Manifest_StructConfig struct {
 func (*ConfigurePluginStates_Manifest_StringConfig) isConfigurePluginStates_Manifest_Config() {}
 
 func (*ConfigurePluginStates_Manifest_StructConfig) isConfigurePluginStates_Manifest_Config() {}
+
+type ExecutionModel_Daemon struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecutionModel_Daemon) Reset() {
+	*x = ExecutionModel_Daemon{}
+	mi := &file_agent_controlplane_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutionModel_Daemon) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutionModel_Daemon) ProtoMessage() {}
+
+func (x *ExecutionModel_Daemon) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutionModel_Daemon.ProtoReflect.Descriptor instead.
+func (*ExecutionModel_Daemon) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{8, 0}
+}
+
+type ExecutionModel_OneShot struct {
+	state    protoimpl.MessageState   `protogen:"open.v1"`
+	Triggers *ExecutionModel_Triggers `protobuf:"bytes,1,opt,name=triggers,proto3" json:"triggers,omitempty"`
+	// The max duration plugin is allowed to run.
+	ExecutionTimeout *durationpb.Duration `protobuf:"bytes,2,opt,name=execution_timeout,json=executionTimeout,proto3" json:"execution_timeout,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ExecutionModel_OneShot) Reset() {
+	*x = ExecutionModel_OneShot{}
+	mi := &file_agent_controlplane_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutionModel_OneShot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutionModel_OneShot) ProtoMessage() {}
+
+func (x *ExecutionModel_OneShot) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutionModel_OneShot.ProtoReflect.Descriptor instead.
+func (*ExecutionModel_OneShot) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{8, 1}
+}
+
+func (x *ExecutionModel_OneShot) GetTriggers() *ExecutionModel_Triggers {
+	if x != nil {
+		return x.Triggers
+	}
+	return nil
+}
+
+func (x *ExecutionModel_OneShot) GetExecutionTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.ExecutionTimeout
+	}
+	return nil
+}
+
+type ExecutionModel_Triggers struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// If true, the plugin runs every time when the instance boots, similar to
+	// startup script.
+	Startup bool `protobuf:"varint,1,opt,name=startup,proto3" json:"startup,omitempty"`
+	// If true, the plugin runs only on the very first startup of an instance,
+	// triggered by an agent detecting a new instance ID.
+	Firstboot bool `protobuf:"varint,2,opt,name=firstboot,proto3" json:"firstboot,omitempty"`
+	// A simple recurring schedule in minutes. Schedule begins at instance
+	// startup.
+	Interval      *durationpb.Duration `protobuf:"bytes,3,opt,name=interval,proto3" json:"interval,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecutionModel_Triggers) Reset() {
+	*x = ExecutionModel_Triggers{}
+	mi := &file_agent_controlplane_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutionModel_Triggers) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutionModel_Triggers) ProtoMessage() {}
+
+func (x *ExecutionModel_Triggers) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_controlplane_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutionModel_Triggers.ProtoReflect.Descriptor instead.
+func (*ExecutionModel_Triggers) Descriptor() ([]byte, []int) {
+	return file_agent_controlplane_proto_rawDescGZIP(), []int{8, 2}
+}
+
+func (x *ExecutionModel_Triggers) GetStartup() bool {
+	if x != nil {
+		return x.Startup
+	}
+	return false
+}
+
+func (x *ExecutionModel_Triggers) GetFirstboot() bool {
+	if x != nil {
+		return x.Firstboot
+	}
+	return false
+}
+
+func (x *ExecutionModel_Triggers) GetInterval() *durationpb.Duration {
+	if x != nil {
+		return x.Interval
+	}
+	return nil
+}
 
 var File_agent_controlplane_proto protoreflect.FileDescriptor
 
@@ -1800,20 +2614,30 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\farchitecture\x18\x06 \x01(\tR\farchitecture\x12%\n" +
 	"\x0ekernel_release\x18\a \x01(\tR\rkernelRelease\x12%\n" +
 	"\x0ekernel_version\x18\b \x01(\tR\rkernelVersion\"\x12\n" +
-	"\x10ListPluginStates\"\x90\t\n" +
+	"\x10ListPluginStates\"\x93\r\n" +
 	"\x13CurrentPluginStates\x12k\n" +
-	"\x14daemon_plugin_states\x18\x01 \x03(\v29.agent_controlplane.CurrentPluginStates.DaemonPluginStateR\x12daemonPluginStates\x1a\x8b\b\n" +
+	"\x14daemon_plugin_states\x18\x01 \x03(\v29.agent_controlplane.CurrentPluginStates.DaemonPluginStateR\x12daemonPluginStates\x12o\n" +
+	"\x16one_shot_plugin_states\x18\x02 \x03(\v2:.agent_controlplane.CurrentPluginStates.OneShotPluginStateR\x13oneShotPluginStates\x1a\xd6\x03\n" +
 	"\x11DaemonPluginState\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12.\n" +
-	"\x13current_revision_id\x18\x02 \x01(\tR\x11currentRevisionId\x12t\n" +
-	"\x15current_plugin_status\x18\x03 \x01(\v2@.agent_controlplane.CurrentPluginStates.DaemonPluginState.StatusR\x13currentPluginStatus\x12.\n" +
-	"\x13pending_revision_id\x18\x04 \x01(\tR\x11pendingRevisionId\x12t\n" +
-	"\x15pending_plugin_status\x18\x05 \x01(\v2@.agent_controlplane.CurrentPluginStates.DaemonPluginState.StatusR\x13pendingPluginStatus\x12v\n" +
-	"\x16current_plugin_metrics\x18\x06 \x03(\v2@.agent_controlplane.CurrentPluginStates.DaemonPluginState.MetricR\x14currentPluginMetrics\x12\x1f\n" +
+	"\x13current_revision_id\x18\x02 \x01(\tR\x11currentRevisionId\x12b\n" +
+	"\x15current_plugin_status\x18\x03 \x01(\v2..agent_controlplane.CurrentPluginStates.StatusR\x13currentPluginStatus\x12.\n" +
+	"\x13pending_revision_id\x18\x04 \x01(\tR\x11pendingRevisionId\x12b\n" +
+	"\x15pending_plugin_status\x18\x05 \x01(\v2..agent_controlplane.CurrentPluginStates.StatusR\x13pendingPluginStatus\x12d\n" +
+	"\x16current_plugin_metrics\x18\x06 \x03(\v2..agent_controlplane.CurrentPluginStates.MetricR\x14currentPluginMetrics\x12\x1f\n" +
 	"\vconfig_hash\x18\a \x01(\tR\n" +
-	"configHash\x1a\xe3\x01\n" +
-	"\x06Status\x12]\n" +
-	"\x06status\x18\x01 \x01(\x0e2E.agent_controlplane.CurrentPluginStates.DaemonPluginState.StatusValueR\x06status\x12#\n" +
+	"configHash\x1a\xd7\x03\n" +
+	"\x12OneShotPluginState\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12.\n" +
+	"\x13current_revision_id\x18\x02 \x01(\tR\x11currentRevisionId\x12b\n" +
+	"\x15current_plugin_status\x18\x03 \x01(\v2..agent_controlplane.CurrentPluginStates.StatusR\x13currentPluginStatus\x12.\n" +
+	"\x13pending_revision_id\x18\x04 \x01(\tR\x11pendingRevisionId\x12b\n" +
+	"\x15pending_plugin_status\x18\x05 \x01(\v2..agent_controlplane.CurrentPluginStates.StatusR\x13pendingPluginStatus\x12d\n" +
+	"\x16current_plugin_metrics\x18\x06 \x03(\v2..agent_controlplane.CurrentPluginStates.MetricR\x14currentPluginMetrics\x12\x1f\n" +
+	"\vconfig_hash\x18\a \x01(\tR\n" +
+	"configHash\x1a\xd1\x01\n" +
+	"\x06Status\x12K\n" +
+	"\x06status\x18\x01 \x01(\x0e23.agent_controlplane.CurrentPluginStates.StatusValueR\x06status\x12#\n" +
 	"\rresponse_code\x18\x02 \x01(\x05R\fresponseCode\x12\x18\n" +
 	"\aresults\x18\x03 \x03(\tR\aresults\x12;\n" +
 	"\vupdate_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -1831,8 +2655,7 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\aCRASHED\x10\x05\x12\x0e\n" +
 	"\n" +
 	"INSTALLING\x10\x06\x12\x12\n" +
-	"\x0eINSTALL_FAILED\x10\a\"\xc7\n" +
-	"\n" +
+	"\x0eINSTALL_FAILED\x10\a\"\xbb\f\n" +
 	"\x15ConfigurePluginStates\x12f\n" +
 	"\x11configure_plugins\x18\x01 \x03(\v29.agent_controlplane.ConfigurePluginStates.ConfigurePluginR\x10configurePlugins\x1a\xf5\x01\n" +
 	"\x0fConfigurePlugin\x12H\n" +
@@ -1847,7 +2670,7 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\ventry_point\x18\x04 \x01(\tR\n" +
 	"entryPoint\x12\x1c\n" +
 	"\targuments\x18\x05 \x03(\tR\targuments\x12\x1a\n" +
-	"\bchecksum\x18\x06 \x01(\tR\bchecksum\x1a\xc6\x05\n" +
+	"\bchecksum\x18\x06 \x01(\tR\bchecksum\x1a\xba\a\n" +
 	"\bManifest\x123\n" +
 	"\x16max_memory_usage_bytes\x18\x01 \x01(\x03R\x13maxMemoryUsageBytes\x127\n" +
 	"\x18max_cpu_usage_percentage\x18\x02 \x01(\x05R\x15maxCpuUsagePercentage\x12D\n" +
@@ -1861,14 +2684,59 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\rstring_config\x18\n" +
 	" \x01(\tH\x00R\fstringConfig\x12>\n" +
 	"\rstruct_config\x18\v \x01(\v2\x17.google.protobuf.StructH\x00R\fstructConfig\x127\n" +
-	"\x18start_exp_backoff_factor\x18\f \x01(\x05R\x15startExpBackoffFactorB\b\n" +
+	"\x18start_exp_backoff_factor\x18\f \x01(\x05R\x15startExpBackoffFactor\x12?\n" +
+	"\vplugin_type\x18\r \x01(\x0e2\x1e.agent_controlplane.PluginTypeR\n" +
+	"pluginType\x12d\n" +
+	"\x18plugin_installation_type\x18\x0e \x01(\x0e2*.agent_controlplane.PluginInstallationTypeR\x16pluginInstallationType\x12K\n" +
+	"\x0fexecution_model\x18\x0f \x01(\v2\".agent_controlplane.ExecutionModelR\x0eexecutionModelB\b\n" +
 	"\x06config\"D\n" +
 	"\x06Action\x12\x16\n" +
 	"\x12ACTION_UNSPECIFIED\x10\x00\x12\v\n" +
 	"\aINSTALL\x10\x01\x12\n" +
 	"\n" +
 	"\x06REMOVE\x10\x02\x12\t\n" +
-	"\x05APPLY\x10\x03\"\xa2\x05\n" +
+	"\x05APPLY\x10\x03\"\xf9\x06\n" +
+	"\x0eExecutionModel\x12G\n" +
+	"\n" +
+	"on_default\x18\x01 \x01(\x0e2(.agent_controlplane.ExecutionModel.StateR\tonDefault\x12C\n" +
+	"\bon_match\x18\x02 \x01(\x0e2(.agent_controlplane.ExecutionModel.StateR\aonMatch\x12Q\n" +
+	"\fmatch_policy\x18\x03 \x01(\x0e2..agent_controlplane.ExecutionModel.MatchPolicyR\vmatchPolicy\x12/\n" +
+	"\x05rules\x18\x04 \x03(\v2\x19.agent_controlplane.RulesR\x05rules\x12#\n" +
+	"\rboot_critical\x18\x05 \x01(\bR\fbootCritical\x12G\n" +
+	"\bone_shot\x18\x06 \x01(\v2*.agent_controlplane.ExecutionModel.OneShotH\x00R\aoneShot\x12C\n" +
+	"\x06daemon\x18\a \x01(\v2).agent_controlplane.ExecutionModel.DaemonH\x00R\x06daemon\x1a\b\n" +
+	"\x06Daemon\x1a\x9a\x01\n" +
+	"\aOneShot\x12G\n" +
+	"\btriggers\x18\x01 \x01(\v2+.agent_controlplane.ExecutionModel.TriggersR\btriggers\x12F\n" +
+	"\x11execution_timeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x10executionTimeout\x1ay\n" +
+	"\bTriggers\x12\x18\n" +
+	"\astartup\x18\x01 \x01(\bR\astartup\x12\x1c\n" +
+	"\tfirstboot\x18\x02 \x01(\bR\tfirstboot\x125\n" +
+	"\binterval\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\binterval\"9\n" +
+	"\x05State\x12\x15\n" +
+	"\x11STATE_UNSPECIFIED\x10\x00\x12\v\n" +
+	"\aENABLED\x10\x01\x12\f\n" +
+	"\bDISABLED\x10\x02\"=\n" +
+	"\vMatchPolicy\x12\x1c\n" +
+	"\x18MATCH_POLICY_UNSPECIFIED\x10\x00\x12\a\n" +
+	"\x03ALL\x10\x01\x12\a\n" +
+	"\x03ANY\x10\x02B\x06\n" +
+	"\x04type\"\x89\x03\n" +
+	"\x05Rules\x125\n" +
+	"\x05scope\x18\x01 \x01(\x0e2\x1f.agent_controlplane.Rules.ScopeR\x05scope\x12\x1c\n" +
+	"\tattribute\x18\x02 \x01(\tR\tattribute\x12]\n" +
+	"\x13comparison_operator\x18\x03 \x01(\x0e2,.agent_controlplane.Rules.ComparisonOperatorR\x12comparisonOperator\x12,\n" +
+	"\x05value\x18\x04 \x01(\v2\x16.google.protobuf.ValueR\x05value\"V\n" +
+	"\x12ComparisonOperator\x12\x18\n" +
+	"\x14OPERATOR_UNSPECIFIED\x10\x00\x12\t\n" +
+	"\x05EQUAL\x10\x01\x12\r\n" +
+	"\tNOT_EQUAL\x10\x02\x12\f\n" +
+	"\bCONTAINS\x10\x03\"F\n" +
+	"\x05Scope\x12\x19\n" +
+	"\x15NAMESPACE_UNSPECIFIED\x10\x00\x12\x06\n" +
+	"\x02OS\x10\x01\x12\f\n" +
+	"\bINSTANCE\x10\x02\x12\f\n" +
+	"\bMETADATA\x10\x03\"\xa2\x05\n" +
 	"\x12PluginEventMessage\x12\x1f\n" +
 	"\vrevision_id\x18\x01 \x01(\tR\n" +
 	"revisionId\x12\x1f\n" +
@@ -1932,7 +2800,16 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\x19MODULE_STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_SKIPPED\x10\x01\x12\x11\n" +
 	"\rSTATUS_FAILED\x10\x02\x12\x14\n" +
-	"\x10STATUS_SUCCEEDED\x10\x03B\x18Z\x16google_guest_agent/acpb\x06proto3"
+	"\x10STATUS_SUCCEEDED\x10\x03*C\n" +
+	"\n" +
+	"PluginType\x12\x1b\n" +
+	"\x17PLUGIN_TYPE_UNSPECIFIED\x10\x00\x12\n" +
+	"\n" +
+	"\x06DAEMON\x10\x01\x12\f\n" +
+	"\bONE_SHOT\x10\x02*J\n" +
+	"\x16PluginInstallationType\x12\x18\n" +
+	"\x14DYNAMIC_INSTALLATION\x10\x00\x12\x16\n" +
+	"\x12LOCAL_INSTALLATION\x10\x01B\x18Z\x16google_guest_agent/acpb\x06proto3"
 
 var (
 	file_agent_controlplane_proto_rawDescOnce sync.Once
@@ -1946,66 +2823,98 @@ func file_agent_controlplane_proto_rawDescGZIP() []byte {
 	return file_agent_controlplane_proto_rawDescData
 }
 
-var file_agent_controlplane_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_agent_controlplane_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_agent_controlplane_proto_enumTypes = make([]protoimpl.EnumInfo, 12)
+var file_agent_controlplane_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_agent_controlplane_proto_goTypes = []any{
-	(AgentInfo_AgentCapability)(0),                         // 0: agent_controlplane.AgentInfo.AgentCapability
-	(CurrentPluginStates_DaemonPluginState_StatusValue)(0), // 1: agent_controlplane.CurrentPluginStates.DaemonPluginState.StatusValue
-	(ConfigurePluginStates_Action)(0),                      // 2: agent_controlplane.ConfigurePluginStates.Action
-	(PluginEventMessage_PluginEventType)(0),                // 3: agent_controlplane.PluginEventMessage.PluginEventType
-	(GuestAgentModuleMetric_Metric)(0),                     // 4: agent_controlplane.GuestAgentModuleMetric.Metric
-	(GuestAgentModuleMetric_ModuleStatus)(0),               // 5: agent_controlplane.GuestAgentModuleMetric.ModuleStatus
-	(*PlatformInfo)(nil),                                   // 6: agent_controlplane.PlatformInfo
-	(*GetAgentInfo)(nil),                                   // 7: agent_controlplane.GetAgentInfo
-	(*AgentInfo)(nil),                                      // 8: agent_controlplane.AgentInfo
-	(*GetOSInfo)(nil),                                      // 9: agent_controlplane.GetOSInfo
-	(*OSInfo)(nil),                                         // 10: agent_controlplane.OSInfo
-	(*ListPluginStates)(nil),                               // 11: agent_controlplane.ListPluginStates
-	(*CurrentPluginStates)(nil),                            // 12: agent_controlplane.CurrentPluginStates
-	(*ConfigurePluginStates)(nil),                          // 13: agent_controlplane.ConfigurePluginStates
-	(*PluginEventMessage)(nil),                             // 14: agent_controlplane.PluginEventMessage
-	(*GuestAgentModuleMetrics)(nil),                        // 15: agent_controlplane.GuestAgentModuleMetrics
-	(*GuestAgentModuleMetric)(nil),                         // 16: agent_controlplane.GuestAgentModuleMetric
-	(*CurrentPluginStates_DaemonPluginState)(nil),          // 17: agent_controlplane.CurrentPluginStates.DaemonPluginState
-	(*CurrentPluginStates_DaemonPluginState_Status)(nil),   // 18: agent_controlplane.CurrentPluginStates.DaemonPluginState.Status
-	(*CurrentPluginStates_DaemonPluginState_Metric)(nil),   // 19: agent_controlplane.CurrentPluginStates.DaemonPluginState.Metric
-	(*ConfigurePluginStates_ConfigurePlugin)(nil),          // 20: agent_controlplane.ConfigurePluginStates.ConfigurePlugin
-	(*ConfigurePluginStates_Plugin)(nil),                   // 21: agent_controlplane.ConfigurePluginStates.Plugin
-	(*ConfigurePluginStates_Manifest)(nil),                 // 22: agent_controlplane.ConfigurePluginStates.Manifest
-	(*timestamppb.Timestamp)(nil),                          // 23: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),                            // 24: google.protobuf.Duration
-	(*structpb.Struct)(nil),                                // 25: google.protobuf.Struct
+	(PluginType)(0),                                // 0: agent_controlplane.PluginType
+	(PluginInstallationType)(0),                    // 1: agent_controlplane.PluginInstallationType
+	(AgentInfo_AgentCapability)(0),                 // 2: agent_controlplane.AgentInfo.AgentCapability
+	(CurrentPluginStates_StatusValue)(0),           // 3: agent_controlplane.CurrentPluginStates.StatusValue
+	(ConfigurePluginStates_Action)(0),              // 4: agent_controlplane.ConfigurePluginStates.Action
+	(ExecutionModel_State)(0),                      // 5: agent_controlplane.ExecutionModel.State
+	(ExecutionModel_MatchPolicy)(0),                // 6: agent_controlplane.ExecutionModel.MatchPolicy
+	(Rules_ComparisonOperator)(0),                  // 7: agent_controlplane.Rules.ComparisonOperator
+	(Rules_Scope)(0),                               // 8: agent_controlplane.Rules.Scope
+	(PluginEventMessage_PluginEventType)(0),        // 9: agent_controlplane.PluginEventMessage.PluginEventType
+	(GuestAgentModuleMetric_Metric)(0),             // 10: agent_controlplane.GuestAgentModuleMetric.Metric
+	(GuestAgentModuleMetric_ModuleStatus)(0),       // 11: agent_controlplane.GuestAgentModuleMetric.ModuleStatus
+	(*PlatformInfo)(nil),                           // 12: agent_controlplane.PlatformInfo
+	(*GetAgentInfo)(nil),                           // 13: agent_controlplane.GetAgentInfo
+	(*AgentInfo)(nil),                              // 14: agent_controlplane.AgentInfo
+	(*GetOSInfo)(nil),                              // 15: agent_controlplane.GetOSInfo
+	(*OSInfo)(nil),                                 // 16: agent_controlplane.OSInfo
+	(*ListPluginStates)(nil),                       // 17: agent_controlplane.ListPluginStates
+	(*CurrentPluginStates)(nil),                    // 18: agent_controlplane.CurrentPluginStates
+	(*ConfigurePluginStates)(nil),                  // 19: agent_controlplane.ConfigurePluginStates
+	(*ExecutionModel)(nil),                         // 20: agent_controlplane.ExecutionModel
+	(*Rules)(nil),                                  // 21: agent_controlplane.Rules
+	(*PluginEventMessage)(nil),                     // 22: agent_controlplane.PluginEventMessage
+	(*GuestAgentModuleMetrics)(nil),                // 23: agent_controlplane.GuestAgentModuleMetrics
+	(*GuestAgentModuleMetric)(nil),                 // 24: agent_controlplane.GuestAgentModuleMetric
+	(*CurrentPluginStates_DaemonPluginState)(nil),  // 25: agent_controlplane.CurrentPluginStates.DaemonPluginState
+	(*CurrentPluginStates_OneShotPluginState)(nil), // 26: agent_controlplane.CurrentPluginStates.OneShotPluginState
+	(*CurrentPluginStates_Status)(nil),             // 27: agent_controlplane.CurrentPluginStates.Status
+	(*CurrentPluginStates_Metric)(nil),             // 28: agent_controlplane.CurrentPluginStates.Metric
+	(*ConfigurePluginStates_ConfigurePlugin)(nil),  // 29: agent_controlplane.ConfigurePluginStates.ConfigurePlugin
+	(*ConfigurePluginStates_Plugin)(nil),           // 30: agent_controlplane.ConfigurePluginStates.Plugin
+	(*ConfigurePluginStates_Manifest)(nil),         // 31: agent_controlplane.ConfigurePluginStates.Manifest
+	(*ExecutionModel_Daemon)(nil),                  // 32: agent_controlplane.ExecutionModel.Daemon
+	(*ExecutionModel_OneShot)(nil),                 // 33: agent_controlplane.ExecutionModel.OneShot
+	(*ExecutionModel_Triggers)(nil),                // 34: agent_controlplane.ExecutionModel.Triggers
+	(*structpb.Value)(nil),                         // 35: google.protobuf.Value
+	(*timestamppb.Timestamp)(nil),                  // 36: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),                    // 37: google.protobuf.Duration
+	(*structpb.Struct)(nil),                        // 38: google.protobuf.Struct
 }
 var file_agent_controlplane_proto_depIdxs = []int32{
-	0,  // 0: agent_controlplane.AgentInfo.agent_capabilities:type_name -> agent_controlplane.AgentInfo.AgentCapability
-	17, // 1: agent_controlplane.CurrentPluginStates.daemon_plugin_states:type_name -> agent_controlplane.CurrentPluginStates.DaemonPluginState
-	20, // 2: agent_controlplane.ConfigurePluginStates.configure_plugins:type_name -> agent_controlplane.ConfigurePluginStates.ConfigurePlugin
-	3,  // 3: agent_controlplane.PluginEventMessage.event_type:type_name -> agent_controlplane.PluginEventMessage.PluginEventType
-	23, // 4: agent_controlplane.PluginEventMessage.event_timestamp:type_name -> google.protobuf.Timestamp
-	16, // 5: agent_controlplane.GuestAgentModuleMetrics.metrics:type_name -> agent_controlplane.GuestAgentModuleMetric
-	4,  // 6: agent_controlplane.GuestAgentModuleMetric.metric_name:type_name -> agent_controlplane.GuestAgentModuleMetric.Metric
-	23, // 7: agent_controlplane.GuestAgentModuleMetric.start_time:type_name -> google.protobuf.Timestamp
-	23, // 8: agent_controlplane.GuestAgentModuleMetric.end_time:type_name -> google.protobuf.Timestamp
-	5,  // 9: agent_controlplane.GuestAgentModuleMetric.module_status:type_name -> agent_controlplane.GuestAgentModuleMetric.ModuleStatus
-	18, // 10: agent_controlplane.CurrentPluginStates.DaemonPluginState.current_plugin_status:type_name -> agent_controlplane.CurrentPluginStates.DaemonPluginState.Status
-	18, // 11: agent_controlplane.CurrentPluginStates.DaemonPluginState.pending_plugin_status:type_name -> agent_controlplane.CurrentPluginStates.DaemonPluginState.Status
-	19, // 12: agent_controlplane.CurrentPluginStates.DaemonPluginState.current_plugin_metrics:type_name -> agent_controlplane.CurrentPluginStates.DaemonPluginState.Metric
-	1,  // 13: agent_controlplane.CurrentPluginStates.DaemonPluginState.Status.status:type_name -> agent_controlplane.CurrentPluginStates.DaemonPluginState.StatusValue
-	23, // 14: agent_controlplane.CurrentPluginStates.DaemonPluginState.Status.update_time:type_name -> google.protobuf.Timestamp
-	23, // 15: agent_controlplane.CurrentPluginStates.DaemonPluginState.Metric.timestamp:type_name -> google.protobuf.Timestamp
-	2,  // 16: agent_controlplane.ConfigurePluginStates.ConfigurePlugin.action:type_name -> agent_controlplane.ConfigurePluginStates.Action
-	21, // 17: agent_controlplane.ConfigurePluginStates.ConfigurePlugin.plugin:type_name -> agent_controlplane.ConfigurePluginStates.Plugin
-	22, // 18: agent_controlplane.ConfigurePluginStates.ConfigurePlugin.manifest:type_name -> agent_controlplane.ConfigurePluginStates.Manifest
-	24, // 19: agent_controlplane.ConfigurePluginStates.Manifest.metrics_interval:type_name -> google.protobuf.Duration
-	24, // 20: agent_controlplane.ConfigurePluginStates.Manifest.download_timeout:type_name -> google.protobuf.Duration
-	24, // 21: agent_controlplane.ConfigurePluginStates.Manifest.start_timeout:type_name -> google.protobuf.Duration
-	24, // 22: agent_controlplane.ConfigurePluginStates.Manifest.stop_timeout:type_name -> google.protobuf.Duration
-	25, // 23: agent_controlplane.ConfigurePluginStates.Manifest.struct_config:type_name -> google.protobuf.Struct
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	2,  // 0: agent_controlplane.AgentInfo.agent_capabilities:type_name -> agent_controlplane.AgentInfo.AgentCapability
+	25, // 1: agent_controlplane.CurrentPluginStates.daemon_plugin_states:type_name -> agent_controlplane.CurrentPluginStates.DaemonPluginState
+	26, // 2: agent_controlplane.CurrentPluginStates.one_shot_plugin_states:type_name -> agent_controlplane.CurrentPluginStates.OneShotPluginState
+	29, // 3: agent_controlplane.ConfigurePluginStates.configure_plugins:type_name -> agent_controlplane.ConfigurePluginStates.ConfigurePlugin
+	5,  // 4: agent_controlplane.ExecutionModel.on_default:type_name -> agent_controlplane.ExecutionModel.State
+	5,  // 5: agent_controlplane.ExecutionModel.on_match:type_name -> agent_controlplane.ExecutionModel.State
+	6,  // 6: agent_controlplane.ExecutionModel.match_policy:type_name -> agent_controlplane.ExecutionModel.MatchPolicy
+	21, // 7: agent_controlplane.ExecutionModel.rules:type_name -> agent_controlplane.Rules
+	33, // 8: agent_controlplane.ExecutionModel.one_shot:type_name -> agent_controlplane.ExecutionModel.OneShot
+	32, // 9: agent_controlplane.ExecutionModel.daemon:type_name -> agent_controlplane.ExecutionModel.Daemon
+	8,  // 10: agent_controlplane.Rules.scope:type_name -> agent_controlplane.Rules.Scope
+	7,  // 11: agent_controlplane.Rules.comparison_operator:type_name -> agent_controlplane.Rules.ComparisonOperator
+	35, // 12: agent_controlplane.Rules.value:type_name -> google.protobuf.Value
+	9,  // 13: agent_controlplane.PluginEventMessage.event_type:type_name -> agent_controlplane.PluginEventMessage.PluginEventType
+	36, // 14: agent_controlplane.PluginEventMessage.event_timestamp:type_name -> google.protobuf.Timestamp
+	24, // 15: agent_controlplane.GuestAgentModuleMetrics.metrics:type_name -> agent_controlplane.GuestAgentModuleMetric
+	10, // 16: agent_controlplane.GuestAgentModuleMetric.metric_name:type_name -> agent_controlplane.GuestAgentModuleMetric.Metric
+	36, // 17: agent_controlplane.GuestAgentModuleMetric.start_time:type_name -> google.protobuf.Timestamp
+	36, // 18: agent_controlplane.GuestAgentModuleMetric.end_time:type_name -> google.protobuf.Timestamp
+	11, // 19: agent_controlplane.GuestAgentModuleMetric.module_status:type_name -> agent_controlplane.GuestAgentModuleMetric.ModuleStatus
+	27, // 20: agent_controlplane.CurrentPluginStates.DaemonPluginState.current_plugin_status:type_name -> agent_controlplane.CurrentPluginStates.Status
+	27, // 21: agent_controlplane.CurrentPluginStates.DaemonPluginState.pending_plugin_status:type_name -> agent_controlplane.CurrentPluginStates.Status
+	28, // 22: agent_controlplane.CurrentPluginStates.DaemonPluginState.current_plugin_metrics:type_name -> agent_controlplane.CurrentPluginStates.Metric
+	27, // 23: agent_controlplane.CurrentPluginStates.OneShotPluginState.current_plugin_status:type_name -> agent_controlplane.CurrentPluginStates.Status
+	27, // 24: agent_controlplane.CurrentPluginStates.OneShotPluginState.pending_plugin_status:type_name -> agent_controlplane.CurrentPluginStates.Status
+	28, // 25: agent_controlplane.CurrentPluginStates.OneShotPluginState.current_plugin_metrics:type_name -> agent_controlplane.CurrentPluginStates.Metric
+	3,  // 26: agent_controlplane.CurrentPluginStates.Status.status:type_name -> agent_controlplane.CurrentPluginStates.StatusValue
+	36, // 27: agent_controlplane.CurrentPluginStates.Status.update_time:type_name -> google.protobuf.Timestamp
+	36, // 28: agent_controlplane.CurrentPluginStates.Metric.timestamp:type_name -> google.protobuf.Timestamp
+	4,  // 29: agent_controlplane.ConfigurePluginStates.ConfigurePlugin.action:type_name -> agent_controlplane.ConfigurePluginStates.Action
+	30, // 30: agent_controlplane.ConfigurePluginStates.ConfigurePlugin.plugin:type_name -> agent_controlplane.ConfigurePluginStates.Plugin
+	31, // 31: agent_controlplane.ConfigurePluginStates.ConfigurePlugin.manifest:type_name -> agent_controlplane.ConfigurePluginStates.Manifest
+	37, // 32: agent_controlplane.ConfigurePluginStates.Manifest.metrics_interval:type_name -> google.protobuf.Duration
+	37, // 33: agent_controlplane.ConfigurePluginStates.Manifest.download_timeout:type_name -> google.protobuf.Duration
+	37, // 34: agent_controlplane.ConfigurePluginStates.Manifest.start_timeout:type_name -> google.protobuf.Duration
+	37, // 35: agent_controlplane.ConfigurePluginStates.Manifest.stop_timeout:type_name -> google.protobuf.Duration
+	38, // 36: agent_controlplane.ConfigurePluginStates.Manifest.struct_config:type_name -> google.protobuf.Struct
+	0,  // 37: agent_controlplane.ConfigurePluginStates.Manifest.plugin_type:type_name -> agent_controlplane.PluginType
+	1,  // 38: agent_controlplane.ConfigurePluginStates.Manifest.plugin_installation_type:type_name -> agent_controlplane.PluginInstallationType
+	20, // 39: agent_controlplane.ConfigurePluginStates.Manifest.execution_model:type_name -> agent_controlplane.ExecutionModel
+	34, // 40: agent_controlplane.ExecutionModel.OneShot.triggers:type_name -> agent_controlplane.ExecutionModel.Triggers
+	37, // 41: agent_controlplane.ExecutionModel.OneShot.execution_timeout:type_name -> google.protobuf.Duration
+	37, // 42: agent_controlplane.ExecutionModel.Triggers.interval:type_name -> google.protobuf.Duration
+	43, // [43:43] is the sub-list for method output_type
+	43, // [43:43] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_agent_controlplane_proto_init() }
@@ -2013,8 +2922,12 @@ func file_agent_controlplane_proto_init() {
 	if File_agent_controlplane_proto != nil {
 		return
 	}
-	file_agent_controlplane_proto_msgTypes[8].OneofWrappers = []any{}
-	file_agent_controlplane_proto_msgTypes[16].OneofWrappers = []any{
+	file_agent_controlplane_proto_msgTypes[8].OneofWrappers = []any{
+		(*ExecutionModel_OneShot_)(nil),
+		(*ExecutionModel_Daemon_)(nil),
+	}
+	file_agent_controlplane_proto_msgTypes[10].OneofWrappers = []any{}
+	file_agent_controlplane_proto_msgTypes[19].OneofWrappers = []any{
 		(*ConfigurePluginStates_Manifest_StringConfig)(nil),
 		(*ConfigurePluginStates_Manifest_StructConfig)(nil),
 	}
@@ -2023,8 +2936,8 @@ func file_agent_controlplane_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_controlplane_proto_rawDesc), len(file_agent_controlplane_proto_rawDesc)),
-			NumEnums:      6,
-			NumMessages:   17,
+			NumEnums:      12,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

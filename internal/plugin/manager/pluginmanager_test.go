@@ -109,39 +109,39 @@ func TestStore(t *testing.T) {
 	cfg2 := &ServiceConfig{Structured: bytes}
 
 	p1 := &Plugin{
-		Name:       "pluginA",
-		PluginType: PluginTypeCore,
-		Revision:   "1",
-		Address:    "test-address1",
-		Protocol:   "tcp",
+		Name:     "pluginA",
+		Revision: "1",
+		Address:  "test-address1",
+		Protocol: "tcp",
 		Manifest: &Manifest{
-			StartAttempts: 3,
-			StartConfig:   cfg,
+			StartAttempts:          3,
+			StartConfig:            cfg,
+			PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
 		},
 		RuntimeInfo: &RuntimeInfo{Pid: 123},
 	}
 
 	p2 := &Plugin{
-		Name:       "pluginB",
-		PluginType: PluginTypeDynamic,
-		Revision:   "2",
-		Address:    "test-address2",
+		Name:     "pluginB",
+		Revision: "2",
+		Address:  "test-address2",
 		Manifest: &Manifest{
-			MaxMemoryUsage: 1024 * 1024,
-			StopTimeout:    3 * time.Second,
+			MaxMemoryUsage:         1024 * 1024,
+			StopTimeout:            3 * time.Second,
+			PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION,
 		},
 		RuntimeInfo: &RuntimeInfo{Pid: 123},
 	}
 
 	p3 := &Plugin{
-		Name:       "pluginC",
-		PluginType: PluginTypeDynamic,
-		Revision:   "3",
-		Address:    "test-address3",
-		Protocol:   "tcp",
+		Name:     "pluginC",
+		Revision: "3",
+		Address:  "test-address3",
+		Protocol: "tcp",
 		Manifest: &Manifest{
-			StartAttempts: 3,
-			StartConfig:   cfg2,
+			StartAttempts:          3,
+			StartConfig:            cfg2,
+			PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION,
 		},
 		RuntimeInfo: &RuntimeInfo{Pid: 123},
 	}
@@ -323,12 +323,12 @@ func TestInitPluginManager(t *testing.T) {
 
 	pluginManager.setInstanceID("1234567890")
 
-	pluginA := &Plugin{Name: "pluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr, EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3, MaxMetricDatapoints: 2, MetricsInterval: time.Second * 3}}
+	pluginA := &Plugin{Name: "pluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr, EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_RUNNING}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3, MaxMetricDatapoints: 2, MetricsInterval: time.Second * 3}}
 	if err := pluginA.Store(); err != nil {
 		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
 	}
 
-	pluginB := &Plugin{Name: "pluginB", Revision: "revisionB", Protocol: udsProtocol, Address: "invalid-address", EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_DaemonPluginState_CRASHED}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3}}
+	pluginB := &Plugin{Name: "pluginB", Revision: "revisionB", Protocol: udsProtocol, Address: "invalid-address", EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_CRASHED}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3}}
 	if err := pluginB.Store(); err != nil {
 		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
 	}
@@ -641,6 +641,9 @@ func TestInstallPlugin(t *testing.T) {
 				scheduler:                s,
 				inProgressPluginRequests: make(map[string]bool),
 			}
+			if tc.local {
+				req.Manifest.PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
+			}
 			pluginManager = pm
 			err := pm.installPlugin(ctx, req, tc.local)
 			if (err != nil) != tc.wantErr {
@@ -687,8 +690,8 @@ func TestInstallPlugin(t *testing.T) {
 				t.Errorf("pm.plugins[%s] returned unexpected diff (-want +got):\n%s", req.Plugin.Name, diff)
 			}
 
-			if got.State() != acpb.CurrentPluginStates_DaemonPluginState_RUNNING {
-				t.Errorf("installPlugin(ctx, %+v) = plugin state %q, want %q", req, got.State(), acpb.CurrentPluginStates_DaemonPluginState_RUNNING)
+			if got.State() != acpb.CurrentPluginStates_RUNNING {
+				t.Errorf("installPlugin(ctx, %+v) = plugin state %q, want %q", req, got.State(), acpb.CurrentPluginStates_RUNNING)
 			}
 
 			if ps.ctrs[tc.name] != 1 {
@@ -804,7 +807,7 @@ func TestUpgradePlugin(t *testing.T) {
 	}
 
 	// This is intermediate state we captured during the upgrade process.
-	wantPendingPlugins := map[string]*pendingPluginStatus{p.Name: &pendingPluginStatus{revision: req.Plugin.GetRevisionId(), status: acpb.CurrentPluginStates_DaemonPluginState_INSTALLING}}
+	wantPendingPlugins := map[string]*pendingPluginStatus{p.Name: &pendingPluginStatus{revision: req.Plugin.GetRevisionId(), status: acpb.CurrentPluginStates_INSTALLING}}
 	if diff := cmp.Diff(wantPendingPlugins, gotPendingPlugins.status, cmp.AllowUnexported(pendingPluginStatus{})); diff != "" {
 		t.Errorf("installPlugin(ctx, %+v) did not update pending plugin revisions (-want +got):\n%s", req, diff)
 	}
@@ -832,7 +835,7 @@ func TestRemovePlugin(t *testing.T) {
 	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
 	createTestFile(t, entryPoint)
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}
@@ -899,10 +902,10 @@ func TestListPluginStates(t *testing.T) {
 	simpleHashBytes := sha256.Sum256([]byte(simpleData))
 	simpleHash := hex.EncodeToString(simpleHashBytes[:])
 
-	pluginA := &Plugin{Name: "PluginA", Revision: "RevisionA", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 0, messages: []string{"ok"}, timestamp: now}, metrics: boundedlist.New[Metric](2), status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}, Manifest: &Manifest{StartConfig: &ServiceConfig{Simple: simpleData}}}
-	pluginB := &Plugin{Name: "PluginB", Revision: "RevisionB", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 1, messages: []string{"missing pre-reqs"}, timestamp: now}, metrics: boundedlist.New[Metric](2), pendingPluginStatus: &pendingPluginStatus{revision: "RevisionB1"}, status: acpb.CurrentPluginStates_DaemonPluginState_CRASHED}, Manifest: &Manifest{}}
+	pluginA := &Plugin{Name: "PluginA", Revision: "RevisionA", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 0, messages: []string{"ok"}, timestamp: now}, metrics: boundedlist.New[Metric](2), status: acpb.CurrentPluginStates_RUNNING}, Manifest: &Manifest{StartConfig: &ServiceConfig{Simple: simpleData}}}
+	pluginB := &Plugin{Name: "PluginB", Revision: "RevisionB", RuntimeInfo: &RuntimeInfo{health: &healthCheck{responseCode: 1, messages: []string{"missing pre-reqs"}, timestamp: now}, metrics: boundedlist.New[Metric](2), pendingPluginStatus: &pendingPluginStatus{revision: "RevisionB1"}, status: acpb.CurrentPluginStates_CRASHED}, Manifest: &Manifest{}}
 
-	pluginA.setPendingStatus("RevisionA1", acpb.CurrentPluginStates_DaemonPluginState_INSTALLING)
+	pluginA.setPendingStatus("RevisionA1", acpb.CurrentPluginStates_INSTALLING)
 	pluginB.resetPendingStatus()
 
 	metric := Metric{timestamp: &tpb.Timestamp{Seconds: now.Unix()}, memoryUsage: 100, cpuUsage: 500}
@@ -914,11 +917,11 @@ func TestListPluginStates(t *testing.T) {
 			&acpb.CurrentPluginStates_DaemonPluginState{
 				Name:              pluginA.Name,
 				CurrentRevisionId: pluginA.Revision,
-				CurrentPluginMetrics: []*acpb.CurrentPluginStates_DaemonPluginState_Metric{
+				CurrentPluginMetrics: []*acpb.CurrentPluginStates_Metric{
 					{Timestamp: metric.timestamp, MemoryUsage: metric.memoryUsage, CpuUsage: metric.cpuUsage},
 				},
 				PendingRevisionId: pluginA.RuntimeInfo.pendingPluginStatus.revision,
-				CurrentPluginStatus: &acpb.CurrentPluginStates_DaemonPluginState_Status{
+				CurrentPluginStatus: &acpb.CurrentPluginStates_Status{
 					Status:       pluginA.RuntimeInfo.status,
 					ResponseCode: pluginA.RuntimeInfo.health.responseCode,
 					Results:      pluginA.RuntimeInfo.health.messages,
@@ -929,7 +932,7 @@ func TestListPluginStates(t *testing.T) {
 			&acpb.CurrentPluginStates_DaemonPluginState{
 				Name:              pluginB.Name,
 				CurrentRevisionId: pluginB.Revision,
-				CurrentPluginStatus: &acpb.CurrentPluginStates_DaemonPluginState_Status{
+				CurrentPluginStatus: &acpb.CurrentPluginStates_Status{
 					Status:       pluginB.RuntimeInfo.status,
 					ResponseCode: pluginB.RuntimeInfo.health.responseCode,
 					Results:      pluginB.RuntimeInfo.health.messages,
@@ -938,7 +941,6 @@ func TestListPluginStates(t *testing.T) {
 			},
 		},
 	}
-
 	gotResp := pm.ListPluginStates(context.Background(), &acpb.ListPluginStates{})
 	got := gotResp.GetDaemonPluginStates()
 
@@ -1265,8 +1267,8 @@ func TestRemoveAllDynamicPlugins(t *testing.T) {
 	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
 	createTestFile(t, entryPoint)
 
-	corePlugin := &Plugin{Name: "CorePlugin", Revision: "RevisionA", InstallPath: t.TempDir(), PluginType: PluginTypeCore}
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
+	corePlugin := &Plugin{Name: "CorePlugin", Revision: "RevisionA", InstallPath: t.TempDir(), Manifest: &Manifest{PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION}}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}
@@ -1304,12 +1306,12 @@ func TestInitAdHocPluginManager(t *testing.T) {
 
 	pluginManager.setInstanceID("test-instance-id")
 
-	pluginA := &Plugin{Name: "pluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr, EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3, MaxMetricDatapoints: 2, MetricsInterval: time.Second * 3}}
+	pluginA := &Plugin{Name: "pluginA", Revision: "revisionA", Protocol: udsProtocol, Address: addr, EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_RUNNING}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3, MaxMetricDatapoints: 2, MetricsInterval: time.Second * 3}}
 	if err := pluginA.Store(); err != nil {
 		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
 	}
 
-	pluginB := &Plugin{Name: "pluginB", Revision: "revisionB", Protocol: udsProtocol, Address: "invalid-address", EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_DaemonPluginState_CRASHED}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3}}
+	pluginB := &Plugin{Name: "pluginB", Revision: "revisionB", Protocol: udsProtocol, Address: "invalid-address", EntryPath: "testentry/binary", RuntimeInfo: &RuntimeInfo{Pid: -5555, status: acpb.CurrentPluginStates_CRASHED}, Manifest: &Manifest{StartAttempts: 3, StartTimeout: time.Second * 3}}
 	if err := pluginB.Store(); err != nil {
 		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
 	}
@@ -1355,8 +1357,8 @@ func TestAdHocStopPlugin(t *testing.T) {
 	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
 	createTestFile(t, entryPoint)
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
-	notRunningPlugin := &Plugin{Name: "PluginB", Revision: "RevisionB", Protocol: udsProtocol, Address: t.TempDir(), RuntimeInfo: &RuntimeInfo{Pid: -6666}, Manifest: &Manifest{StopTimeout: time.Second * 3}, PluginType: PluginTypeDynamic}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
+	notRunningPlugin := &Plugin{Name: "PluginB", Revision: "RevisionB", Protocol: udsProtocol, Address: t.TempDir(), RuntimeInfo: &RuntimeInfo{Pid: -6666}, Manifest: &Manifest{StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 
 	pm := &PluginManager{plugins: map[string]*Plugin{plugin.Name: plugin, notRunningPlugin.Name: notRunningPlugin}, protocol: udsProtocol, pluginMonitors: make(map[string]string)}
 
@@ -1393,7 +1395,7 @@ func TestApplyConfig(t *testing.T) {
 	setupConstraintTestClient(t)
 	setupMockPsClient(t, &mockPsClient{alive: true, exe: "test-entry-point"})
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: "test-entry-point", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{startConfigHash: "oldhash", StopTimeout: time.Second * 3, StartTimeout: time.Second * 3}}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: "test-entry-point", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{startConfigHash: "oldhash", StopTimeout: time.Second * 3, StartTimeout: time.Second * 3, PluginType: acpb.PluginType_DAEMON, PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}

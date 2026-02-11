@@ -63,13 +63,13 @@ type launchStep struct {
 func (l *launchStep) Name() string { return "LaunchPluginStep" }
 
 // Status returns the plugin state for current step.
-func (l *launchStep) Status() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	return acmpb.CurrentPluginStates_DaemonPluginState_STARTING
+func (l *launchStep) Status() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_STARTING
 }
 
 // Status returns the plugin state for current step.
-func (l *launchStep) ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	return acmpb.CurrentPluginStates_DaemonPluginState_CRASHED
+func (l *launchStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_CRASHED
 }
 
 // Run unpacks to the target directory and deletes the archive file.
@@ -99,7 +99,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	// static and does not change across revisions. For instance on Linux it is
 	// always /usr/lib/google/guest_agent/core_plugin. Skip symlink setup for core
 	// plugin.
-	if p.PluginType != PluginTypeCore {
+	if !p.IsLocal() {
 		if err := file.UpdateSymlink(p.staticInstallPath(), p.InstallPath); err != nil {
 			return fmt.Errorf("UpdateSymlink(%q, %q) failed for plugin %q: %w", p.staticInstallPath(), p.InstallPath, p.FullName(), err)
 		}
@@ -126,7 +126,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	// Launch the plugin.
 	if err := retry.Run(ctx, policy, launchFunc); err != nil {
 		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to launch plugin: [%v]. Plugin logs: %s", err, readPluginLogs(p.logfile())))
-		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+		p.setState(acmpb.CurrentPluginStates_CRASHED)
 		return err
 	}
 
@@ -148,7 +148,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	// Apply resource constraint.
 	if err := retry.Run(ctx, policy, constraintFunc); err != nil {
 		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to apply resource constraint: [%v]", err))
-		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+		p.setState(acmpb.CurrentPluginStates_CRASHED)
 		return err
 	}
 
@@ -166,25 +166,25 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 			}
 			return fmt.Errorf("socket %q does not exist for plugin %q", p.Address, p.FullName())
 		}); err != nil {
-			p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+			p.setState(acmpb.CurrentPluginStates_CRASHED)
 			return fmt.Errorf("failed to verify socket %q for plugin %q: %w", p.Address, p.FullName(), err)
 		}
 	}
 
 	if err := p.Connect(ctx); err != nil {
-		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+		p.setState(acmpb.CurrentPluginStates_CRASHED)
 		return fmt.Errorf("failed to connect plugin %s: %w", p.FullName(), err)
 	}
 
 	_, status := p.Start(ctx)
 	if status.Err() != nil {
 		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to start plugin: [%+v]. Plugin logs: %s", status, readPluginLogs(p.logfile())))
-		p.setState(acmpb.CurrentPluginStates_DaemonPluginState_CRASHED)
+		p.setState(acmpb.CurrentPluginStates_CRASHED)
 		return fmt.Errorf("failed to start plugin %s with error: %w", p.FullName(), status.Err())
 	}
 
 	sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_STARTED, "Successfully started the plugin.")
-	p.setState(acmpb.CurrentPluginStates_DaemonPluginState_RUNNING)
+	p.setState(acmpb.CurrentPluginStates_RUNNING)
 	galog.Infof("Successfully started plugin %q", p.FullName())
 
 	if err := p.Store(); err != nil {

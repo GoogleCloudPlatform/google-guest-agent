@@ -43,15 +43,15 @@ type stopStep struct {
 func (ss *stopStep) Name() string { return "StopPluginStep" }
 
 // Status returns the plugin state for current step.
-func (ss *stopStep) Status() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
-	return acmpb.CurrentPluginStates_DaemonPluginState_STOPPING
+func (ss *stopStep) Status() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_STOPPING
 }
 
 // Status returns the plugin state for current step.
-func (ss *stopStep) ErrorStatus() acmpb.CurrentPluginStates_DaemonPluginState_StatusValue {
+func (ss *stopStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
 	// This step is not expected to fail as agent would kill the plugin if stop
 	// fails.
-	return acmpb.CurrentPluginStates_DaemonPluginState_STATE_VALUE_UNSPECIFIED
+	return acmpb.CurrentPluginStates_STATE_VALUE_UNSPECIFIED
 }
 
 // isSameExecutablePath checks if the executable path is the same as the plugin
@@ -117,7 +117,7 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 		}
 	}
 
-	p.setState(acmpb.CurrentPluginStates_DaemonPluginState_STOPPED)
+	p.setState(acmpb.CurrentPluginStates_STOPPED)
 
 	// Reset the plugin client and process PID.
 	p.client = nil
@@ -147,7 +147,7 @@ func cleanup(ctx context.Context, p *Plugin) error {
 	}
 
 	// Files paths of core plugins are managed by package manager do not remove.
-	if p.PluginType != PluginTypeCore {
+	if !p.IsLocal() {
 		if err := os.RemoveAll(p.InstallPath); err != nil {
 			errs = append(errs, fmt.Errorf("%s plugin install path (%s) removal failed with error: %w", p.FullName(), p.InstallPath, err))
 		}

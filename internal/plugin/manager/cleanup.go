@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
-	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
@@ -66,7 +66,7 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 		}
 		if _, err := m.Fetch(p.Name()); err != nil {
 			installPath := filepath.Join(pluginInstallLoc, p.Name())
-			failedRemovals[p.Name()] = &Plugin{Name: pluginName, Revision: pluginRevision, InstallPath: installPath, PluginType: PluginTypeDynamic}
+			failedRemovals[p.Name()] = &Plugin{Name: pluginName, Revision: pluginRevision, InstallPath: installPath, Manifest: &Manifest{PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 			galog.Debugf("Found leftover plugin %q, marking for removal", p.Name())
 		}
 	}
@@ -150,8 +150,8 @@ func (s *CleanupJob) ID() string {
 }
 
 // MetricName returns the metric name of the cleanup job.
-func (s *CleanupJob) MetricName() acmpb.GuestAgentModuleMetric_Metric {
-	return acmpb.GuestAgentModuleMetric_PLUGIN_CLEANUP
+func (s *CleanupJob) MetricName() acpb.GuestAgentModuleMetric_Metric {
+	return acpb.GuestAgentModuleMetric_PLUGIN_CLEANUP
 }
 
 // Interval returns the interval of the cleanup job. This is set to 24 hours

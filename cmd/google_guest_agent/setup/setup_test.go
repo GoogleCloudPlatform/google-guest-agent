@@ -35,7 +35,7 @@ import (
 type plugin struct {
 	name     string
 	revision string
-	status   acpb.CurrentPluginStates_DaemonPluginState_StatusValue
+	status   acpb.CurrentPluginStates_StatusValue
 }
 
 type testPluginManager struct {
@@ -49,8 +49,8 @@ func (m *testPluginManager) ListPluginStates(context.Context, *acpb.ListPluginSt
 	var states []*acpb.CurrentPluginStates_DaemonPluginState
 
 	for n, s := range m.plugins {
-		status := &acpb.CurrentPluginStates_DaemonPluginState_Status{Status: s.status}
-		state := &acpb.CurrentPluginStates_DaemonPluginState{CurrentPluginStatus: status, Name: n, CurrentRevisionId: s.revision}
+		status := &acpb.CurrentPluginStates_Status{Status: s.status}
+		state := &acpb.CurrentPluginStates_DaemonPluginState{Name: n, CurrentRevisionId: s.revision, CurrentPluginStatus: status}
 		states = append(states, state)
 	}
 
@@ -67,8 +67,8 @@ func TestVerifyPluginRunning(t *testing.T) {
 	ctx := context.Background()
 
 	plugins := make(map[string]plugin)
-	plugins["plugin1"] = plugin{name: "plugin1", revision: "1", status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}
-	plugins["plugin2"] = plugin{name: "plugin2", revision: "2", status: acpb.CurrentPluginStates_DaemonPluginState_CRASHED}
+	plugins["plugin1"] = plugin{name: "plugin1", revision: "1", status: acpb.CurrentPluginStates_RUNNING}
+	plugins["plugin2"] = plugin{name: "plugin2", revision: "2", status: acpb.CurrentPluginStates_CRASHED}
 
 	testManager := &testPluginManager{plugins: plugins}
 
@@ -116,9 +116,11 @@ func TestInstall(t *testing.T) {
 					EntryPoint: c.CorePluginPath,
 				},
 				Manifest: &acpb.ConfigurePluginStates_Manifest{
-					StartAttemptCount: 5,
-					StartTimeout:      &dpb.Duration{Seconds: 30},
-					StopTimeout:       &dpb.Duration{Seconds: 30},
+					StartAttemptCount:      5,
+					StartTimeout:           &dpb.Duration{Seconds: 30},
+					StopTimeout:            &dpb.Duration{Seconds: 30},
+					PluginType:             acpb.PluginType_DAEMON,
+					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
 				},
 			},
 		},
@@ -155,7 +157,7 @@ func TestInstall(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			plugins := make(map[string]plugin)
 			if !tc.wantErr {
-				plugins[manager.CorePluginName] = plugin{name: manager.CorePluginName, revision: c.Version, status: acpb.CurrentPluginStates_DaemonPluginState_RUNNING}
+				plugins[manager.CorePluginName] = plugin{name: manager.CorePluginName, revision: c.Version, status: acpb.CurrentPluginStates_RUNNING}
 			}
 			testManager := &testPluginManager{setOnInstall: plugins}
 			if tc.shouldSkip {
