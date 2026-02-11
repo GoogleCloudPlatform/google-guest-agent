@@ -31,6 +31,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
@@ -1578,6 +1579,187 @@ func TestSetConfig(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.want, manifest.StartConfig); diff != "" {
 				t.Errorf("setConfig(%v) returned diff (-want +got):\n%s", tc.req, diff)
+			}
+		})
+	}
+}
+
+func TestStartLocalPlugin(t *testing.T) {
+	connections := t.TempDir()
+	state := t.TempDir()
+	setBaseStateDir(t, state)
+	setupConstraintTestClient(t)
+	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+	cfg.Retrieve().Plugin.SocketConnectionsDir = connections
+	cfg.Retrieve().Core.ACSClient = false
+	addr := filepath.Join(connections, "PluginA_RevisionA.sock")
+	ps := &testPluginServer{ctrs: make(map[string]int)}
+	server, hash, runner, seenPendingPlugins := installSetup(t, ps, addr)
+	runner.pid = -6666
+	defer server.Close()
+
+	orig := pluginManager
+	t.Cleanup(func() { pluginManager = orig })
+
+	tests := []struct {
+		name     string
+		url      string
+		disabled bool
+		onReady  bool
+	}{
+		{
+			name: "success",
+			url:  server.URL,
+		},
+		{
+			name:     "disabled",
+			disabled: true,
+		},
+		{
+			name:    "on-ready",
+			onReady: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set the local plugin directory to the test state directory.
+			localDir := t.TempDir()
+			cfg.Retrieve().Plugin.LocalPluginDir = localDir
+			if err := os.Mkdir(filepath.Join(localDir, "PluginA"), 0755); err != nil {
+				t.Fatalf("os.Mkdir(%s) failed unexpectedly with error: %v", filepath.Join(localDir, "PluginA"), err)
+			}
+
+			// Create a local plugin manifest file.
+			req := &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Action: acpb.ConfigurePluginStates_INSTALL,
+				Plugin: &acpb.ConfigurePluginStates_Plugin{
+					Name:         "PluginA",
+					RevisionId:   "RevisionA",
+					EntryPoint:   "test-entry-point",
+					Checksum:     hash,
+					GcsSignedUrl: tc.url,
+				},
+				Manifest: &acpb.ConfigurePluginStates_Manifest{
+					Config:                 &acpb.ConfigurePluginStates_Manifest_StringConfig{StringConfig: tc.name},
+					MaxMemoryUsageBytes:    1024 * 1024,
+					StartTimeout:           &dpb.Duration{Seconds: 3},
+					StopTimeout:            &dpb.Duration{Seconds: 5},
+					StartAttemptCount:      3,
+					DownloadAttemptCount:   2,
+					DownloadTimeout:        &dpb.Duration{Seconds: 5},
+					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+				},
+			}
+			reqBytes, err := prototext.Marshal(req)
+			if err != nil {
+				t.Fatalf("prototext.Marshal(%+v) failed unexpectedly with error: %v", req, err)
+			}
+			if err := os.WriteFile(filepath.Join(localDir, "PluginA", manifestFile), reqBytes, 0644); err != nil {
+				t.Fatalf("os.WriteFile(%s) failed unexpectedly with error: %v", filepath.Join(localDir, "PluginA", manifestFile), err)
+			}
+
+			// Set up the plugin manager.
+			s := scheduler.Instance()
+			t.Cleanup(s.Stop)
+			pm := &PluginManager{
+				plugins:                  map[string]*Plugin{},
+				protocol:                 udsProtocol,
+				pluginMonitors:           make(map[string]string),
+				pluginMetricsMonitors:    make(map[string]string),
+				scheduler:                s,
+				inProgressPluginRequests: make(map[string]bool),
+				requestCount:             make(map[acpb.ConfigurePluginStates_Action]map[bool]int),
+			}
+			pluginManager = pm
+
+			var onReadyCalled bool
+			// Set the installations map to disable the plugin if needed, and set the
+			// on-ready callback if needed.
+			installations := make(map[string]LocalPluginInstallation)
+			if tc.disabled || tc.onReady {
+				localInstallation := LocalPluginInstallation{
+					Enable: !tc.disabled,
+				}
+				if tc.onReady {
+					localInstallation.OnReady = func(context.Context) {
+						onReadyCalled = true
+					}
+				}
+				installations["PluginA"] = localInstallation
+			}
+
+			// Start the local plugins for the test.
+			if err := pm.StartLocalPlugins(ctx, installations); err != nil {
+				t.Fatalf("StartLocalPlugins(ctx, %+v) = error: %v, want no error", installations, err)
+			}
+
+			// Fresh install should not have any pending plugins.
+			if len(seenPendingPlugins.revisions) != 0 || len(seenPendingPlugins.status) != 0 {
+				t.Errorf("StartLocalPlugins(ctx, %+v) set pending plugins = %+v, want empty revision and status map", installations, seenPendingPlugins)
+			}
+
+			// If the plugin is disabled or an error is expected, the plugin list should be empty.
+			if tc.disabled {
+				if len(pm.plugins) != 0 {
+					t.Errorf("StartLocalPlugins(ctx, %+v) = %+v, want no plugin", installations, pm.plugins)
+				}
+				return
+			}
+
+			if tc.onReady && !onReadyCalled {
+				t.Errorf("StartLocalPlugins(ctx, %+v) did not call on-ready callback", installations)
+			}
+
+			entryPoint := "test-entry-point"
+
+			want, err := newPlugin(req, true)
+			if err != nil {
+				t.Fatalf("newPlugin(%+v, %t) failed unexpectedly with error: %v", req, true, err)
+			}
+
+			want.RuntimeInfo.Pid = runner.pid
+			want.Address = addr
+			want.Protocol = udsProtocol
+			want.EntryPath = entryPoint
+			want.Manifest.PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
+
+			if runner.seenCommand != entryPoint {
+				t.Errorf("StartLocalPlugins(ctx, %+v) executed %q, want %q", installations, runner.seenCommand, entryPoint)
+			}
+
+			got, ok := pm.plugins[req.Plugin.Name]
+			if !ok {
+				t.Fatalf("StartLocalPlugins(ctx, %+v) did not create plugin %q", installations, req.Plugin.Name)
+			}
+			if diff := cmp.Diff(want, got, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}, Manifest{}), cmpopts.IgnoreFields(ServiceConfig{}, "Simple"), cmpopts.IgnoreFields(Plugin{}, "InstallPath")); diff != "" {
+				t.Errorf("pm.plugins[%s] returned unexpected diff (-want +got):\n%s", req.Plugin.Name, diff)
+			}
+
+			if got.State() != acpb.CurrentPluginStates_RUNNING {
+				t.Errorf("StartLocalPlugins(ctx, %+v) = plugin state %q, want %q", installations, got.State(), acpb.CurrentPluginStates_RUNNING)
+			}
+
+			if pm.requestCount[acpb.ConfigurePluginStates_INSTALL][true] != 1 {
+				t.Errorf("StartLocalPlugins(ctx, %+v) called ConfigurePluginStates %d times, want 1 time", installations, pm.requestCount[acpb.ConfigurePluginStates_INSTALL][true])
+			}
+
+			if ps.ctrs[tc.name] != 1 {
+				t.Errorf("StartLocalPlugins(ctx, %+v) called start RPC %d times, want 1 time on plugin %q", installations, ps.ctrs[tc.name], req.Plugin.Name)
+			}
+			c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
+			err = retry.Run(ctx, c, func() error {
+				pm.pluginMonitorMu.Lock()
+				defer pm.pluginMonitorMu.Unlock()
+				_, ok := pm.pluginMonitors[want.FullName()]
+				if !ok {
+					return fmt.Errorf("StartLocalPlugins(ctx, %+v) did not create monitor for plugin %q", installations, req.Plugin.Name)
+				}
+				return nil
+			})
+
+			if err != nil {
+				t.Errorf("%v", err)
 			}
 		})
 	}

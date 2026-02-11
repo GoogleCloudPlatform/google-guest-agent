@@ -45,6 +45,7 @@ var (
 		"instanceIDDir":        defaultInstanceIDDir,
 		"commandPipe":          defaultCmdMonitor,
 		"ipAliasesEnabled":     fmt.Sprintf("%t", defaultIPAliasesEnabled),
+		"localPluginDir":       defaultLocalPluginDir,
 	}
 
 	// panicFc is a reference to panic(), it's overridden in unit tests.
@@ -134,6 +135,7 @@ timeout_in_seconds = 60
 [PluginConfig]
 socket_connections_dir = {{.socketConnectionsDir}}
 state_dir = {{.baseStateDir}}
+local_plugin_dir = {{.localPluginDir}}
 
 [ACS]
 endpoint =
@@ -431,6 +433,8 @@ type Plugin struct {
 	SocketConnectionsDir string `ini:"socket_connections_dir,omitempty"`
 	// StateDir defines the directory path where all state files should be stored.
 	StateDir string `ini:"state_dir,omitempty"`
+	// LocalPluginDir defines the directory path where local plugins are installed.
+	LocalPluginDir string `ini:"local_plugin_dir,omitempty"`
 }
 
 // Unstable contains the configurations of Unstable section. No long term

@@ -32,4 +32,6 @@ const (
 	// defaultIPAliasesEnabled is the default value for the IPAliases
 	// enabled configuration knob.
 	defaultIPAliasesEnabled = true
+	// defaultLocalPluginDir is the directory on Linux where local plugins are installed.
+	defaultLocalPluginDir = "/usr/lib/google/guest_agent"
 )
