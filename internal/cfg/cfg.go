@@ -115,6 +115,7 @@ sysprep-specialize = true
 dhcp_command =
 ip_forwarding = true
 setup = true
+vlan_setup_enabled = false
 restore_debian12_netplan_config = true
 
 [OSLogin]
@@ -152,7 +153,6 @@ command_pipe_mode = 0770
 command_pipe_path = {{.commandPipe}}
 command_pipe_group =
 command_request_timeout = 10s
-vlan_setup_enabled = false
 systemd_config_dir = /usr/lib/systemd/network
 fqdn_address_interface_index = 0
 `
