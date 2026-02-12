@@ -50,72 +50,8 @@ type PluginManagerInterface interface {
 	ListPluginStates(context.Context, *acpb.ListPluginStates) *acpb.CurrentPluginStates
 	// ConfigurePluginStates configures the plugin states as stated in the request.
 	ConfigurePluginStates(context.Context, *acpb.ConfigurePluginStates, bool)
-}
-
-// verifyPluginRunning verifies the plugin [name] is in running state.
-func verifyPluginRunning(ctx context.Context, pm PluginManagerInterface, name, revision string) error {
-	states := pm.ListPluginStates(ctx, &acpb.ListPluginStates{})
-	var foundState *acpb.CurrentPluginStates_Status
-	for _, s := range states.GetDaemonPluginStates() {
-		if s.GetName() == name {
-			if s.GetCurrentPluginStatus().GetStatus() == acpb.CurrentPluginStates_RUNNING && s.GetCurrentRevisionId() == revision {
-				return nil
-			}
-			foundState = s.GetCurrentPluginStatus()
-		}
-	}
-
-	if foundState == nil {
-		return fmt.Errorf("core plugin %s not found, current plugins: %+v", name, states)
-	}
-
-	return fmt.Errorf("core plugin failed to start, found in state: %+v", foundState)
-}
-
-// install installs the core plugin and verifies if its running.
-func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
-	// If guest-agent is restarting and previously had installed core-plugin once
-	// it will reconnect on [InitPluginManager]. Verify and return if running.
-	// Requesting install again would be a no-op but will generate unnecessary
-	// [PLUGIN_INSTALL_FAILED] event as plugin will be already present.
-	err := verifyPluginRunning(ctx, pm, manager.CorePluginName, c.Version)
-	if err == nil {
-		galog.Debugf("Core plugin found in running state, skipping installation")
-		return nil
-	}
-
-	galog.Infof("Current plugin state: %v installing core plugin...", err)
-
-	// TODO(andrewhl): Read the core plugin config from a file.
-	req := &acpb.ConfigurePluginStates{
-		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
-			&acpb.ConfigurePluginStates_ConfigurePlugin{
-				Action: acpb.ConfigurePluginStates_INSTALL,
-				Plugin: &acpb.ConfigurePluginStates_Plugin{
-					Name:       manager.CorePluginName,
-					RevisionId: c.Version,
-					EntryPoint: c.CorePluginPath,
-				},
-				Manifest: &acpb.ConfigurePluginStates_Manifest{
-					StartAttemptCount:      5,
-					StartTimeout:           &dpb.Duration{Seconds: 30},
-					StopTimeout:            &dpb.Duration{Seconds: 30},
-					PluginType:             acpb.PluginType_DAEMON,
-					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
-				},
-			},
-		},
-	}
-
-	// ConfigurePluginStates will launch the core plugin. This is blocking call
-	// and would wait until request is completed.
-	// Note that core plugin is already present on disk and must pass [true]
-	// to indicate local plugin.
-	pm.ConfigurePluginStates(ctx, req, true)
-
-	// As above request is completed this check should pass/fail right away
-	// no need to retry or wait.
-	return verifyPluginRunning(ctx, pm, manager.CorePluginName, c.Version)
+	// VerifyPluginRunning verifies that the configured plugins are running.
+	VerifyPluginRunning(context.Context, *acpb.ConfigurePluginStates_ConfigurePlugin) error
 }
 
 // coreReady executes components that are dependent/waiting on core plugin to be ready.
@@ -161,6 +97,9 @@ type Config struct {
 	// SkipCorePlugin determines if core plugin should be skipped.
 	// This is used only for testing and must not be set in non-test environments.
 	SkipCorePlugin bool
+	// EnableLocalPlugins determines if the core plugin should be launched
+	// using a hardcoded config, or by dynamically reading the config from disk.
+	EnableLocalPlugins bool
 }
 
 // runTimeConfig contains the runtime configuration of the instance.
@@ -238,11 +177,29 @@ func Run(ctx context.Context, c Config) error {
 	if c.SkipCorePlugin {
 		galog.Debug("Skipping core plugin initialization")
 		coreReady(ctx, c)
-		return nil
 	}
 
-	if err := install(ctx, pm, c); err != nil {
-		return fmt.Errorf("core plugin installation: %w", err)
+	if c.EnableLocalPlugins {
+		if err := pm.StartLocalPlugins(ctx, map[string]manager.LocalPluginInstallation{
+			manager.CorePluginName: manager.LocalPluginInstallation{
+				// Only enable core plugin locally if core plugin initialization is not
+				// skipped and local launch is enabled.
+				Enable: !c.SkipCorePlugin,
+				OnReady: func(ctx context.Context) {
+					coreReady(ctx, c)
+				},
+			},
+		}); err != nil {
+			return fmt.Errorf("start local plugins: %w", err)
+		}
+	}
+
+	// Launch with hardcoded config only if local dynamic launch is skipped.
+	if !c.EnableLocalPlugins {
+		galog.Debugf("Skipped dynamic local launch of core plugin, attempting to install core plugin with hardcoded config...")
+		if err := install(ctx, pm, c); err != nil {
+			return fmt.Errorf("core plugin installation: %w", err)
+		}
 	}
 
 	events.FetchManager().Subscribe(manager.EventID, events.EventSubscriber{Name: "GuestAgent", Data: c, Callback: handlePluginEvent, MetricName: acpb.GuestAgentModuleMetric_CORE_PLUGIN_INITIALIZATION})
@@ -254,4 +211,49 @@ func Run(ctx context.Context, c Config) error {
 	}
 
 	return nil
+}
+
+// install installs the core plugin and verifies if its running.
+func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
+	req := &acpb.ConfigurePluginStates{
+		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
+			&acpb.ConfigurePluginStates_ConfigurePlugin{
+				Action: acpb.ConfigurePluginStates_INSTALL,
+				Plugin: &acpb.ConfigurePluginStates_Plugin{
+					Name:       manager.CorePluginName,
+					RevisionId: c.Version,
+					EntryPoint: c.CorePluginPath,
+				},
+				Manifest: &acpb.ConfigurePluginStates_Manifest{
+					StartAttemptCount:      5,
+					StartTimeout:           &dpb.Duration{Seconds: 30},
+					StopTimeout:            &dpb.Duration{Seconds: 30},
+					PluginType:             acpb.PluginType_DAEMON,
+					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+				},
+			},
+		},
+	}
+
+	// If guest-agent is restarting and previously had installed core-plugin once
+	// it will reconnect on [InitPluginManager]. Verify and return if running.
+	// Requesting install again would be a no-op but will generate unnecessary
+	// [PLUGIN_INSTALL_FAILED] event as plugin will be already present.
+	err := pm.VerifyPluginRunning(ctx, req.GetConfigurePlugins()[0])
+	if err == nil {
+		galog.Debugf("Core plugin found in running state, skipping installation")
+		return nil
+	}
+
+	galog.Infof("Current plugin state: %v installing core plugin...", err)
+
+	// ConfigurePluginStates will launch the core plugin. This is blocking call
+	// and would wait until request is completed.
+	// Note that core plugin is already present on disk and must pass [true]
+	// to indicate local plugin.
+	pm.ConfigurePluginStates(ctx, req, true)
+
+	// As above request is completed this check should pass/fail right away
+	// no need to retry or wait.
+	return pm.VerifyPluginRunning(ctx, req.GetConfigurePlugins()[0])
 }

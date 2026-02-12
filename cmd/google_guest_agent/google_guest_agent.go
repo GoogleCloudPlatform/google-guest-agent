@@ -148,7 +148,7 @@ func main() {
 		}
 	}
 
-	opts := setup.Config{Version: version, CorePluginPath: corePluginPath, SkipCorePlugin: ignoreCorePlugin()}
+	opts := setup.Config{Version: version, CorePluginPath: corePluginPath, SkipCorePlugin: ignoreCorePlugin(), EnableLocalPlugins: cfg.Retrieve().Core.EnableLocalPlugins}
 	// ACS watcher requires ACS client enabled.
 	if (forceOnDemandPlugins || cfg.Retrieve().Core.OnDemandPlugins) && cfg.Retrieve().Core.ACSClient {
 		opts.EnableACSWatcher = true

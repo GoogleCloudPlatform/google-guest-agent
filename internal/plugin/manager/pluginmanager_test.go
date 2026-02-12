@@ -31,7 +31,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
@@ -1584,6 +1583,53 @@ func TestSetConfig(t *testing.T) {
 	}
 }
 
+func TestGetLocalPlugin(t *testing.T) {
+	ctx := context.Background()
+	pm := &PluginManager{}
+	// Set the local plugin directory to the test state directory.
+	localDir := t.TempDir()
+	cfg.Load(nil)
+	cfg.Retrieve().Plugin.LocalPluginDir = localDir
+	if err := os.Mkdir(filepath.Join(localDir, "PluginA"), 0755); err != nil {
+		t.Fatalf("os.Mkdir(%s) failed unexpectedly with error: %v", filepath.Join(localDir, "PluginA"), err)
+	}
+
+	// Create a local plugin manifest file.
+	req := &acpb.ConfigurePluginStates_ConfigurePlugin{
+		Action: acpb.ConfigurePluginStates_INSTALL,
+		Plugin: &acpb.ConfigurePluginStates_Plugin{
+			Name:       "PluginA",
+			RevisionId: "RevisionA",
+			EntryPoint: "test-entry-point",
+		},
+		Manifest: &acpb.ConfigurePluginStates_Manifest{
+			MaxMemoryUsageBytes:    1024 * 1024,
+			StartTimeout:           &dpb.Duration{Seconds: 3},
+			StopTimeout:            &dpb.Duration{Seconds: 5},
+			StartAttemptCount:      3,
+			DownloadAttemptCount:   2,
+			DownloadTimeout:        &dpb.Duration{Seconds: 5},
+			PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+		},
+	}
+	reqBytes, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatalf("proto.Marshal(%+v) failed unexpectedly with error: %v", req, err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "PluginA", manifestFile), reqBytes, 0644); err != nil {
+		t.Fatalf("os.WriteFile(%s) failed unexpectedly with error: %v", filepath.Join(localDir, "PluginA", manifestFile), err)
+	}
+
+	got, err := pm.GetLocalPlugin(ctx, "PluginA")
+	if err != nil {
+		t.Fatalf("GetLocalPlugin(ctx, %s) failed unexpectedly with error: %v", "PluginA", err)
+	}
+
+	if diff := cmp.Diff(req, got, protocmp.Transform(), cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}, Manifest{})); diff != "" {
+		t.Errorf("GetLocalPlugin(ctx, %s) returned unexpected diff (-want +got):\n%s", "PluginA", diff)
+	}
+}
+
 func TestStartLocalPlugin(t *testing.T) {
 	connections := t.TempDir()
 	state := t.TempDir()
@@ -1651,9 +1697,9 @@ func TestStartLocalPlugin(t *testing.T) {
 					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
 				},
 			}
-			reqBytes, err := prototext.Marshal(req)
+			reqBytes, err := proto.Marshal(req)
 			if err != nil {
-				t.Fatalf("prototext.Marshal(%+v) failed unexpectedly with error: %v", req, err)
+				t.Fatalf("proto.Marshal(%+v) failed unexpectedly with error: %v", req, err)
 			}
 			if err := os.WriteFile(filepath.Join(localDir, "PluginA", manifestFile), reqBytes, 0644); err != nil {
 				t.Fatalf("os.WriteFile(%s) failed unexpectedly with error: %v", filepath.Join(localDir, "PluginA", manifestFile), err)

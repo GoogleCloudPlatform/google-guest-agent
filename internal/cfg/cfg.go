@@ -66,6 +66,7 @@ log_verbosity = 0
 log_file =
 on_demand_plugins = true
 acs_client = true
+enable_local_plugins = false
 
 [Telemetry]
 metric_collection_enabled = true
@@ -312,6 +313,9 @@ type Core struct {
 	// By disabling this configuration the ACS client related features including
 	// on-demand plugins, metric collection and plugin events are turned off entirely.
 	ACSClient bool `ini:"acs_client,omitempty"`
+	// EnableLocalPlugins determines if the core plugin should be launched
+	// using a hardcoded config, or by dynamically reading the config from disk.
+	EnableLocalPlugins bool `ini:"enable_local_plugins,omitempty"`
 	// Version defines the version of the running binary. Its for internal use
 	// only. Value is set dynamically when config is loaded in main. Any values
 	// provided via config file or anything will be overridden.

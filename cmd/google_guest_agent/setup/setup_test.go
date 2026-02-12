@@ -42,6 +42,8 @@ type testPluginManager struct {
 	plugins      map[string]plugin
 	setOnInstall map[string]plugin
 	seenRequest  *acpb.ConfigurePluginStates
+	runError     []bool
+	timesRun     int
 	seenLocal    bool
 }
 
@@ -63,45 +65,17 @@ func (m *testPluginManager) ConfigurePluginStates(ctx context.Context, req *acpb
 	m.plugins = m.setOnInstall
 }
 
-func TestVerifyPluginRunning(t *testing.T) {
-	ctx := context.Background()
-
-	plugins := make(map[string]plugin)
-	plugins["plugin1"] = plugin{name: "plugin1", revision: "1", status: acpb.CurrentPluginStates_RUNNING}
-	plugins["plugin2"] = plugin{name: "plugin2", revision: "2", status: acpb.CurrentPluginStates_CRASHED}
-
-	testManager := &testPluginManager{plugins: plugins}
-
-	tests := []struct {
-		desc     string
-		name     string
-		revision string
-		wantErr  bool
-	}{
-		{
-			desc:     "plugin running",
-			name:     "plugin1",
-			revision: "1",
-		},
-		{
-			desc:     "plugin not running",
-			name:     "plugin2",
-			revision: "2",
-			wantErr:  true,
-		},
-		{
-			desc:    "plugin not found",
-			name:    "plugin3",
-			wantErr: true,
-		},
+func (m *testPluginManager) VerifyPluginRunning(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
+	defer func() {
+		m.timesRun++
+	}()
+	if len(m.runError) <= m.timesRun {
+		return nil
 	}
-
-	for _, tc := range tests {
-		err := verifyPluginRunning(ctx, testManager, tc.name, tc.revision)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("verifyPluginRunning(ctx, %+v, %s) = %v, want error %t", testManager, tc.name, err, tc.wantErr)
-		}
+	if m.runError[m.timesRun] {
+		return fmt.Errorf("test run error")
 	}
+	return nil
 }
 
 func TestInstall(t *testing.T) {
@@ -133,22 +107,26 @@ func TestInstall(t *testing.T) {
 		name       string
 		shouldSkip bool
 		wantErr    bool
+		runError   []bool
 		wantReq    *acpb.ConfigurePluginStates
 		wantLocal  bool
 	}{
 		{
 			desc:      "install_success",
 			wantReq:   wantReq,
+			runError:  []bool{true, false},
 			wantLocal: true,
 		},
 		{
 			desc:       "install_skipped",
+			runError:   []bool{false},
 			shouldSkip: true,
 		},
 		{
 			desc:      "install_failure",
 			wantErr:   true,
 			wantLocal: true,
+			runError:  []bool{true, true},
 			wantReq:   wantReq,
 		},
 	}
@@ -159,7 +137,7 @@ func TestInstall(t *testing.T) {
 			if !tc.wantErr {
 				plugins[manager.CorePluginName] = plugin{name: manager.CorePluginName, revision: c.Version, status: acpb.CurrentPluginStates_RUNNING}
 			}
-			testManager := &testPluginManager{setOnInstall: plugins}
+			testManager := &testPluginManager{setOnInstall: plugins, runError: tc.runError}
 			if tc.shouldSkip {
 				testManager.plugins = plugins
 			}
