@@ -952,6 +952,16 @@ func load(stateDir string) (map[string]*Plugin, error) {
 		}
 		plugin.RuntimeInfo.metrics = boundedlist.New[Metric](plugin.Manifest.MaxMetricDatapoints)
 		plugins[plugin.Name] = plugin
+
+		// This is a hack to ensure that the core plugin is always treated as a
+		// daemon and local plugin. This is because previous versions of the agent
+		// did not store this information in the plugin state. Hence, when the agent
+		// is upgraded, the core plugin will be treated as a dynamic plugin, which
+		// would cause the agent to clean up the core plugin binary and folder.
+		if plugin.Name == CorePluginName {
+			plugin.Manifest.PluginType = acpb.PluginType_DAEMON
+			plugin.Manifest.PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
+		}
 	}
 	return plugins, nil
 }

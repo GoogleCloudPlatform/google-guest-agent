@@ -146,6 +146,32 @@ func TestStore(t *testing.T) {
 		RuntimeInfo: &RuntimeInfo{Pid: 123},
 	}
 
+	corePlugin := &Plugin{
+		Name:     CorePluginName,
+		Revision: "1",
+		Address:  "test-address1",
+		Manifest: &Manifest{
+			StartAttempts: 5,
+			StartTimeout:  time.Second * 30,
+			StopTimeout:   time.Second * 30,
+		},
+		RuntimeInfo: &RuntimeInfo{Pid: 123},
+	}
+
+	wantCorePlugin := &Plugin{
+		Name:     CorePluginName,
+		Revision: "1",
+		Address:  "test-address1",
+		Manifest: &Manifest{
+			StartAttempts:          5,
+			StartTimeout:           time.Second * 30,
+			StopTimeout:            time.Second * 30,
+			PluginType:             acpb.PluginType_DAEMON,
+			PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+		},
+		RuntimeInfo: &RuntimeInfo{Pid: 123},
+	}
+
 	storeTests := []struct {
 		name   string
 		plugin *Plugin
@@ -161,6 +187,10 @@ func TestStore(t *testing.T) {
 		{
 			name:   "PluginC_store",
 			plugin: p3,
+		},
+		{
+			name:   "core_plugin_store",
+			plugin: corePlugin,
 		},
 	}
 
@@ -195,6 +225,10 @@ func TestStore(t *testing.T) {
 			name:    "PluginC_load",
 			plugin:  p3,
 			wantCfg: cfg2,
+		},
+		{
+			name:   "core_plugin_load",
+			plugin: wantCorePlugin,
 		},
 	}
 
