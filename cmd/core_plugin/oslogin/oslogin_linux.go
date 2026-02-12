@@ -150,6 +150,8 @@ var (
 		"/var/google-users.d",
 	}
 
+	defaultOsLoginReadmePath = "/var/google-users.d/README"
+
 	// defaultDeprecatedEntries are the deprecated files to clean up. This is a map
 	// of the file path to the key-value pairs to remove.
 	defaultDeprecatedEntries = map[string][]*textconfig.Entry{
@@ -217,6 +219,8 @@ type osloginModule struct {
 	services map[daemon.RestartMethod][]serviceRestartConfig
 	// osloginDirs are the directories to create for OSLogin, if necessary.
 	osloginDirs []string
+	// osloginReadmePath is the path to the README file in /var/google-users.d.
+	osloginReadmePath string
 	// sudoers is the path to the sudoers file.
 	sudoers string
 	// deprecatedEntries are the deprecated files to clean up.
@@ -259,6 +263,7 @@ func NewModule(context.Context) *manager.Module {
 		authorizedKeysCommandSKPaths: defaultAuthorizedKeysCommandSKPaths,
 		services:                     defaultServices,
 		osloginDirs:                  defaultOSLoginDirs,
+		osloginReadmePath:            defaultOsLoginReadmePath,
 		sudoers:                      defaultSudoersPath,
 		deprecatedEntries:            defaultDeprecatedEntries,
 	}
@@ -696,6 +701,33 @@ func (mod *osloginModule) disableOSLogin(ctx context.Context, evManager *events.
 	// Restart the services to reflect the rollback.
 	if err := mod.restartServices(ctx); err != nil {
 		return fmt.Errorf("failed to restart services: %w", err)
+	}
+
+	return nil
+}
+
+func (mod *osloginModule) writeGoogleUsersReadmeFile(ctx context.Context) error {
+	restorecon, restoreconerr := execLookPath("restorecon")
+
+	readmeFP, err := os.Open(mod.osloginReadmePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %q: %v", mod.osloginReadmePath, err)
+	}
+	defer readmeFP.Close()
+
+	if _, err := readmeFP.WriteString("# This directory contains per-user SSHD configuration for OS Login.\n" + "# All files in this directory are included by /etc/ssh/sshd_config.\n" + "# Editing files in this directory is not recommended.\n"); err != nil {
+		return fmt.Errorf("failed to write to file %q: %v", mod.osloginReadmePath, err)
+	}
+
+	if restoreconerr != nil {
+		return nil
+	}
+	if _, err := run.WithContext(ctx, run.Options{
+		OutputType: run.OutputNone,
+		Name:       restorecon,
+		Args:       []string{mod.osloginReadmePath},
+	}); err != nil {
+		return fmt.Errorf("failed to run restorecon on %s: %w", mod.osloginReadmePath, err)
 	}
 
 	return nil
