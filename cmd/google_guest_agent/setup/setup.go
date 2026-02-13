@@ -192,10 +192,7 @@ func Run(ctx context.Context, c Config) error {
 		}); err != nil {
 			return fmt.Errorf("start local plugins: %w", err)
 		}
-	}
-
-	// Launch with hardcoded config only if local dynamic launch is skipped.
-	if !c.EnableLocalPlugins {
+	} else {
 		galog.Debugf("Skipped dynamic local launch of core plugin, attempting to install core plugin with hardcoded config...")
 		if err := install(ctx, pm, c); err != nil {
 			return fmt.Errorf("core plugin installation: %w", err)
@@ -215,6 +212,11 @@ func Run(ctx context.Context, c Config) error {
 
 // install installs the core plugin and verifies if its running.
 func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
+	if c.SkipCorePlugin {
+		galog.Debug("Core plugin installation is skipped, skipping core plugin installation")
+		return nil
+	}
+
 	req := &acpb.ConfigurePluginStates{
 		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
 			&acpb.ConfigurePluginStates_ConfigurePlugin{

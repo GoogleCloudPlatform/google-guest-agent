@@ -1844,3 +1844,92 @@ func TestStartLocalPlugin(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifyPluginRunning(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		req       *acpb.ConfigurePluginStates_ConfigurePlugin
+		isRunning bool
+		plugins   []*Plugin
+		wantErr   bool
+	}{
+		{
+			name: "success",
+			req: &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Plugin: &acpb.ConfigurePluginStates_Plugin{
+					Name:       "PluginA",
+					RevisionId: "RevisionA",
+					EntryPoint: "test-entry-point",
+				},
+			},
+			plugins: []*Plugin{
+				&Plugin{
+					Name:     "PluginA",
+					Revision: "RevisionA",
+					RuntimeInfo: &RuntimeInfo{
+						status: acpb.CurrentPluginStates_RUNNING,
+					},
+				},
+			},
+			isRunning: true,
+		},
+		{
+			name: "plugin-not-running",
+			req: &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Plugin: &acpb.ConfigurePluginStates_Plugin{
+					Name:       "PluginA",
+					RevisionId: "RevisionA",
+					EntryPoint: "test-entry-point",
+				},
+			},
+			plugins: []*Plugin{
+				&Plugin{
+					Name:     "PluginA",
+					Revision: "RevisionA",
+					RuntimeInfo: &RuntimeInfo{
+						status: acpb.CurrentPluginStates_STOPPED,
+					},
+				},
+			},
+			wantErr:   true,
+			isRunning: false,
+		},
+		{
+			name: "plugin-not-found",
+			req: &acpb.ConfigurePluginStates_ConfigurePlugin{
+				Plugin: &acpb.ConfigurePluginStates_Plugin{
+					Name:       "PluginB",
+					RevisionId: "RevisionB",
+					EntryPoint: "test-entry-point",
+				},
+			},
+			plugins: []*Plugin{
+				&Plugin{
+					Name:     "PluginA",
+					Revision: "RevisionA",
+					RuntimeInfo: &RuntimeInfo{
+						status: acpb.CurrentPluginStates_RUNNING,
+					},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pm := &PluginManager{
+				plugins: map[string]*Plugin{},
+			}
+			for _, p := range tc.plugins {
+				pm.plugins[p.Name] = p
+			}
+			err := pm.VerifyPluginRunning(ctx, tc.req)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("VerifyPluginRunning(ctx, %+v) = error: %v, want error: %t", tc.req, err, tc.wantErr)
+			}
+		})
+	}
+}

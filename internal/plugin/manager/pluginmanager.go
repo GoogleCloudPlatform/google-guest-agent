@@ -1115,13 +1115,18 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 func (m *PluginManager) VerifyPluginRunning(ctx context.Context, plugin *acpb.ConfigurePluginStates_ConfigurePlugin) error {
 	currPlugins := m.list()
 
+	var found bool
 	for _, currPlugin := range currPlugins {
 		if currPlugin.Name == plugin.GetPlugin().GetName() {
 			if currPlugin.State() != acpb.CurrentPluginStates_RUNNING || currPlugin.Revision != plugin.GetPlugin().GetRevisionId() {
 				return fmt.Errorf("plugin %q with revision %q is not running, current status: %+v", plugin.GetPlugin().GetName(), plugin.GetPlugin().GetRevisionId(), currPlugin.State())
 			}
+			found = true
 			break
 		}
+	}
+	if !found {
+		return fmt.Errorf("plugin %q with revision %q not found", plugin.GetPlugin().GetName(), plugin.GetPlugin().GetRevisionId())
 	}
 	return nil
 }
