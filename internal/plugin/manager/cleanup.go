@@ -58,6 +58,7 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 		nameIndex := strings.LastIndex(p.Name(), "_")
 		pluginName := p.Name()[:nameIndex]
 		pluginRevision := p.Name()[nameIndex+1:]
+		galog.Debugf("Checking plugin %q, revision %q", pluginName, pluginRevision)
 		// We want to avoid cleaning up plugins that currently have a request in progress.
 		// This is to prevent a race condition where the plugin is removed in the
 		// middle of an installation request.
@@ -80,6 +81,7 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 		}
 		// Check if the link points to a plugin directory that is no longer cached
 		// by the guest agent.
+		galog.Debugf("Checking link %q", link)
 		if _, ok := failedRemovals[filepath.Base(dest)]; ok {
 			linkPath := filepath.Join(pluginInstallLoc, link)
 			galog.Debugf("Removing link %q", linkPath)
@@ -92,6 +94,7 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 	var errs []error
 	noop := len(failedRemovals) == 0
 	for _, p := range failedRemovals {
+		galog.Debugf("Cleaning up plugin %q", p.FullName())
 		if err := cleanup(ctx, p); err != nil {
 			errs = append(errs, err)
 		}
