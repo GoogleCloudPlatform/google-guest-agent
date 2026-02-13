@@ -23,7 +23,7 @@ import (
 )
 
 // platformEarlyInit is a hook for platform-specific early initialization.
-func platformEarlyInit(ctx context.Context, data any) error {
+func platformEarlyInit(ctx context.Context) error {
 	galog.V(2).Debugf("Early network initialization not implemented for linux, skipping.")
 	return nil
 }

@@ -34,45 +34,36 @@ import (
 )
 
 const (
-	// networkEarlyModuleID is the ID of the network early initialization module.
-	networkEarlyModuleID = "early-network"
-	// networkLateModuleID is the ID of the network late initialization module.
-	networkLateModuleID = "network"
+	// networkModuleID is the ID of the network late initialization module.
+	networkModuleID = "network"
 )
 
-// NewEarlyModule returns the network early initialization module.
-func NewEarlyModule(_ context.Context) *manager.Module {
-	return &manager.Module{
-		ID:          networkEarlyModuleID,
-		Enabled:     &cfg.Retrieve().Daemons.NetworkDaemon,
-		BlockSetup:  platformEarlyInit,
-		Description: "Manages the early initialization of the network subsystem",
-	}
-}
-
-// lateModule is the network late initialization module.
-type lateModule struct {
+// module is the network late initialization module.
+type module struct {
 	// prevMetadata is the previous metadata descriptor.
 	prevMetadata *metadata.Descriptor
 	// wsfcEnabled is true if WSFC is enabled.
 	wsfcEnabled bool
 	// failedConfiguration indicates if the last setup has failed.
 	failedConfiguration bool
+	// skipMDS skips the metadata fetch if set to true. This is used for testing
+	// purposes only.
+	skipMDS bool
 }
 
-// NewLateModule returns the network late initialization module.
-func NewLateModule(_ context.Context) *manager.Module {
-	module := &lateModule{}
+// NewModule returns the network early initialization module.
+func NewModule(_ context.Context) *manager.Module {
+	module := &module{}
 	return &manager.Module{
-		ID:          networkLateModuleID,
+		ID:          networkModuleID,
 		Enabled:     &cfg.Retrieve().Daemons.NetworkDaemon,
-		Setup:       module.moduleSetup,
-		Description: "Manages the continuous and dynamic configuration of the network subsystem",
+		BlockSetup:  module.setup,
+		Description: "Manages the initialization and configuration of the network subsystem",
 	}
 }
 
-// moduleSetup is the setup function for the late network module.
-func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
+// setup is the setup function for the late network module.
+func (mod *module) setup(ctx context.Context, data any) error {
 	// If the network interface setup is disabled, we skip the rest of the
 	// initialization - first setup is not done and no metadata longpoll event
 	// handler is registered.
@@ -82,10 +73,26 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 		return nil
 	}
 
-	galog.Debugf("Initializing %s module", networkLateModuleID)
+	galog.Debugf("Initializing %s module", networkModuleID)
+	var err error
+
+	// In normal use cases, the data is not a metadata descriptor. This is just
+	// used for testing so we can avoid doing an actual metadata fetch.
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
-		return fmt.Errorf("network module expects a metadata descriptor in the data pointer")
+		// This error case should only ever be hit in tests.
+		if mod.skipMDS {
+			return fmt.Errorf("failed to get a metadata descriptor")
+		}
+		desc, err = metadata.New().Get(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get metadata descriptor: %v", err)
+		}
+	}
+
+	// Perform early network platform-specific initialization.
+	if err := platformEarlyInit(ctx); err != nil {
+		return fmt.Errorf("failed to perform early network initialization: %v", err)
 	}
 
 	// Do the initial setup of the network interfaces. It will be handled by the
@@ -95,16 +102,16 @@ func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
 	}
 
 	eManager := events.FetchManager()
-	sub := events.EventSubscriber{Name: networkLateModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_NETWORK_INITIALIZATION}
+	sub := events.EventSubscriber{Name: networkModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_NETWORK_INITIALIZATION}
 	eManager.Subscribe(metadata.LongpollEvent, sub)
 
-	galog.Debugf("Finished initializing %s module", networkLateModuleID)
+	galog.Debugf("Finished initializing %s module", networkModuleID)
 	return nil
 }
 
 // metadataSubscriber is the callback function to be called by the event manager
 // when a metadata longpoll event is received.
-func (mod *lateModule) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
+func (mod *module) metadataSubscriber(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
 	desc, ok := evData.Data.(*metadata.Descriptor)
 	// If the event manager is passing a non expected data type we log it and
 	// don't renew the handler.
@@ -123,7 +130,7 @@ func (mod *lateModule) metadataSubscriber(ctx context.Context, evType string, da
 }
 
 // networkSetup sets up all the network interfaces on the system.
-func (mod *lateModule) networkSetup(ctx context.Context, config *cfg.Sections, mds *metadata.Descriptor) (bool, error) {
+func (mod *module) networkSetup(ctx context.Context, config *cfg.Sections, mds *metadata.Descriptor) (bool, error) {
 	failedSetup := false
 
 	defer func() {
@@ -175,7 +182,7 @@ type networkChanged struct {
 
 // networkMetadataChanged returns true if the metadata has changed or if it's being
 // called on behalf of the first handler's execution.
-func (mod *lateModule) networkMetadataChanged(mds *metadata.Descriptor, config *cfg.Sections) bool {
+func (mod *module) networkMetadataChanged(mds *metadata.Descriptor, config *cfg.Sections) bool {
 	// If the module has not been initialized yet then we return true to force
 	// the first execution of the setup.
 	if mod.prevMetadata == nil {
@@ -206,7 +213,7 @@ func (mod *lateModule) networkMetadataChanged(mds *metadata.Descriptor, config *
 // routeChanged returns true if the route metadata has changed, or if the routes
 // present on the system have changed from what is expected based on the network
 // interfaces configuration.
-func (mod *lateModule) routeChanged(ctx context.Context, nicConfigs []*nic.Configuration) bool {
+func (mod *module) routeChanged(ctx context.Context, nicConfigs []*nic.Configuration) bool {
 	for _, nic := range nicConfigs {
 		if nic.Invalid || nic.Interface == nil {
 			continue
