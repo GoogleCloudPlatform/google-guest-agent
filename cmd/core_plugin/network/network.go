@@ -73,20 +73,19 @@ func NewLateModule(_ context.Context) *manager.Module {
 
 // moduleSetup is the setup function for the late network module.
 func (mod *lateModule) moduleSetup(ctx context.Context, data any) error {
+	// If the network interface setup is disabled, we skip the rest of the
+	// initialization - first setup is not done and no metadata longpoll event
+	// handler is registered.
+	config := cfg.Retrieve()
+	if !config.Daemons.NetworkDaemon {
+		galog.Infof("Network daemon is disabled, skipping network module setup.")
+		return nil
+	}
+
 	galog.Debugf("Initializing %s module", networkLateModuleID)
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("network module expects a metadata descriptor in the data pointer")
-	}
-
-	config := cfg.Retrieve()
-
-	// If the network interface setup is disabled, we skip the rest of the
-	// initialization - first setup is not done and no metadata longpoll event
-	// handler is registered.
-	if !config.NetworkInterfaces.Setup {
-		galog.Infof("Network interface setup disabled, skipping")
-		return nil
 	}
 
 	// Do the initial setup of the network interfaces. It will be handled by the

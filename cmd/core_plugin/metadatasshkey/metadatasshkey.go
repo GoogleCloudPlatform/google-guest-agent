@@ -84,6 +84,13 @@ func NewModule(context.Context) *manager.Module {
 }
 
 func moduleSetup(ctx context.Context, data any) error {
+	// Legacy agent documentation refers to metadata ssh key functionality as
+	// accounts management.
+	if !cfg.Retrieve().Daemons.AccountsDaemon {
+		galog.Infof("Accounts daemon is disabled, skipping metadata ssh key setup.")
+		return nil
+	}
+
 	galog.Debug("Initializing Metadata SSH Key module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {

@@ -69,6 +69,33 @@ func TestLateModule(t *testing.T) {
 	}
 }
 
+func TestNetworkDaemonDisabled(t *testing.T) {
+	events.FetchManager().Unsubscribe(metadata.LongpollEvent, networkLateModuleID)
+
+	mds, err := metadata.UnmarshalDescriptor(`{}`)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor() returned unexpected error: %v", err)
+	}
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() returned unexpected error: %v", err)
+	}
+	cfg.Retrieve().Daemons.NetworkDaemon = false
+
+	mod := &lateModule{}
+	if err := mod.moduleSetup(context.Background(), mds); err != nil {
+		t.Errorf("NewLateModule().Setup() returned unexpected error: %v", err)
+	}
+
+	if events.FetchManager().IsSubscribed(metadata.LongpollEvent, networkLateModuleID) {
+		t.Errorf("%s subscribed to metadata.LongpollEvent, want not subscribed", networkLateModuleID)
+	}
+
+	t.Cleanup(func() {
+		events.FetchManager().Unsubscribe(metadata.LongpollEvent, networkLateModuleID)
+	})
+}
+
 func TestLateInitFailure(t *testing.T) {
 	mds, err := metadata.UnmarshalDescriptor(mdsJSON)
 	if err != nil {

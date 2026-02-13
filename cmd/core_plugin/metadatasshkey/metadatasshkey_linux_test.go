@@ -503,37 +503,28 @@ func TestUpdateSSHKeysError(t *testing.T) {
 
 func TestEnableMetadataSSHKey(t *testing.T) {
 	tests := []struct {
-		config  *cfg.Sections
 		mdsjson string
 		want    bool
 	}{
 		{
-			config:  &cfg.Sections{Daemons: &cfg.Daemons{AccountsDaemon: true}},
 			mdsjson: `{"instance":{"attributes":{"enable-oslogin": "true"}},"project":{"attributes":{"enable-oslogin": "true"}}}`,
 			want:    false,
 		},
 		{
-			config:  &cfg.Sections{Daemons: &cfg.Daemons{AccountsDaemon: true}},
 			mdsjson: `{"instance":{"attributes":{"enable-oslogin": "false"}},"project":{"attributes":{"enable-oslogin": "true"}}}`,
 			want:    true,
 		},
 		{
-			config:  &cfg.Sections{Daemons: &cfg.Daemons{AccountsDaemon: true}},
 			mdsjson: `{"project":{"attributes":{"enable-oslogin": "false"}}}`,
 			want:    true,
-		},
-		{
-			config:  &cfg.Sections{Daemons: &cfg.Daemons{AccountsDaemon: false}},
-			mdsjson: `{"instance":{"attributes":{"enable-oslogin": "false"}},"project":{"attributes":{"enable-oslogin": "false"}}}`,
-			want:    false,
 		},
 	}
 
 	for _, tc := range tests {
 		mdsdesc := descriptorFromJSON(t, tc.mdsjson)
-		got := enableMetadataSSHKey(tc.config, mdsdesc)
+		got := enableMetadataSSHKey(&cfg.Sections{}, mdsdesc)
 		if got != tc.want {
-			t.Errorf("enableMetadataSSHKey(%+v, %v) = %v, want: %v", tc.config.Daemons, tc.mdsjson, got, tc.want)
+			t.Errorf("enableMetadataSSHKey(cfg, %v) = %v, want: %v", mdsdesc, got, tc.want)
 		}
 	}
 }
@@ -565,7 +556,7 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 	}{
 		{
 			name:                         "set_configuration_successfully",
-			config:                       &cfg.Sections{Accounts: &cfg.Accounts{Groups: currentGroup.Name}, Daemons: &cfg.Daemons{AccountsDaemon: true}},
+			config:                       &cfg.Sections{Accounts: &cfg.Accounts{Groups: currentGroup.Name}},
 			desc:                         descriptorFromJSON(t, `{}`),
 			onetimePlatformSetupFinished: false,
 			lastEnabled:                  false,
@@ -586,7 +577,6 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 					Groups:      "newgroup",
 					GroupAddCmd: "false",
 				},
-				Daemons: &cfg.Daemons{AccountsDaemon: true},
 			},
 			desc:                         descriptorFromJSON(t, `{}`),
 			onetimePlatformSetupFinished: false,
@@ -611,31 +601,10 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 					Groups:      "newgroup",
 					GroupAddCmd: "false",
 				},
-				Daemons: &cfg.Daemons{AccountsDaemon: true},
 			},
 			desc:                         descriptorFromJSON(t, `{}`),
 			onetimePlatformSetupFinished: true,
 			lastEnabled:                  false,
-			lastValidKeys:                make(userKeyMap),
-			googleSudoersContents:        "don't over-write me",
-			googleSudoersGroup:           "new_admin_group",
-			want:                         nil,
-			wantSudoersConfig:            "don't over-write me",
-			wantSupplementalGroups:       map[string]*accounts.Group{},
-			wantNoop:                     false,
-		},
-		{
-			name: "noop_metadatasshkey_disabled",
-			config: &cfg.Sections{
-				Accounts: &cfg.Accounts{
-					Groups:      "newgroup",
-					GroupAddCmd: "false",
-				},
-				Daemons: &cfg.Daemons{AccountsDaemon: false},
-			},
-			desc:                         descriptorFromJSON(t, `{}`),
-			onetimePlatformSetupFinished: false,
-			lastEnabled:                  true,
 			lastValidKeys:                make(userKeyMap),
 			googleSudoersContents:        "don't over-write me",
 			googleSudoersGroup:           "new_admin_group",
@@ -651,7 +620,6 @@ func TestMetadataSSHKeySetup(t *testing.T) {
 					Groups:      "newgroup",
 					GroupAddCmd: "false",
 				},
-				Daemons: &cfg.Daemons{AccountsDaemon: true},
 			},
 			desc:                         descriptorFromJSON(t, `{}`),
 			onetimePlatformSetupFinished: false,

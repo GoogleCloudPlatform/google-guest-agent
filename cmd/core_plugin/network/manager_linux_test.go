@@ -452,7 +452,44 @@ func TestRunManagerSetup(t *testing.T) {
 	}
 }
 
+func TestNetworkInterfacesSetupDisabled(t *testing.T) {
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+	cfg.Retrieve().NetworkInterfaces.Setup = false
+	defer func() {
+		cfg.Retrieve().NetworkInterfaces.Setup = true
+	}()
+
+	var routeSetupCalled bool
+	oldRouteSetup := routeSetup
+	t.Cleanup(func() {
+		routeSetup = oldRouteSetup
+	})
+	routeSetup = func(ctx context.Context, opts *service.Options) error {
+		routeSetupCalled = true
+		return nil
+	}
+
+	testOpts := service.NewOptions(nil, []*nic.Configuration{
+		{Index: 1},
+	})
+	if err := managerSetup(ctx, testOpts.NICConfigs(), networkChanged{true, false}); err != nil {
+		t.Errorf("managerSetup(ctx, %+v) = %v, want nil", testOpts, err)
+	}
+
+	// Routes setup should be called even if network interfaces setup is disabled.
+	if !routeSetupCalled {
+		t.Errorf("routeSetup() was not called")
+	}
+}
+
 func TestManagerSetup(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
 	tests := []struct {
 		name      string
 		opts      *service.Options

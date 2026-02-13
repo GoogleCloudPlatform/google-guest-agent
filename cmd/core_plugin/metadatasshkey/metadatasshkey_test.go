@@ -229,6 +229,21 @@ func TestNewModule(t *testing.T) {
 	}
 }
 
+func TestModuleSetupDaemonDisabled(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
+	cfg.Retrieve().Daemons.AccountsDaemon = false
+
+	if err := moduleSetup(context.Background(), descriptorFromJSON(t, "{}")); err != nil {
+		t.Fatalf("moduleSetup(ctx, {}) = %v, want nil", err)
+	}
+
+	if events.FetchManager().IsSubscribed(metadata.LongpollEvent, "metadatasshkey") {
+		t.Errorf("moduleSetup(ctx, {}) = subscribed to metadata.LongpollEvent, want not subscribed")
+	}
+}
+
 func TestModuleSetupInputValidity(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) = %v, want nil", err)

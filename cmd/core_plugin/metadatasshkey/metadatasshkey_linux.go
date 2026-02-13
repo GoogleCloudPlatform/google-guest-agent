@@ -253,10 +253,5 @@ func setPlatformConfiguration(ctx context.Context, config *cfg.Sections, _ *meta
 
 // enableMetadataSSHKey reports whether metadata ssh keys should be managed.
 func enableMetadataSSHKey(config *cfg.Sections, mdsdesc *metadata.Descriptor) bool {
-	// Legacy agent documentation refers to metadata ssh key functionality as
-	// accounts management.
-	if !config.Daemons.AccountsDaemon {
-		return false
-	}
 	return !mdsdesc.OSLoginEnabled()
 }

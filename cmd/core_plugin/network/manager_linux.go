@@ -28,6 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/networkd"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/nm"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/network/wicked"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
@@ -43,6 +44,9 @@ var (
 		wicked.NewService(),
 		dhclient.NewService(),
 	}
+
+	// routeSetup is the function that sets up the routes.
+	routeSetup = route.Setup
 )
 
 // managerSetup sets up the network interfaces for linux.
@@ -50,14 +54,14 @@ func managerSetup(ctx context.Context, nics []*nic.Configuration, networkChanged
 	galog.Infof("Running linux network management module setup.")
 	opts := service.NewOptions(defaultLinuxManagers, nics)
 
-	if networkChanged.networkInterfaces {
+	if networkChanged.networkInterfaces && cfg.Retrieve().NetworkInterfaces.Setup {
 		if err := runManagerSetup(ctx, opts); err != nil {
 			return fmt.Errorf("failed to setup network configuration: %w", err)
 		}
 	}
 
 	// Attempt to setup the routes.
-	if err := route.Setup(ctx, opts); err != nil {
+	if err := routeSetup(ctx, opts); err != nil {
 		return fmt.Errorf("failed to setup routes: %w", err)
 	}
 
