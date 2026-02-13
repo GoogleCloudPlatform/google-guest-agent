@@ -15,6 +15,12 @@ GO_BINARIES = \
 	cmd/metadata_script_runner_compat/gce_compat_metadata_script_runner \
 	cmd/google_authorized_keys_compat/google_authorized_keys_compat
 
+LINUX_BINPB_FILES = \
+  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.linux.binpb
+
+WINDOWS_BINPB_FILES = \
+  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.windows.binpb
+
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
 MWLID_PROTO_URL = https://github.com/GoogleCloudPlatform/managed-workload-identity
 
@@ -71,9 +77,17 @@ $(GO_BINARIES): print-go-env
 
 gen-pbgo: $(PBGO_FILES)
 
+gen-binpb: $(LINUX_BINPB_FILES) $(WINDOWS_BINPB_FILES)
+
+TXTTOBIN = $(subst .binpb,.txtpb,$(@))
+
+$(LINUX_BINPB_FILES) $(WINDOWS_BINPB_FILES):
+	$(Q)echo "[GEN] $(@)"
+	$(Q)cat $(TXTTOBIN) | protoc --encode agent_controlplane.ConfigurePluginStates.ConfigurePlugin internal/acp/proto/agent_controlplane.proto > $(@)
+
 build-go-binaries: $(GO_BINARIES)
 
-go-unit-tests: $(PBGO_FILES)
+go-unit-tests: $(PBGO_FILES) $(BINPB_FILES)
 	$(Q)echo "Running go unit tests..."
 	$(Q)$(eval DEST := $(ARTIFACTS_DIR))
 	$(Q)go test -v -coverprofile=$(DEST)/coverage.out ./... | tee -a $(DEST)/go-test.log
@@ -90,6 +104,10 @@ clean-pbgo:
 clean-go-binaries:
 	$(Q)echo "Cleaning up go binaries..."
 	$(Q)rm -f $(GO_BINARIES)
+
+clean-binpb:
+	$(Q)echo "Cleaning up binpb files..."
+	$(Q)rm -f $(LINUX_BINPB_FILES) $(WINDOWS_BINPB_FILES)
 
 # go-lint runs golint on all packages but ignores proto_deps as it contains
 # generated code and third party dependencies.

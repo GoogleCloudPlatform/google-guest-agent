@@ -1004,8 +1004,17 @@ func (m *PluginManager) GetLocalPlugin(ctx context.Context, name string) (*acpb.
 	if err := proto.Unmarshal(contentBytes, req); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal manifest file %q into plugin request: %w", textprotoFile, err)
 	}
+
+	// Correct the fields that are specific to local plugin manifests.
 	req.GetManifest().PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
 	req.Action = acpb.ConfigurePluginStates_INSTALL
+
+	// Only for core plugin, set the revision ID to the guest agent version.
+	if req.GetPlugin().GetRevisionId() == "" && req.GetPlugin().GetName() == CorePluginName {
+		version := cfg.Retrieve().Core.Version
+		galog.Debugf("Setting revision ID for core plugin to guest agent version %q", version)
+		req.GetPlugin().RevisionId = version
+	}
 	galog.Debugf("Local plugin %q has local manifest file %q, returning request: %+v", name, textprotoFile, req)
 	return req, nil
 }
@@ -1070,7 +1079,6 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 				continue
 			}
 		}
-
 		configurePlugins.ConfigurePlugins = append(configurePlugins.ConfigurePlugins, req)
 
 		// Add the plugin name to the list of plugins to install.

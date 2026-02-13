@@ -7,8 +7,9 @@ endif
 
 include build/Makefile.gobin
 
-clean: clean-go-binaries clean-pbgo
+clean: clean-go-binaries clean-pbgo clean-binpb
 build: build-go-binaries
+gen: gen-binpb gen-pbgo
 test: go-unit-tests
 check: go-lint
 
@@ -20,9 +21,10 @@ help:
 	$(Q)echo  "  VERSION           - Sets the main.version flag for all binaries, defaults to \"dev\""
 	$(Q)echo  " "
 	$(Q)echo  "GENERAL TARGETS:"
-	$(Q)echo  "  build             - Builds all binary artifacts (all code generation also happens)"
+	$(Q)echo  "  build             - Builds all binary artifacts"
 	$(Q)echo  "  check             - Runs linters and code checks"
 	$(Q)echo  "  clean             - Cleans up binaries and generated code"
+	$(Q)echo  "  gen               - Generates binpb and pb.go files"
 	$(Q)echo  "  help              - Prints this help message"
 	$(Q)echo  "  test              - Runs all unit tests"
 

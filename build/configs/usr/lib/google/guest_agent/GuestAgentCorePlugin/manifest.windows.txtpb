@@ -1,0 +1,21 @@
+# (see go/textformat-spec#header).
+# proto-file: internal/acp/proto/agent_controlplane.proto
+# proto-message: agent_controlplane.ConfigurePluginStates.ConfigurePlugin
+
+plugin: {
+  name: "GuestAgentCorePlugin"
+  entry_point: "C:\\Program Files\\Guest Agent\\GuestAgentCorePlugin\\core_plugin.exe"
+}
+manifest: {
+  start_attempt_count: 5
+  start_timeout: {
+    seconds: 30
+  }
+  stop_timeout: {
+    seconds: 30
+  }
+  plugin_type: DAEMON
+  execution_model: {
+    boot_critical: true
+  }
+}

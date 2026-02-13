@@ -59,9 +59,9 @@ const (
 	// shutdown.
 	galogShutdownTimeout = time.Second
 	// defaultLinuxCorePath is the default path where core plugin is installed on Linux.
-	defaultLinuxCorePath = "/usr/lib/google/guest_agent/core_plugin"
+	defaultLinuxCorePath = "/usr/lib/google/guest_agent/GuestAgentCorePlugin/core_plugin"
 	// defaultWindowsCorePath is the default path where core plugin is installed on Windows.
-	defaultWindowsCorePath = `C:\Program Files\Google\Compute Engine\agent\CorePlugin.exe`
+	defaultWindowsCorePath = `C:\Program Files\Google\Compute Engine\agent\GuestAgentCorePlugin\CorePlugin.exe`
 )
 
 func setupFlags() {

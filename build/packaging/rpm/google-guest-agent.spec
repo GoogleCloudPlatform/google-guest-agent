@@ -38,7 +38,8 @@ install -p -m 0644 build/configs/usr/lib/systemd/system/google-guest-agent.servi
 install -p -m 0644 build/configs/usr/lib/systemd/system/google-guest-agent.service %{buildroot}%/usr/lib/systemd/system/google-shutdown-scripts.service
 install -p -m 0755 cmd/google_guest_agent/google_guest_agent %{buildroot}%{_bindir}/google_guest_agent
 install -p -m 0755 cmd/google_guest_agent/ggactl %{buildroot}%{_bindir}/ggactl
-install -p -m 0755 cmd/core_plugin/core_plugin %{buildroot}%{_libdir}/google/guest_agent/core_plugin
+install -p -m 0755 cmd/core_plugin/core_plugin %{buildroot}%{_libdir}/google/guest_agent/GuestAgentCorePlugin/core_plugin
+install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb %{buildroot}%/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
 
 %files
 /etc/default/instance_configs.cfg
@@ -47,7 +48,8 @@ install -p -m 0755 cmd/core_plugin/core_plugin %{buildroot}%{_libdir}/google/gue
 /usr/lib/systemd/system/google-shutdown-scripts.service
 %{_bindir}/google_guest_agent
 %{_bindir}/ggactl
-%{_libdir}/google/guest_agent/core_plugin
+%{_libdir}/google/guest_agent/GuestAgentCorePlugin/core_plugin
+%{_libdir}/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
 
 %endif
 
