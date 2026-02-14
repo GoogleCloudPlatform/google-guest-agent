@@ -16,7 +16,7 @@ GO_BINARIES = \
 	cmd/google_authorized_keys_compat/google_authorized_keys_compat
 
 LINUX_BINPB_FILES = \
-  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.linux.binpb
+  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
 
 WINDOWS_BINPB_FILES = \
   build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.windows.binpb
