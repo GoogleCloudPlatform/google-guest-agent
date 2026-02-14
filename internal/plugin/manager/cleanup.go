@@ -39,6 +39,10 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 	pluginInstallLoc := filepath.Join(baseState(), pluginInstallDir)
 	pluginDirs, err := os.ReadDir(pluginInstallLoc)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			galog.V(1).Debugf("Plugin install directory %q does not exist, nothing to clean up", pluginInstallLoc)
+			return true, nil
+		}
 		return true, fmt.Errorf("failed to read plugin install directory: %w", err)
 	}
 
@@ -58,7 +62,7 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 		nameIndex := strings.LastIndex(p.Name(), "_")
 		pluginName := p.Name()[:nameIndex]
 		pluginRevision := p.Name()[nameIndex+1:]
-		galog.Debugf("Checking plugin %q, revision %q", pluginName, pluginRevision)
+		galog.V(1).Debugf("Checking plugin %q, revision %q", pluginName, pluginRevision)
 		// We want to avoid cleaning up plugins that currently have a request in progress.
 		// This is to prevent a race condition where the plugin is removed in the
 		// middle of an installation request.
@@ -81,10 +85,10 @@ func (m *PluginManager) retryFailedRemovals(ctx context.Context) (bool, error) {
 		}
 		// Check if the link points to a plugin directory that is no longer cached
 		// by the guest agent.
-		galog.Debugf("Checking link %q", link)
+		galog.V(1).Debugf("Checking link %q", link)
 		if _, ok := failedRemovals[filepath.Base(dest)]; ok {
 			linkPath := filepath.Join(pluginInstallLoc, link)
-			galog.Debugf("Removing link %q", linkPath)
+			galog.V(1).Debugf("Removing link %q", linkPath)
 			if err := os.Remove(linkPath); err != nil {
 				galog.Debugf("Unable to remove link %q: %v", linkPath, err)
 			}
