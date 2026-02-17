@@ -448,12 +448,6 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		failed = true
 	}
 
-	// Restart services. This is not a blocker.
-	if err := mod.restartServices(ctx); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("failed to restart services: %w", err))
-		failed = true
-	}
-
 	// Create the necessary OSLogin directories and other files.
 	if err := mod.setupOSLoginDirs(ctx); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to setup OSLogin directories: %w", err))
@@ -471,6 +465,12 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		OutputType: run.OutputNone,
 	}); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to fill NSS cache: %w", err))
+		failed = true
+	}
+
+	// Restart services. This is not a blocker.
+	if err := mod.restartServices(ctx); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("failed to restart services: %w", err))
 		failed = true
 	}
 
