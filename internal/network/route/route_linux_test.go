@@ -19,11 +19,16 @@ package route
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/google/go-cmp/cmp"
 )
@@ -916,4 +921,183 @@ func TestRemoveRoutes(t *testing.T) {
 
 	}
 
+}
+
+type testRunner struct {
+	callback     func(ctx context.Context, opts run.Options) (*run.Result, error)
+	seenCommands []string
+}
+
+func (tr *testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	tr.seenCommands = append(tr.seenCommands, fmt.Sprintf("%s %s", opts.Name, strings.Join(opts.Args, " ")))
+	if tr.callback == nil {
+		return &run.Result{}, nil
+	}
+	return tr.callback(ctx, opts)
+}
+
+// checkRoutesCommands checks if the expected routes commands were executed.
+// operation is the operation that was executed, which should match the ip
+// route argument (add, delete, etc.).
+func (tr *testRunner) checkRoutesCommands(t *testing.T, operation string, expected []string) {
+	t.Helper()
+
+	for _, route := range expected {
+		var found bool
+		for _, command := range tr.seenCommands {
+			args := strings.Split(command, " ")
+			if args[0] == "ip" && args[1] == "route" && args[2] == operation {
+				if slices.Contains(args, route) {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Errorf("route %q not found in seen commands: [%v]", route, strings.Join(tr.seenCommands, "\n"))
+		}
+	}
+}
+
+func TestSetup(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+
+	mdsJSON := `
+	{
+		"instance":  {
+			"networkInterfaces": [
+				{
+					"forwardedIps": [
+						"192.0.2.1/24",
+						"192.0.2.2"
+					]
+				}
+			]
+		}
+	}`
+	mds, err := metadata.UnmarshalDescriptor(mdsJSON)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", mdsJSON, err)
+	}
+
+	ip1, err := address.ParseIP("192.0.2.1/24")
+	if err != nil {
+		t.Fatalf("ParseIP(%q) returned an unexpected error: %v", "192.0.2.1/24", err)
+	}
+	ip2, err := address.ParseIP("192.0.2.3")
+	if err != nil {
+		t.Fatalf("ParseIP(%q) returned an unexpected error: %v", "192.0.2.3", err)
+	}
+
+	tests := []struct {
+		name            string
+		opts            *SetupOptions
+		callback        func(ctx context.Context, opts run.Options) (*run.Result, error)
+		expectedMissing []string
+		expectedExtra   []string
+		wantErr         bool
+	}{
+		{
+			name:    "no-options",
+			wantErr: false,
+		},
+		{
+			name:    "no-service-options-not-checked",
+			opts:    &SetupOptions{},
+			wantErr: false,
+		},
+		{
+			name: "no-nic-configs-not-checked",
+			opts: &SetupOptions{
+				ServiceOptions: service.NewOptions(nil, nil),
+			},
+			wantErr: false,
+		},
+		{
+			name: "already-checked-no-routes",
+			opts: &SetupOptions{
+				AlreadyChecked: true,
+				MissingRoutes:  make(map[string][]Handle),
+				ExtraRoutes:    make(map[string][]Handle),
+			},
+			wantErr: false,
+		},
+		{
+			name: "already-checked-with-routes",
+			opts: &SetupOptions{
+				AlreadyChecked: true,
+				MissingRoutes: map[string][]Handle{
+					"eth0": []Handle{
+						Handle{
+							Table:         "local",
+							Destination:   ip1,
+							InterfaceName: "eth0",
+							Type:          "local",
+							Proto:         "66",
+						},
+					},
+				},
+				ExtraRoutes: map[string][]Handle{
+					"eth0": []Handle{
+						Handle{
+							Table:         "local",
+							Destination:   ip2,
+							InterfaceName: "eth0",
+							Type:          "local",
+							Proto:         "66",
+						},
+					},
+				},
+			},
+			wantErr:         false,
+			expectedMissing: []string{"192.0.2.0/24"},
+			expectedExtra:   []string{"192.0.2.3"},
+		},
+		{
+			name: "service-options-not-checked",
+			opts: &SetupOptions{
+				ServiceOptions: service.NewOptions(nil, []*nic.Configuration{
+					{
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "eth0" },
+						},
+						ExtraAddresses: address.NewExtraAddresses(mds.Instance().NetworkInterfaces()[0], cfg.Retrieve(), nil),
+					},
+				}),
+			},
+			callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+				allArgs := strings.Join(opts.Args, " ")
+
+				// Mocking proto 66 for extra routes check.
+				if strings.Contains(allArgs, "66") {
+					return &run.Result{Output: "local 192.0.2.3 dev eth0 proto 66 scope host\n"}, nil
+				}
+				// Mocking for missing routes check.
+				return &run.Result{Output: "local 192.0.2.2 dev eth0 proto kernel scope host\n"}, nil
+			},
+			expectedMissing: []string{"192.0.2.0/24"},
+			expectedExtra:   []string{"192.0.2.3"},
+			wantErr:         false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runClient := run.Client
+			tr := &testRunner{callback: tc.callback}
+			run.Client = tr
+			defer func() { run.Client = runClient }()
+
+			ctx := context.Background()
+			err := Setup(ctx, tc.opts)
+			if (err == nil) == tc.wantErr {
+				t.Errorf("Setup(%v) = %v, want %v", tc.opts, err, tc.wantErr)
+			}
+
+			tr.checkRoutesCommands(t, "add", tc.expectedMissing)
+			tr.checkRoutesCommands(t, "delete", tc.expectedExtra)
+		})
+	}
 }

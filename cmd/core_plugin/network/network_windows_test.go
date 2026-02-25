@@ -42,7 +42,7 @@ func TestRouteChanged(t *testing.T) {
 	}
 
 	mod := &module{}
-	got := mod.routeChanged(context.Background(), nicConfigs)
+	got, _ := mod.routeChanged(context.Background(), nicConfigs)
 	if got {
 		t.Errorf("routeChanged(%v) = %t, want false", nicConfigs, got)
 	}
