@@ -71,7 +71,7 @@ func setupRoutes(cmd *cobra.Command, args []string) error {
 	opts := service.NewOptions(nil, nicConfigs)
 
 	// Add the routes, if any.
-	if err := route.Setup(ctx, opts); err != nil {
+	if err := route.Setup(ctx, &route.SetupOptions{ServiceOptions: opts}); err != nil {
 		return fmt.Errorf("failed to setup routes: %v", err)
 	}
 	return nil

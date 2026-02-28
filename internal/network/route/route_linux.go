@@ -25,7 +25,6 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"golang.org/x/exp/maps"
 )
@@ -398,16 +397,40 @@ func (lc *linuxClient) RemoveRoutes(ctx context.Context, iface string) error {
 
 // SetupRoutes sets up the routes for the network interfaces. This uses ip route
 // commands to delete extra routes and add missing routes.
-func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
-	nicConfigs := opts.FilteredNICConfigs()
-	if len(nicConfigs) == 0 {
-		galog.Debugf("No NICs to setup routes for.")
+func (lc *linuxClient) Setup(ctx context.Context, opts *SetupOptions) error {
+	if opts == nil {
+		galog.Debugf("No setup options provided.")
 		return nil
 	}
 	galog.Debugf("Running ip route setup.")
 
+	if opts.AlreadyChecked {
+		if len(opts.MissingRoutes) == 0 && len(opts.ExtraRoutes) == 0 {
+			galog.Debugf("No routes to setup.")
+			return nil
+		}
+
+		for iface, routes := range opts.ExtraRoutes {
+			lc.deleteExtraRoutes(ctx, iface, routes)
+		}
+		for iface, routes := range opts.MissingRoutes {
+			lc.addMissingRoutes(ctx, iface, routes)
+		}
+		return nil
+	}
+
+	if opts.ServiceOptions == nil {
+		galog.Debugf("No service options provided.")
+		return nil
+	}
+	nicConfigs := opts.ServiceOptions.FilteredNICConfigs()
+	if len(nicConfigs) == 0 {
+		galog.Debugf("No NICs to setup routes for.")
+		return nil
+	}
+
 	// Fallback route setup uses ip commands.
-	for _, nic := range opts.FilteredNICConfigs() {
+	for _, nic := range nicConfigs {
 		if nic.Interface == nil {
 			galog.Debugf("Skipping route setup for interface index %d: interface is nil", nic.Index)
 			continue
@@ -418,44 +441,60 @@ func (lc *linuxClient) Setup(ctx context.Context, opts *service.Options) error {
 		}
 
 		// Find extra routes to delete.
-		extraAddrs := nic.ExtraAddresses.MergedMap()
-		extraRoutes, err := lc.ExtraRoutes(ctx, nic.Interface.Name(), extraAddrs)
-		if err != nil {
-			return fmt.Errorf("failed to get extra routes for interface %q: %w", nic.Interface.Name(), err)
-		}
-
-		if len(extraRoutes) == 0 {
-			galog.Debugf("No extra routes to delete for interface %q", nic.Interface.Name())
+		var extraAddrs address.IPAddressMap
+		var extraRoutes []Handle
+		var err error
+		if opts.AlreadyChecked {
+			extraRoutes = opts.ExtraRoutes[nic.Interface.Name()]
 		} else {
-			galog.Infof("Deleting extra routes %v for interface %q", extraRoutes, nic.Interface.Name())
-			for _, r := range extraRoutes {
-				if err = lc.Delete(ctx, r); err != nil {
-					// Continue to delete the rest of the routes, and only log the error.
-					galog.Errorf("Failed to delete route %q for interface %q: %v", r.Destination.String(), nic.Interface.Name(), err)
-				}
+			extraAddrs = nic.ExtraAddresses.MergedMap()
+			extraRoutes, err = lc.ExtraRoutes(ctx, nic.Interface.Name(), extraAddrs)
+			if err != nil {
+				return fmt.Errorf("failed to get extra routes for interface %q: %w", nic.Interface.Name(), err)
 			}
 		}
+		lc.deleteExtraRoutes(ctx, nic.Interface.Name(), extraRoutes)
 
 		// Find missing routes for the given interface.
-		missingRoutes, err := lc.MissingRoutes(ctx, nic.Interface.Name(), extraAddrs)
-		if err != nil {
-			return fmt.Errorf("failed to get missing routes for interface %q: %w", nic.Interface.Name(), err)
-		}
-
-		if len(missingRoutes) == 0 {
-			galog.Debugf("No missing routes to add for interface %q", nic.Interface.Name())
-			continue
-		}
-		galog.Infof("Adding routes %v for interface %q", missingRoutes, nic.Interface.Name())
-
-		// Add the missing routes.
-		for _, r := range missingRoutes {
-			if err = lc.Add(ctx, r); err != nil {
-				// Continue to add the rest of the routes, and only log the error.
-				galog.Errorf("Failed to add route %q for interface %q: %v", r.Destination.String(), nic.Interface.Name(), err)
+		var missingRoutes []Handle
+		if opts.AlreadyChecked {
+			missingRoutes = opts.MissingRoutes[nic.Interface.Name()]
+		} else {
+			missingRoutes, err = lc.MissingRoutes(ctx, nic.Interface.Name(), extraAddrs)
+			if err != nil {
+				return fmt.Errorf("failed to get missing routes for interface %q: %w", nic.Interface.Name(), err)
 			}
 		}
+		lc.addMissingRoutes(ctx, nic.Interface.Name(), missingRoutes)
 	}
 	galog.Debugf("Finished ip route setup.")
 	return nil
+}
+
+func (lc *linuxClient) deleteExtraRoutes(ctx context.Context, iface string, extraRoutes []Handle) {
+	if len(extraRoutes) == 0 {
+		galog.Debugf("No extra routes to delete for interface %q", iface)
+		return
+	}
+	galog.Infof("Deleting extra routes %v for interface %q", extraRoutes, iface)
+	for _, r := range extraRoutes {
+		if err := lc.Delete(ctx, r); err != nil {
+			// Continue to delete the rest of the routes, and only log the error.
+			galog.Errorf("Failed to delete route %q for interface %q: %v", r.Destination.String(), iface, err)
+		}
+	}
+}
+
+func (lc *linuxClient) addMissingRoutes(ctx context.Context, iface string, missingRoutes []Handle) {
+	if len(missingRoutes) == 0 {
+		galog.Debugf("No missing routes to add for interface %q", iface)
+		return
+	}
+	galog.Infof("Adding routes %v for interface %q", missingRoutes, iface)
+	for _, r := range missingRoutes {
+		if err := lc.Add(ctx, r); err != nil {
+			// Continue to add the rest of the routes, and only log the error.
+			galog.Errorf("Failed to add route %q for interface %q: %v", r.Destination.String(), iface, err)
+		}
+	}
 }

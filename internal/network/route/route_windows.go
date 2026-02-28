@@ -22,7 +22,6 @@ import (
 	"net/netip"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"golang.org/x/sys/windows"
 )
 
@@ -164,6 +163,6 @@ func (wc *windowsClient) ExtraRoutes(context.Context, string, address.IPAddressM
 }
 
 // Setup sets up the routes for the network interfaces.
-func (wc *windowsClient) Setup(context.Context, *service.Options) error {
+func (wc *windowsClient) Setup(context.Context, *SetupOptions) error {
 	return fmt.Errorf("not implemented on Windows")
 }
