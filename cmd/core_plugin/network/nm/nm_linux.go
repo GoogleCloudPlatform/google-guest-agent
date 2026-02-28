@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
@@ -397,15 +398,19 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 		if err := sn.reloadInterfaces(ctx); err != nil {
 			return fmt.Errorf("failed to reload NetworkManager interfaces: %w", err)
 		}
+		return nil
+	}
 
-		// NetworkManager will not create a default connection if we are removing the one
-		// we manage, in that case we need to force it to connect and then with that create
-		// a default connection.
-		if reconnectPrimaryNic {
-			opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"device", "connect", primaryOp.name}}
-			if _, err := run.WithContext(ctx, opt); err != nil {
-				return fmt.Errorf("error reconnecting device(%q): %w", primaryOp.name, err)
-			}
+	// NetworkManager will not create a default connection if we are removing the
+	// one we manage, in that case we need to force it to connect and then with
+	// that create a default connection.
+	//
+	// We only do this if we are not managing the primary NIC to avoid unnecessary
+	// reloads. Otherwise the primary NIC will be reloaded twice.
+	if reconnectPrimaryNic && !cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC {
+		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"device", "connect", primaryOp.name}}
+		if _, err := run.WithContext(ctx, opt); err != nil {
+			return fmt.Errorf("error reconnecting device(%q): %w", primaryOp.name, err)
 		}
 	}
 

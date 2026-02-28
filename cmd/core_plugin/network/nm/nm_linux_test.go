@@ -38,9 +38,12 @@ import (
 
 type runMock struct {
 	callback func(context.Context, run.Options) (*run.Result, error)
+	called   []string
 }
 
 func (rm *runMock) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	called := fmt.Sprintf("%s %s", opts.Name, strings.Join(opts.Args, " "))
+	rm.called = append(rm.called, called)
 	return rm.callback(ctx, opts)
 }
 
@@ -610,10 +613,26 @@ method = auto
 
 func TestRollback(t *testing.T) {
 	tests := []struct {
-		name             string
-		opts             *service.Options
+		// Name of the test.
+		name string
+		// List of test service options.
+		opts *service.Options
+		// Indicates whether the config file should be created.
 		createConfigFile bool
-		wantErr          bool
+		// Indicates whether the NetworkManager service is the active manager.
+		active bool
+		// Indicates whether nmcli exists on the system.
+		nmcliExists bool
+		// Indicates whether the primary NIC should be managed.
+		primaryNic bool
+		// Indicates whether the config file should be kept.
+		keepConfig bool
+		// Indicates whether nmcli conn reload should be called.
+		wantReload bool
+		// Indicates whether nmcli device connect iface should be called.
+		wantReconnect bool
+		// Indicates whether an error should be returned when Rollback is called.
+		wantErr bool
 	}{
 		{
 			name: "no-config-file",
@@ -683,14 +702,94 @@ func TestRollback(t *testing.T) {
 			createConfigFile: true,
 			wantErr:          false,
 		},
+		{
+			name: "with-config-file-reload",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 1,
+				},
+			}),
+			createConfigFile: true,
+			nmcliExists:      true,
+			active:           false,
+			wantReload:       true,
+			wantReconnect:    false,
+			wantErr:          false,
+		},
+		{
+			// Primary NIC config file shouldn't be removed if this is the active
+			// manager. As a result, neither reload nor reconnect should be called.
+			name: "with-config-file-primary-nic-no-reconnect",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 0,
+				},
+			}),
+			createConfigFile: true,
+			nmcliExists:      true,
+			active:           true,
+			keepConfig:       true,
+			primaryNic:       true,
+			wantReload:       false,
+			wantReconnect:    false,
+			wantErr:          false,
+		},
+		{
+			// In case we are active, but the primary NIC is no longer being managed,
+			// we need to remove the primary NIC config file and force NM to reconnect.
+			name: "with-config-file-no-primary-nic-yes-reconnect",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+					Index: 0,
+				},
+			}),
+			createConfigFile: true,
+			nmcliExists:      true,
+			active:           true,
+			primaryNic:       false,
+			wantReload:       false,
+			wantReconnect:    true,
+			wantErr:          false,
+		},
 	}
 
 	ctx := context.Background()
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if err := cfg.Load(nil); err != nil {
+				t.Fatalf("failed to load config: %v", err)
+			}
+			cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC = tc.primaryNic
+
+			runMock := &runMock{
+				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+					return &run.Result{}, nil
+				},
+			}
+			oldRunClient := run.Client
+			run.Client = runMock
+			t.Cleanup(func() {
+				run.Client = oldRunClient
+			})
+
 			svc := &serviceNetworkManager{
 				configDir: path.Join(t.TempDir(), "NetworkManager", "config"),
+			}
+
+			if tc.nmcliExists {
+				execLookPath = func(path string) (string, error) {
+					return "nmcli", nil
+				}
 			}
 
 			if tc.createConfigFile {
@@ -703,13 +802,31 @@ func TestRollback(t *testing.T) {
 				}
 			}
 
-			err := svc.Rollback(ctx, tc.opts, false)
+			// Run the rollback.
+			err := svc.Rollback(ctx, tc.opts, tc.active)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Rollback() = %v, want error? %v", err, tc.wantErr)
 			}
 
-			if !tc.wantErr && file.Exists(svc.configFilePath("iface"), file.TypeFile) {
+			// Check if the config file was removed or kept.
+			fileExists := file.Exists(svc.configFilePath("iface"), file.TypeFile)
+			if !tc.wantErr && fileExists && !tc.keepConfig {
 				t.Errorf("config file %s was not removed", svc.configFilePath("iface"))
+			}
+			if tc.keepConfig && !fileExists {
+				t.Errorf("config file %s was removed", svc.configFilePath("iface"))
+			}
+
+			// Check if nmcli conn reload was called.
+			reloadCalled := slices.Contains(runMock.called, "nmcli conn reload")
+			if tc.wantReload != reloadCalled {
+				t.Errorf("nmcli conn reload called: %v, want: %v", reloadCalled, tc.wantReload)
+			}
+
+			// Check if nmcli device connect iface was called.
+			reconnectCalled := slices.Contains(runMock.called, "nmcli device connect iface")
+			if tc.wantReconnect != reconnectCalled {
+				t.Errorf("nmcli device connect iface called: %v, want: %v", reconnectCalled, tc.wantReconnect)
 			}
 		})
 	}
