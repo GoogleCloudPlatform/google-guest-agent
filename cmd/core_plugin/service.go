@@ -29,7 +29,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"google.golang.org/grpc"
@@ -50,11 +49,13 @@ var pluginServer *PluginServer
 // initPluginServer initializes the core plugin server and starts serving
 // requests from Guest Agent.
 func initPluginServer() error {
+	galog.Infof("Initializing core plugin server...")
 	listener, err := net.Listen(protocol, address)
 	if err != nil {
 		return fmt.Errorf("start listening on %q using %q: %v", address, protocol, err)
 	}
 	defer listener.Close()
+	galog.Infof("Core plugin server listening on %q using %q", address, protocol)
 
 	// This is the grpc server in communication with the Guest Agent.
 	server := grpc.NewServer()
@@ -64,6 +65,7 @@ func initPluginServer() error {
 	// offered mean Guest Agent was successful in installing/launching the plugin
 	// & will manage the lifecycle (start, stop, or revision change) here onwards.
 	pb.RegisterGuestAgentPluginServer(server, pluginServer)
+	galog.Infof("Core plugin server registered. Starting to serve requests...")
 
 	if err := server.Serve(listener); err != nil {
 		return fmt.Errorf("cannot continue serving on %q: %v", address, err)
@@ -198,12 +200,6 @@ func (ps *PluginServer) Start(ctx context.Context, msg *pb.StartRequest) (*pb.St
 	// Treat this as the entry point for a plugin to be functional.
 	pCtx, cancel := context.WithCancel(context.Background())
 	ps.cancel = cancel
-
-	logOpts.ProgramVersion = version
-	if err := logger.Init(pCtx, logOpts); err != nil {
-		return nil, status.Errorf(1, "failed to initialize logger: %v", err)
-	}
-	loggerInitialized.Store(true)
 
 	// Log the config read by the core plugin to debug.
 	cfg.Log()

@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -120,6 +121,13 @@ func main() {
 	// having the cfg package initialized as it depends on some default values
 	// coming from user's configuration.
 	setupFlags()
+
+	// Initialize the logger.
+	logOpts.ProgramVersion = version
+	if err := logger.Init(context.Background(), logOpts); err != nil {
+		logAndExit(fmt.Sprintf("Failed to initialize logger: %v", err))
+	}
+	loggerInitialized.Store(true)
 
 	// List available modules and exit.
 	if listModules {
