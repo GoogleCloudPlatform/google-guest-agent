@@ -252,10 +252,10 @@ func address(ctx context.Context, protocol, id string, policy retry.Policy) (str
 	return retry.RunWithResponse(ctx, policy, f)
 }
 
-// isUDSSupported returns true if UDS is supported on Windows. Instead of going
-// by version to figure out if UDS is supported, try listening on test address
-// using UDS, if it gets listener successfully consider UDS is supported.
-func isUDSSupported() bool {
+// defaultIsUDSSupported returns true if UDS is supported on Windows. Instead of
+// going by version to figure out if UDS is supported, try listening on test
+// address using UDS, if it gets listener successfully consider UDS is supported.
+func defaultIsUDSSupported() bool {
 	if runtime.GOOS == "linux" {
 		return true
 	}

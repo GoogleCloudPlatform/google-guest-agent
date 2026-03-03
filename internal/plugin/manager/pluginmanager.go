@@ -62,6 +62,10 @@ const (
 var (
 	// pluginManager is the instance of plugin manager.
 	pluginManager *PluginManager
+
+	// isUDSSupported checks if UDS is supported on the host. This is stubbed out
+	// for testing.
+	isUDSSupported = defaultIsUDSSupported
 )
 
 // PluginManager struct represents the plugins that plugin manager manages.
@@ -262,8 +266,21 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 	pluginManager.pendingPluginRevisionsMu.Unlock()
 	wg.Wait()
 
+	// TCP is always supported, so if the forced connection type is TCP, we can
+	// return early.
+	connType := cfg.Retrieve().Plugin.ConnectionType
+	if connType == tcpProtocol {
+		pluginManager.protocol = tcpProtocol
+		return pluginManager, nil
+	}
+
+	// If the connection type is not TCP, check if UDS is supported and set the
+	// protocol to UDS if it is. Otherwise, fallback to TCP.
 	if isUDSSupported() {
 		pluginManager.protocol = udsProtocol
+	} else {
+		galog.Debugf("UDS is not supported, fallback to TCP")
+		pluginManager.protocol = tcpProtocol
 	}
 	return pluginManager, nil
 }

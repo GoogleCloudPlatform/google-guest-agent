@@ -137,6 +137,7 @@ timeout_in_seconds = 60
 socket_connections_dir = {{.socketConnectionsDir}}
 state_dir = {{.baseStateDir}}
 local_plugin_dir = {{.localPluginDir}}
+connection_type =
 
 [ACS]
 endpoint =
@@ -439,6 +440,10 @@ type Plugin struct {
 	StateDir string `ini:"state_dir,omitempty"`
 	// LocalPluginDir defines the directory path where local plugins are installed.
 	LocalPluginDir string `ini:"local_plugin_dir,omitempty"`
+	// ConnectionType defines the connection type of the plugin. Only "tcp" and
+	// "uds" are supported; anything else will be ignored and the default
+	// behavior will be used.
+	ConnectionType string `ini:"connection_type,omitempty"`
 }
 
 // Unstable contains the configurations of Unstable section. No long term

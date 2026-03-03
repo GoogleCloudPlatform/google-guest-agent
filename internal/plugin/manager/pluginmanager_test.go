@@ -422,6 +422,83 @@ func TestInitPluginManager(t *testing.T) {
 	}
 }
 
+func TestInitPluginManagerConfig(t *testing.T) {
+	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+	stateDir := t.TempDir()
+	addr := filepath.Join(t.TempDir(), "pluginA_revisionA.sock")
+
+	tests := []struct {
+		name             string
+		isUDSSupported   bool
+		connectionType   string
+		expectedProtocol string
+	}{
+		{
+			name:             "uds_connection_type",
+			isUDSSupported:   true,
+			connectionType:   udsProtocol,
+			expectedProtocol: udsProtocol,
+		},
+		{
+			name:             "tcp_connection_type",
+			isUDSSupported:   true,
+			connectionType:   tcpProtocol,
+			expectedProtocol: tcpProtocol,
+		},
+		{
+			name:             "invalid_connection_type",
+			isUDSSupported:   true,
+			connectionType:   "invalid",
+			expectedProtocol: udsProtocol,
+		},
+		{
+			name:             "uds_not_supported",
+			isUDSSupported:   false,
+			connectionType:   udsProtocol,
+			expectedProtocol: tcpProtocol,
+		},
+		{
+			name:             "uds_not_supported_tcp_connection_type",
+			isUDSSupported:   false,
+			connectionType:   tcpProtocol,
+			expectedProtocol: tcpProtocol,
+		},
+		{
+			name:             "uds_not_supported_invalid_connection_type",
+			isUDSSupported:   false,
+			connectionType:   "invalid",
+			expectedProtocol: tcpProtocol,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			config := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\nconnection_type = %s\n[Core]\nacs_client = false\nsocket_connections_dir = %s", stateDir, tc.connectionType, filepath.Dir(addr))
+			if err := cfg.Load([]byte(config)); err != nil {
+				t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+			}
+
+			oldIsUDSSupported := isUDSSupported
+			t.Cleanup(func() { isUDSSupported = oldIsUDSSupported })
+			isUDSSupported = func() bool { return tc.isUDSSupported }
+
+			pm, err := InitPluginManager(ctx, "1234567890")
+			if err != nil {
+				t.Fatalf("InitPluginManager(ctx) failed unexpectedly with error: %v", err)
+			}
+			if pm.protocol != tc.expectedProtocol {
+				t.Errorf("InitPluginManager(ctx) = protocol %q, want %q", pm.protocol, tc.expectedProtocol)
+			}
+
+			t.Cleanup(func() {
+				if err := command.CurrentMonitor().UnregisterHandler(VMEventCmd); err != nil {
+					t.Fatalf("command.CurrentMonitor().UnregisterHandler(VMEventCmd) failed unexpectedly with error: %v", err)
+				}
+			})
+		})
+	}
+}
+
 func TestConfigurePluginStates(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("Failed to load config: %v", err)
