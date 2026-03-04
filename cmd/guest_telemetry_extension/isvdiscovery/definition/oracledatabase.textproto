@@ -1,0 +1,29 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "oracledatabase"
+  any: {
+    conditions: [
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "ora_pmon"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "db_pmon"
+        }
+      }
+    ]
+  }
+  version_rules: [
+    {
+      command: OPATCH
+      command_args: ["lsinventory"]
+      regex_match: "Oracle Interim Patch Installer version \\d+(?:\\.\\d+)+"
+    }
+  ]
+}

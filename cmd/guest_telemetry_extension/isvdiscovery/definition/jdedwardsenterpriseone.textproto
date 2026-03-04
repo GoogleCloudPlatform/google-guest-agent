@@ -1,0 +1,30 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "jdedwardsenterpriseone"
+  any: {
+    conditions: [
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "jdenet_n"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "jdenet_k"
+        }
+      }
+    ]
+  }
+  version_rules: [
+    {
+      command: CAT
+      command_args: ["$JDE_HOME/system/bin32/ptf.log"]
+      # TODO: b/479503774 - Update the regex once example output is available.
+      regex_match: "[Vv]ersion"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "saphanastudio"
+  any: {
+    conditions: [
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "hdbstudio"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "hdbstudio.exe"
+        }
+      }
+    ]
+  }
+  version_rules: [
+    {
+      command: GREP
+      command_args: ["eclipse.buildId", "/usr/sap/hdbstudio/configuration/config.ini"]
+      regex_match: "eclipse\\.buildId=([0-9]+\\.[0-9]+\\.[0-9]+)"
+    },
+    {
+      command: GETCOMMAND
+      command_args: ["C:\\Program Files\\SAP\\hdbstudio\\hdbstudio.exe"]
+      regex_match: "hdbstudio\\.exe[\\s\\r\\n]+.*([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
+    }
+  ]
+}

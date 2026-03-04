@@ -1,0 +1,29 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "saphanadb"
+  any: {
+    conditions: [
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "hdbindexserver"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "hdbnameserver"
+        }
+      }
+    ]
+  }
+  version_rules: [
+    {
+      command: HDBLCM
+      command_args: ["-L"]
+      regex_match: "version"
+    }
+  ]
+}

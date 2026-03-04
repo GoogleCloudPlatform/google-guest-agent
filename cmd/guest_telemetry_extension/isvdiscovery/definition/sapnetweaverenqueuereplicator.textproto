@@ -1,0 +1,27 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "sapnetweaverenqueuereplicator"
+  any: {
+    conditions: {
+      string_match: {
+        vm_field: VM_PROCESS_NAME
+        regex_match: "enqr.sap"
+      }
+    }
+    conditions: {
+      string_match: {
+        vm_field: VM_PROCESS_NAME
+        regex_match: "er.sap"
+      }
+    }
+  }
+  version_rules: [
+    {
+      command: CAT
+      command_args: ["/sapmnt/*/exe/uc/linuxx86_64/sapmanifest.mf"]
+      regex_match: "kernel release"
+    }
+  ]
+}
