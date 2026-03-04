@@ -1086,6 +1086,10 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 			// since the dynamic version will always take precedence.
 			if p.IsDynamic() {
 				galog.Infof("Plugin %q already dynamically installed with revision %q, skipping local installation", pluginName, p.Revision)
+				if installation, ok := config[req.GetPlugin().GetName()]; ok && installation.OnReady != nil {
+					galog.Debugf("Running OnReady function for plugin %q", pluginName)
+					installation.OnReady(ctx)
+				}
 				continue
 			}
 			// If the local version is already installed, check if it's the same
@@ -1093,6 +1097,11 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 			// revision over the old one.
 			if p.IsLocal() && p.Revision == req.GetPlugin().GetRevisionId() {
 				galog.Infof("Plugin %q already locally installed with revision %q, skipping local installation", pluginName, p.Revision)
+				// Run the OnReady function for the plugin.
+				if installation, ok := config[req.GetPlugin().GetName()]; ok && installation.OnReady != nil {
+					galog.Debugf("Running OnReady function for plugin %q", pluginName)
+					installation.OnReady(ctx)
+				}
 				continue
 			}
 		}
@@ -1123,6 +1132,7 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 					errs = append(errs, fmt.Errorf("failed to verify local plugins are running: %w", err))
 					errMu.Unlock()
 				} else {
+					galog.Debugf("Running OnReady function for plugin %q", req.GetPlugin().GetName())
 					if installation, ok := config[req.GetPlugin().GetName()]; ok && installation.OnReady != nil {
 						installation.OnReady(ctx)
 					}
