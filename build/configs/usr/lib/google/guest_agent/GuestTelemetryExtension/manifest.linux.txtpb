@@ -1,10 +1,9 @@
-# (see go/textformat-spec#header).
 # proto-file: internal/acp/proto/agent_controlplane.proto
 # proto-message: agent_controlplane.ConfigurePluginStates.ConfigurePlugin
 
 plugin: {
-  name: "GuestAgentCorePlugin"
-  entry_point: "C:\\Program Files\\Compute Engine\\agent\\GuestAgentCorePlugin\\CorePlugin.exe"
+  name: "GuestTelemetryExtension"
+  entry_point: "/usr/lib/google/guest_agent/GuestTelemetryExtension/guesttelemetryextension"
 }
 manifest: {
   start_attempt_count: 5
@@ -16,6 +15,6 @@ manifest: {
   }
   plugin_type: DAEMON
   execution_model: {
-    boot_critical: true
+    boot_critical: false
   }
 }

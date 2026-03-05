@@ -1,0 +1,24 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "sqlserver"
+  condition: {
+    string_match: {
+      vm_field: VM_PROCESS_NAME
+      regex_match: "sqlservr"
+    }
+  }
+  version_rules: [
+    {
+      command: SQLSERVR
+      command_args: ["--version"]
+      regex_match: "^Microsoft SQL Server \\d{4}.*? - \\d{1,2}\\.\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}"
+    },
+    {
+      command: GETITEMPROPERTYVALUE
+      command_args: ["-Path", "'HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\*\\MSSQLServer\\CurrentVersion'", "-Name", "CurrentVersion"]
+      regex_match: "^\\d{1,2}\\.\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}$"
+    }
+  ]
+}

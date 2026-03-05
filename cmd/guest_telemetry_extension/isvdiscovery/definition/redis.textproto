@@ -1,0 +1,41 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "redis"
+  any: {
+    conditions: [
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "redis-server"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "redis-server.exe"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "memurai"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "memurai.exe"
+        }
+      }
+    ]
+  }
+  version_rules: [
+    {
+      command: REDISSERVER
+      command_args: ["--version"]
+      regex_match: "v=([0-9]+\\.[0-9]+\\.[0-9]+)"
+    }
+  ]
+}

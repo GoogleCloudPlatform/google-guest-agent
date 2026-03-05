@@ -13,13 +13,17 @@ GO_BINARIES = \
 	cmd/google_guest_compat_manager/google_guest_compat_manager \
 	cmd/gce_metadata_script_runner/gce_metadata_script_runner \
 	cmd/metadata_script_runner_compat/gce_compat_metadata_script_runner \
-	cmd/google_authorized_keys_compat/google_authorized_keys_compat
+	cmd/google_authorized_keys_compat/google_authorized_keys_compat \
+	cmd/guest_telemetry_extension/guest_telemetry
 
 LINUX_BINPB_FILES = \
-  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
+  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb \
+	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb
+
 
 WINDOWS_BINPB_FILES = \
-  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.windows.binpb
+  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.windows.binpb \
+	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.windows.binpb
 
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
 MWLID_PROTO_URL = https://github.com/GoogleCloudPlatform/managed-workload-identity
@@ -96,7 +100,7 @@ go-unit-tests: $(PBGO_FILES) $(BINPB_FILES)
 
 clean-pbgo:
 	$(Q)echo "Cleaning up all generated pb.go and _grpc.pb.go files..."
-	$(Q)find . -type f \( -name "*.pb.go" -o -name "*_grpc.pb.go" \) -not -path "./vendor/*" \
+	$(Q)find . -type f \( -name "*.pb.go" -o -name "*_grpc.pb.go" \) -not -path "./vendor/*" -not -path "./cmd/guest_telemetry_extension/*" \
 		-exec echo "[CLEAN] {}" \; \
 		-delete
 	$(Q)rm -Rf proto_deps
