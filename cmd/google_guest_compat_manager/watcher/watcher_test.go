@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/config"
 	"github.com/google/go-cmp/cmp"
 )
@@ -146,7 +147,7 @@ func TestSetupError(t *testing.T) {
 			testRunner := fakeDaemonClient{wantStopDaemonErr: test.stopErr, wantRestartServiceErr: test.restartErr, wantStartDaemonErr: test.startErr, wantEnableServiceErr: test.enableErr, wantDisableServiceErr: test.disableErr}
 			setTestDaemonClient(t, &testRunner)
 
-			watcher := Manager{corePluginsEnabled: test.prevEnabled, instanceID: "test-instance-id"}
+			watcher := Manager{corePluginsEnabled: test.prevEnabled, instanceID: "test-instance-id", osInfoReader: func() osinfo.OSInfo { return osinfo.OSInfo{OS: "debian"} }}
 			cfgFile := filepath.Join(t.TempDir(), "core-plugin-enabled")
 			config.CorePluginEnabledConfigFile = cfgFile
 
@@ -269,91 +270,128 @@ func TestEnableDisableAgent(t *testing.T) {
 		config.CorePluginEnabledConfigFile = orig
 	})
 
-	wantEnableCmds := []string{"disable", "stop", "disable", "stop", "restart"}
-	wantEnableServices := []string{"test-guest-agent", "test-guest-agent", "gce-workload-cert-refresh.timer", "gce-workload-cert-refresh.timer", "test-guest-agent-manager"}
-
-	wantDisableCmds := []string{"stop", "start", "enable", "start", "enable", "start"}
-	wantDisableServices := []string{"test-guest-agent-manager", "test-guest-agent-manager", "gce-workload-cert-refresh.timer", "gce-workload-cert-refresh.timer", "test-guest-agent", "test-guest-agent"}
-
-	if runtime.GOOS == "windows" {
-		wantEnableCmds = []string{"disable", "stop", "restart"}
-		wantEnableServices = []string{"test-guest-agent", "test-guest-agent", "test-guest-agent-manager"}
-
-		wantDisableCmds = []string{"stop", "start", "enable", "start"}
-		wantDisableServices = []string{"test-guest-agent-manager", "test-guest-agent-manager", "test-guest-agent", "test-guest-agent"}
-
+	type osBehaviour struct {
+		os                  string
+		wantEnableCmds      []string
+		wantEnableServices  []string
+		wantDisableCmds     []string
+		wantDisableServices []string
+		osInfoReader        func() osinfo.OSInfo
 	}
 
-	// default state is disabled.
-	watcher := Manager{corePluginsEnabled: false, guestAgentProcessName: "test-guest-agent", guestAgentManagerProcessName: "test-guest-agent-manager", instanceID: "test-instance-id"}
+	behaviours := []osBehaviour{
+		{
+			os:                  "debian",
+			wantEnableCmds:      []string{"disable", "stop", "disable", "stop", "restart"},
+			wantEnableServices:  []string{"test-guest-agent", "test-guest-agent", "gce-workload-cert-refresh.timer", "gce-workload-cert-refresh.timer", "test-guest-agent-manager"},
+			wantDisableCmds:     []string{"stop", "start", "enable", "start", "enable", "start"},
+			wantDisableServices: []string{"test-guest-agent-manager", "test-guest-agent-manager", "gce-workload-cert-refresh.timer", "gce-workload-cert-refresh.timer", "test-guest-agent", "test-guest-agent"},
+			osInfoReader:        func() osinfo.OSInfo { return osinfo.OSInfo{OS: "debian"} },
+		},
+		{
+			os:                  "sles",
+			wantEnableCmds:      []string{"disable", "stop", "restart"},
+			wantEnableServices:  []string{"test-guest-agent", "test-guest-agent", "test-guest-agent-manager"},
+			wantDisableCmds:     []string{"stop", "start", "enable", "start"},
+			wantDisableServices: []string{"test-guest-agent-manager", "test-guest-agent-manager", "test-guest-agent", "test-guest-agent"},
+			osInfoReader:        func() osinfo.OSInfo { return osinfo.OSInfo{OS: "sles"} },
+		},
+	}
+	if runtime.GOOS == "windows" {
+		behaviours = []osBehaviour{
+			{
+				os:                  "windows",
+				wantEnableCmds:      []string{"disable", "stop", "restart"},
+				wantEnableServices:  []string{"test-guest-agent", "test-guest-agent", "test-guest-agent-manager"},
+				wantDisableCmds:     []string{"stop", "start", "enable", "start"},
+				wantDisableServices: []string{"test-guest-agent-manager", "test-guest-agent-manager", "test-guest-agent", "test-guest-agent"},
+				osInfoReader:        func() osinfo.OSInfo { return osinfo.OSInfo{OS: "windows"} },
+			},
+		}
+	}
 
 	tests := []struct {
 		name                  string
-		wantCmds              []string
-		wantServices          []string
+		runEnableDisable      bool
 		wantCorePluginEnabled bool
-		prevCorePluginEnabled bool
 		wantNoop              bool
+		wantCmds              func(b osBehaviour) []string
+		wantServices          func(b osBehaviour) []string
 	}{
 		{
 			name:                  "enable_core_plugin",
-			wantCmds:              wantEnableCmds,
-			wantServices:          wantEnableServices,
+			runEnableDisable:      true,
 			wantCorePluginEnabled: true,
-			prevCorePluginEnabled: false,
 			wantNoop:              false,
+			wantCmds:              func(b osBehaviour) []string { return b.wantEnableCmds },
+			wantServices:          func(b osBehaviour) []string { return b.wantEnableServices },
 		},
 		{
 			name:                  "no_change_core_plugin_enabled",
+			runEnableDisable:      true,
 			wantCorePluginEnabled: true,
-			prevCorePluginEnabled: true,
 			wantNoop:              true,
 		},
 		{
 			name:                  "disable_core_plugin",
-			wantCmds:              wantDisableCmds,
-			wantServices:          wantDisableServices,
+			runEnableDisable:      false,
 			wantCorePluginEnabled: false,
-			prevCorePluginEnabled: true,
 			wantNoop:              false,
+			wantCmds:              func(b osBehaviour) []string { return b.wantDisableCmds },
+			wantServices:          func(b osBehaviour) []string { return b.wantDisableServices },
 		},
 		{
 			name:                  "no_change_core_plugin_disabled",
+			runEnableDisable:      false,
 			wantCorePluginEnabled: false,
-			prevCorePluginEnabled: false,
 			wantNoop:              true,
 		},
 	}
 
-	// Expected to be run in the order they are defined in the test case. Each run
-	// will update the config file state and should update based on the previous
-	// state.
-	for _, test := range tests {
-		testRunner := fakeDaemonClient{}
-		setTestDaemonClient(t, &testRunner)
+	for _, b := range behaviours {
+		t.Run(b.os, func(t *testing.T) {
+			t.Logf("Running test for %s", b.os)
+			watcher := Manager{corePluginsEnabled: false, guestAgentProcessName: "test-guest-agent", guestAgentManagerProcessName: "test-guest-agent-manager", instanceID: "test-instance-id", osInfoReader: b.osInfoReader}
 
-		gotNoop, err := watcher.enableDisableAgent(ctx, test.wantCorePluginEnabled)
-		if err != nil {
-			t.Errorf("enableDisableAgent(ctx, %t) returned error for %q: %v, want: nil", test.wantCorePluginEnabled, test.name, err)
-		}
-		if gotNoop != test.wantNoop {
-			t.Errorf("enableDisableAgent(ctx, %t) returned noop: %t, want: %t", test.wantCorePluginEnabled, gotNoop, test.wantNoop)
-		}
+			for _, test := range tests {
+				t.Run(test.name, func(t *testing.T) {
+					testRunner := fakeDaemonClient{}
+					setTestDaemonClient(t, &testRunner)
 
-		if diff := cmp.Diff(test.wantCmds, testRunner.commandRun); diff != "" {
-			t.Errorf("enableDisableAgent(ctx, true) did not run expected commands for %q, diff (-want +got):\n%s", test.name, diff)
-		}
-		if diff := cmp.Diff(test.wantServices, testRunner.seenServiceName); diff != "" {
-			t.Errorf("enableDisableAgent(ctx, true) did not run commands on expected services for %q, diff (-want +got):\n%s", test.name, diff)
-		}
+					gotNoop, err := watcher.enableDisableAgent(ctx, test.runEnableDisable)
+					if err != nil {
+						t.Errorf("enableDisableAgent(ctx, %t) returned error for %q: %v, want: nil", test.runEnableDisable, test.name, err)
+					}
+					if gotNoop != test.wantNoop {
+						t.Errorf("enableDisableAgent(ctx, %t) returned noop: %t, want: %t", test.runEnableDisable, gotNoop, test.wantNoop)
+					}
 
-		if got := config.IsCorePluginEnabled(); got != test.wantCorePluginEnabled {
-			t.Errorf("enableCorePlugin(ctx) set enable core plugin for %q to: %t, want: %t", test.name, got, test.wantCorePluginEnabled)
-		}
+					var wantCmds []string
+					if test.wantCmds != nil {
+						wantCmds = test.wantCmds(b)
+					}
+					var wantServices []string
+					if test.wantServices != nil {
+						wantServices = test.wantServices(b)
+					}
 
-		if watcher.corePluginsEnabled != test.wantCorePluginEnabled {
-			t.Errorf("enableDisableAgent(ctx, %t) set corePluginsEnabled for %q to: %t, want: %t", test.wantCorePluginEnabled, test.name, watcher.corePluginsEnabled, test.wantCorePluginEnabled)
-		}
+					if diff := cmp.Diff(wantCmds, testRunner.commandRun); diff != "" {
+						t.Errorf("enableDisableAgent(ctx, %t) did not run expected commands for %q, diff (-want +got):\n%s", test.runEnableDisable, test.name, diff)
+					}
+					if diff := cmp.Diff(wantServices, testRunner.seenServiceName); diff != "" {
+						t.Errorf("enableDisableAgent(ctx, %t) did not run commands on expected services for %q, diff (-want +got):\n%s", test.runEnableDisable, test.name, diff)
+					}
+
+					if got := config.IsCorePluginEnabled(); got != test.wantCorePluginEnabled {
+						t.Errorf("enableCorePlugin(ctx) set enable core plugin for %q to: %t, want: %t", test.name, got, test.wantCorePluginEnabled)
+					}
+
+					if watcher.corePluginsEnabled != test.wantCorePluginEnabled {
+						t.Errorf("enableDisableAgent(ctx, %t) set corePluginsEnabled for %q to: %t, want: %t", test.runEnableDisable, test.name, watcher.corePluginsEnabled, test.wantCorePluginEnabled)
+					}
+				})
+			}
+		})
 	}
 }
 

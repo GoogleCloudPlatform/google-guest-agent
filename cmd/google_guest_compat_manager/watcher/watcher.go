@@ -24,6 +24,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/config"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
@@ -36,6 +37,7 @@ type Manager struct {
 	guestAgentProcessName        string
 	instanceID                   string
 	guestAgentManagerProcessName string
+	osInfoReader                 func() osinfo.OSInfo
 }
 
 // NewManager creates a new Manager.
@@ -43,7 +45,7 @@ func NewManager() *Manager {
 	// IsCorePluginEnabled defaults to [true] if the config file is not present.
 	alreadyEnabled := config.IsCorePluginEnabled()
 	galog.Infof("Compat manager created with core plugin already enabled: %t", alreadyEnabled)
-	return &Manager{guestAgentProcessName: daemon.GuestAgent, guestAgentManagerProcessName: daemon.GuestAgentManager, corePluginsEnabled: alreadyEnabled}
+	return &Manager{guestAgentProcessName: daemon.GuestAgent, guestAgentManagerProcessName: daemon.GuestAgentManager, corePluginsEnabled: alreadyEnabled, osInfoReader: osinfo.Read}
 }
 
 // Setup sets up the configuration to enable/disable the Core Plugin and the

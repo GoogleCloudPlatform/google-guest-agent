@@ -35,6 +35,11 @@ const (
 
 // disableCertRefresher disables and stops the workload cert refresher service.
 func (w *Manager) disableCertRefresher(ctx context.Context) error {
+	if w.osInfoReader().OS == "sles" {
+		galog.Infof("SLES does not install workload cert refresher service, skipping disable")
+		return nil
+	}
+
 	galog.Infof("Disabling workload cert refresher service")
 
 	if err := daemon.DisableService(ctx, workloadCertRefresherServiceName); err != nil {
@@ -50,6 +55,11 @@ func (w *Manager) disableCertRefresher(ctx context.Context) error {
 
 // enableCertRefresher enables the workload cert refresher service.
 func (w *Manager) enableCertRefresher(ctx context.Context) error {
+	if w.osInfoReader().OS == "sles" {
+		galog.Infof("SLES does not install workload cert refresher service, skipping enable")
+		return nil
+	}
+
 	galog.Infof("Enabling workload cert refresher service")
 
 	if err := daemon.EnableService(ctx, workloadCertRefresherServiceName); err != nil {
