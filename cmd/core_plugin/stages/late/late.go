@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/agentcrypto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/clock"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/diagnostics"
@@ -55,6 +56,7 @@ var (
 	// independently within its own Go routine and must not rely on any other
 	// module being executed before or after it.
 	modsFcs = []stages.ModuleFc{
+		agentcrypto.NewModule,
 		clock.NewModule,
 		command.NewModule,
 		diagnostics.NewModule,

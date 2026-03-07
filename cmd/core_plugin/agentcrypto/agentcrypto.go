@@ -39,9 +39,10 @@ const (
 // NewModule returns agentcrypto early initialization module.
 func NewModule(_ context.Context) *manager.Module {
 	handler := &moduleHandler{metadata: metadata.New(), credsDir: defaultCredsDir}
+	// TODO(b/490501678): Move back to early initialization once bug is fixed.
 	return &manager.Module{
 		ID:          moduleID,
-		BlockSetup:  handler.setup,
+		Setup:       handler.setup,
 		Description: "MDS/MTLS bootstrapping and certificate rotation",
 	}
 }

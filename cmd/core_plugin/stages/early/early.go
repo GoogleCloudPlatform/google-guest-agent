@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/agentcrypto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/firstboot"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/iosched"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
@@ -50,7 +49,6 @@ var (
 		firstboot.NewEarlyModule,
 		network.NewModule,
 		iosched.NewModule,
-		agentcrypto.NewModule,
 	}
 )
 

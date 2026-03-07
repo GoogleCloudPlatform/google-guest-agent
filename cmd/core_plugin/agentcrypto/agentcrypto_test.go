@@ -34,11 +34,11 @@ func TestNewModule(t *testing.T) {
 	if module.ID != moduleID {
 		t.Errorf("NewModule() returned module with ID %q, want %q", module.ID, moduleID)
 	}
-	if module.BlockSetup == nil {
-		t.Errorf("NewModule() returned module with nil BlockSetup")
+	if module.Setup == nil {
+		t.Errorf("NewModule() returned module with nil Setup")
 	}
-	if module.Setup != nil {
-		t.Errorf("NewModule() returned module with Setup not nil, want nil")
+	if module.BlockSetup != nil {
+		t.Errorf("NewModule() returned module with BlockSetup not nil, want nil")
 	}
 	if module.Description == "" {
 		t.Errorf("NewModule() returned module with empty Description")
