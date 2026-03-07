@@ -4,7 +4,7 @@
 
 plugin: {
   name: "GuestAgentCorePlugin"
-  entry_point: "C:\\Program Files\\Guest Agent\\GuestAgentCorePlugin\\core_plugin.exe"
+  entry_point: "C:\\Program Files\\Compute Engine\\agent\\GuestAgentCorePlugin\\core_plugin.exe"
 }
 manifest: {
   start_attempt_count: 5
