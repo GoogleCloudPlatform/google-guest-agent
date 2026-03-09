@@ -83,6 +83,21 @@ type Options struct {
 	Device string
 }
 
+// SetupOptions wraps route setup options.
+type SetupOptions struct {
+	// ServiceOptions contains the NIC configurations for route setup.
+	ServiceOptions *service.Options
+	// AlreadyChecked indicates whether missing and extra routes have already
+	// been checked.
+	AlreadyChecked bool
+	// MissingRoutes contains the routes that are missing from the system. This
+	// is only relevant if AlreadyChecked is true.
+	MissingRoutes map[string][]Handle
+	// ExtraRoutes contains the routes that are extra to the system. This is only
+	// relevant if AlreadyChecked is true.
+	ExtraRoutes map[string][]Handle
+}
+
 // routeOperations is the interface for a route backend.
 type routeOperations interface {
 	// Add adds a route to the system.
@@ -103,7 +118,7 @@ type routeOperations interface {
 	// interface.
 	RemoveRoutes(ctx context.Context, iface string) error
 	// Setup sets up the routes for the network interfaces.
-	Setup(ctx context.Context, opts *service.Options) error
+	Setup(ctx context.Context, opts *SetupOptions) error
 }
 
 // Add adds a route to the system.
@@ -133,7 +148,7 @@ func MissingRoutes(ctx context.Context, iface string, wantedRoutes address.IPAdd
 }
 
 // Setup sets up the routes for the network interfaces.
-func Setup(ctx context.Context, opts *service.Options) error {
+func Setup(ctx context.Context, opts *SetupOptions) error {
 	return client.Setup(ctx, opts)
 }
 

@@ -63,10 +63,12 @@ func TestRouteChanged(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		nicConfigs     []*nic.Configuration
-		hasExtraRoutes bool
-		want           bool
+		name             string
+		nicConfigs       []*nic.Configuration
+		hasExtraRoutes   bool
+		want             bool
+		numExtraRoutes   int
+		numMissingRoutes int
 	}{
 		{
 			name: "no-change-empty-extra-addresses",
@@ -125,7 +127,8 @@ func TestRouteChanged(t *testing.T) {
 					ExtraAddresses: address.NewExtraAddresses(desc.Instance().NetworkInterfaces()[0], cfg.Retrieve(), nil),
 				},
 			},
-			want: true,
+			want:             true,
+			numMissingRoutes: 2,
 		},
 		{
 			name: "change-extra-route",
@@ -139,6 +142,7 @@ func TestRouteChanged(t *testing.T) {
 			},
 			hasExtraRoutes: true,
 			want:           true,
+			numExtraRoutes: 2,
 		},
 	}
 
@@ -151,9 +155,17 @@ func TestRouteChanged(t *testing.T) {
 			})
 
 			mod := &module{}
-			got := mod.routeChanged(context.Background(), test.nicConfigs)
+			got, opts := mod.routeChanged(context.Background(), test.nicConfigs)
 			if got != test.want {
 				t.Errorf("routeChanged(%v) = %t, want %t", test.nicConfigs, got, test.want)
+			}
+
+			if len(opts.ExtraRoutes["eth0"]) != test.numExtraRoutes {
+				t.Errorf("routeChanged(%v) = %v, want %d extra routes", test.nicConfigs, opts.ExtraRoutes, test.numExtraRoutes)
+			}
+
+			if len(opts.MissingRoutes["eth0"]) != test.numMissingRoutes {
+				t.Errorf("routeChanged(%v) = %v, want %d missing routes", test.nicConfigs, opts.MissingRoutes, test.numMissingRoutes)
 			}
 		})
 	}
