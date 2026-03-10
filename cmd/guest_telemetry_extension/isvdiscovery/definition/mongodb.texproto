@@ -1,0 +1,34 @@
+# proto-file: third_party/guest_telemetry_extension/isvdiscovery/definition/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "mongodb"
+  any: {
+    conditions: [
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "mongod"
+        }
+      },
+      {
+        string_match: {
+          vm_field: VM_PROCESS_NAME
+          regex_match: "mongos"
+        }
+      }
+    ]
+  }
+  version_rules: [
+    {
+      command: USE_DISCOVERED_PROCESS_PATH
+      command_args: ["--version"]
+      regex_match: "^db version v(\\d+\\.\\d+\\.\\d+)(?:-[a-zA-Z0-9_.]*)?"
+    },
+    {
+      command: MONGOD
+      command_args: ["--version"]
+      regex_match: "^db version v(\\d+\\.\\d+\\.\\d+)(?:-[a-zA-Z0-9_.]*)?"
+    }
+  ]
+}

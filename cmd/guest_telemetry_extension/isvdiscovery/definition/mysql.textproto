@@ -1,0 +1,29 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "mysql"
+  condition: {
+    string_match: {
+      vm_field: VM_PROCESS_NAME
+      regex_match: "mysqld"
+    }
+  }
+  version_rules: [
+    {
+      command: USE_DISCOVERED_PROCESS_PATH
+      command_args: ["--version"]
+      regex_match: "Ver\\s+(\\d+\\.\\d+\\.\\d+)([^\\s]*)"
+    },
+    {
+      command: MYSQLD
+      command_args: ["--version"]
+      regex_match: "Ver\\s+(\\d+\\.\\d+\\.\\d+)([^\\s]*)"
+    },
+    {
+      command: MYSQL
+      command_args: ["--version"]
+      regex_match: "Ver\\s+(\\d+\\.\\d+\\.\\d+)([^\\s]*)"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "sapwebdispatcher"
+  condition: {
+    string_match: {
+      vm_field: VM_PROCESS_NAME
+      regex_match: "sapwebdisp"
+    }
+  }
+  version_rules: [
+    {
+      command: CAT
+      command_args: ["/sapmnt/*/exe/uc/linuxx86_64/sapmanifest.mf"]
+      regex_match: "kernel release"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "oracleebusinesssuite"
+  condition: {
+    string_match: {
+      vm_field: VM_PROCESS_NAME
+      regex_match: "FNDLIBR"
+    }
+  }
+  version_rules: [
+    {
+      command: CAT
+      command_args: ["$APPL_TOP/admin/$CONTEXT_NAME.xml"]
+      # TODO: b/479503774 - Update the regex once example output is available.
+      regex_match: "[Vv]ersion"
+    }
+  ]
+}

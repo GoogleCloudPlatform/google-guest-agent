@@ -1,0 +1,46 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "oraclegoldengate"
+  all: {
+    any: {
+      conditions: [
+        {
+          string_match: {
+            vm_field: VM_PROCESS_NAME
+            regex_match: "mgr"
+          }
+        },
+        {
+          string_match: {
+            vm_field: VM_PROCESS_NAME
+            regex_match: "extract"
+          }
+        },
+        {
+          string_match: {
+            vm_field: VM_PROCESS_NAME
+            regex_match: "replicat"
+          }
+        }
+      ]
+    }
+    conditions: [
+      {
+        string_match: {
+          vm_field: VM_ENV_VARS
+          regex_match: "OGG_HOME"
+        }
+      }
+    ]
+  }
+  version_rules: [
+    {
+      command: GGSCI
+      command_args: ["-v"]
+      # TODO: b/479503774 - Update the regex once example output is available.
+      regex_match: "[Vv]ersion"
+    }
+  ]
+}

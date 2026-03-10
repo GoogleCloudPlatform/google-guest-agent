@@ -1,0 +1,24 @@
+# proto-file: isvdiscovery/proto/definition.proto
+# proto-message: DiscoveryRules
+
+rules: {
+  discovered_workload_name: "mariadb"
+  condition: {
+    string_match: {
+      vm_field: VM_PROCESS_NAME
+      regex_match: "mariadb"
+    }
+  }
+  version_rules: [
+    {
+      command: USE_DISCOVERED_PROCESS_PATH
+      command_args: ["--version"]
+      regex_match: "Ver\\s+([0-9]+\\.[0-9]+\\.[0-9]+).*-MariaDB"
+    },
+    {
+      command: MARIADB
+      command_args: ["--version"]
+      regex_match: "Ver\\s+([0-9]+\\.[0-9]+\\.[0-9]+).*-MariaDB"
+    }
+  ]
+}
