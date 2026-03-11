@@ -26,6 +26,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/resource"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
@@ -105,8 +106,99 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 		}
 	}
 
+	// Launch the plugin.
+	if err := launchPlugin(ctx, p, l.protocol, policy); err != nil {
+		return err
+	}
+	pluginPid := p.pid()
+
+	// Wait for the socket to be verified if the protocol is UDS. This simply
+	// checks to see if the socket file exists up until the default connect
+	// timeout is reached. If the timeout is reached, we try to relaunch the
+	// plugin using TCP.
+	if p.Protocol == udsProtocol {
+		socketPolicy := retry.Policy{MaxAttempts: defaultConnectTimeoutTries, BackoffFactor: 1, Jitter: time.Second * 1}
+		if err := retry.Run(ctx, socketPolicy, func() error {
+			if file.Exists(p.Address, file.TypeFile) {
+				return nil
+			}
+			return fmt.Errorf("socket %q does not exist for plugin %q", p.Address, p.FullName())
+		}); err != nil {
+			// If the socket does not exist after some time, we assume that UDS may
+			// not be working for whatever reason. We therefore try to relaunch the
+			// plugin using TCP.
+			galog.Warnf("Failed to verify socket %q for plugin %q, trying TCP: %v", p.Address, p.FullName(), err)
+
+			// Kill the existing plugin process before trying to relaunch using TCP.
+			if err := ps.KillProcess(pluginPid, ps.KillModeWait); err != nil {
+				galog.Warnf("Failed to kill plugin process %q: %v", p.FullName(), err)
+			}
+
+			// Get a new address using TCP.
+			addr, err := address(ctx, tcpProtocol, p.FullName(), policy)
+			if err != nil {
+				return fmt.Errorf("failed to get TCP address: %w", err)
+			}
+			p.Address = addr
+			p.Protocol = tcpProtocol
+
+			// Relaunch the plugin using TCP.
+			if err := launchPlugin(ctx, p, tcpProtocol, policy); err != nil {
+				return err
+			}
+			pluginPid = p.pid()
+		}
+	}
+
+	// Prepare for resource constraint.
+	constraintFunc := func() error {
+		constraint := resource.Constraint{
+			PID:            pluginPid,
+			Name:           p.FullName(),
+			MaxMemoryUsage: p.Manifest.MaxMemoryUsage,
+			MaxCPUUsage:    p.Manifest.MaxCPUUsage,
+		}
+		if err := resource.Apply(constraint); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Apply resource constraint.
+	if err := retry.Run(ctx, policy, constraintFunc); err != nil {
+		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to apply resource constraint: [%v]", err))
+		p.setState(acmpb.CurrentPluginStates_CRASHED)
+		return err
+	}
+
+	if err := p.Connect(ctx); err != nil {
+		p.setState(acmpb.CurrentPluginStates_CRASHED)
+		return fmt.Errorf("failed to connect plugin %s: %w", p.FullName(), err)
+	}
+
+	_, status := p.Start(ctx)
+	if status.Err() != nil {
+		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to start plugin: [%+v]. Plugin logs: %s", status, readPluginLogs(p.logfile())))
+		p.setState(acmpb.CurrentPluginStates_CRASHED)
+		return fmt.Errorf("failed to start plugin %s with error: %w", p.FullName(), status.Err())
+	}
+
+	sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_STARTED, "Successfully started the plugin.")
+	p.setState(acmpb.CurrentPluginStates_RUNNING)
+	galog.Infof("Successfully started plugin %q", p.FullName())
+
+	if err := p.Store(); err != nil {
+		return fmt.Errorf("store plugin %s info failed: %w", p.FullName(), err)
+	}
+
+	return nil
+}
+
+// launchPlugin launches the plugin and applies resource constraints.
+func launchPlugin(ctx context.Context, p *Plugin, protocol string, policy retry.Policy) error {
 	args := p.Manifest.LaunchArguments
-	args = append(args, fmt.Sprintf("--protocol=%s", l.protocol), fmt.Sprintf("--address=%s", p.Address), fmt.Sprintf("--errorlogfile=%s", p.logfile()))
+	args = append(args, fmt.Sprintf("--protocol=%s", protocol), fmt.Sprintf("--address=%s", p.Address), fmt.Sprintf("--errorlogfile=%s", p.logfile()))
+
 	pluginExecMode := run.ExecModeDetach
 	if p.IsLocal() {
 		pluginExecMode = run.ExecModeAsync
@@ -133,68 +225,9 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 		p.setState(acmpb.CurrentPluginStates_CRASHED)
 		return err
 	}
-
 	pluginPid := p.pid()
 
-	constraintFunc := func() error {
-		constraint := resource.Constraint{
-			PID:            pluginPid,
-			Name:           p.FullName(),
-			MaxMemoryUsage: p.Manifest.MaxMemoryUsage,
-			MaxCPUUsage:    p.Manifest.MaxCPUUsage,
-		}
-		if err := resource.Apply(constraint); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Apply resource constraint.
-	if err := retry.Run(ctx, policy, constraintFunc); err != nil {
-		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to apply resource constraint: [%v]", err))
-		p.setState(acmpb.CurrentPluginStates_CRASHED)
-		return err
-	}
-
 	galog.Debugf("Launched a plugin process from %q with pid %d", p.EntryPath, pluginPid)
-
-	// Wait for the socket to be verified if the protocol is UDS. This simply
-	// checks to see if the socket file exists up until the default connect
-	// timeout is reached. If the timeout is reached, we can assume that
-	// something is wrong, as the plugin shouldn't take that long to start.
-	if p.Protocol == udsProtocol {
-		socketPolicy := retry.Policy{MaxAttempts: defaultConnectTimeoutTries, BackoffFactor: 1, Jitter: time.Second * 1}
-		if err := retry.Run(ctx, socketPolicy, func() error {
-			if file.Exists(p.Address, file.TypeFile) {
-				return nil
-			}
-			return fmt.Errorf("socket %q does not exist for plugin %q", p.Address, p.FullName())
-		}); err != nil {
-			p.setState(acmpb.CurrentPluginStates_CRASHED)
-			return fmt.Errorf("failed to verify socket %q for plugin %q: %w", p.Address, p.FullName(), err)
-		}
-	}
-
-	if err := p.Connect(ctx); err != nil {
-		p.setState(acmpb.CurrentPluginStates_CRASHED)
-		return fmt.Errorf("failed to connect plugin %s: %w", p.FullName(), err)
-	}
-
-	_, status := p.Start(ctx)
-	if status.Err() != nil {
-		sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_START_FAILED, fmt.Sprintf("Failed to start plugin: [%+v]. Plugin logs: %s", status, readPluginLogs(p.logfile())))
-		p.setState(acmpb.CurrentPluginStates_CRASHED)
-		return fmt.Errorf("failed to start plugin %s with error: %w", p.FullName(), status.Err())
-	}
-
-	sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_STARTED, "Successfully started the plugin.")
-	p.setState(acmpb.CurrentPluginStates_RUNNING)
-	galog.Infof("Successfully started plugin %q", p.FullName())
-
-	if err := p.Store(); err != nil {
-		return fmt.Errorf("store plugin %s info failed: %w", p.FullName(), err)
-	}
-
 	return nil
 }
 
