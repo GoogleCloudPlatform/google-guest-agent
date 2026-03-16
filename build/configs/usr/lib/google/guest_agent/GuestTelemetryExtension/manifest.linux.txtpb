@@ -4,6 +4,7 @@
 plugin: {
   name: "GuestTelemetryExtension"
   entry_point: "/usr/lib/google/guest_agent/GuestTelemetryExtension/guest_telemetry"
+  revision_id: "1.0"
 }
 manifest: {
   start_attempt_count: 5
