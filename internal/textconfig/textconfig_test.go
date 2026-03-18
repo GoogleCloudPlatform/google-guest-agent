@@ -152,6 +152,22 @@ func TestCleanup(t *testing.T) {
 			`,
 			delimiter: commonDelimiter,
 		},
+		{
+			name: "double-start-delimiter-should-not-wipe-config",
+			data: `
+			# start our block
+			# start our block
+			key value
+			key value
+			key2 value
+			# end our block
+			zzZZzzzZZzz
+			`,
+			want: `
+			zzZZzzzZZzz
+			`,
+			delimiter: commonDelimiter,
+		},
 	}
 
 	for _, tc := range tests {
@@ -191,11 +207,11 @@ func TestCleanup(t *testing.T) {
 			}
 
 			if string(data) != tc.want {
-				t.Errorf("Cleanup() = %q, want %q", string(data), tc.want)
+				t.Errorf("Cleanup(%q) = %q, want %q", tc.data, string(data), tc.want)
 			}
 
 			if string(data1) != string(data) {
-				t.Errorf("Cleanup() = %q, want %q", string(data), string(data1))
+				t.Errorf("Cleanup(%q) = %q, want %q", tc.data, string(data), string(data1))
 			}
 		})
 	}

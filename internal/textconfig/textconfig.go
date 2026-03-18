@@ -198,11 +198,12 @@ func (h *Handle) cleanup(lines []string) []string {
 	inBlock := false
 
 	for _, line := range lines {
-		isMatch := h.matchLine(line)
-
-		// Leave out the delimiters.
-		if isMatch {
-			inBlock = !inBlock
+		if h.matchStart(line) {
+			inBlock = true
+			continue
+		}
+		if h.matchEnd(line) {
+			inBlock = false
 			continue
 		}
 
@@ -229,12 +230,19 @@ func (h *Handle) cleanup(lines []string) []string {
 	return output
 }
 
-// matchLine returns true if the line matches any of the delimiters.
-func (h *Handle) matchLine(line string) bool {
+// matchStart returns true if the line matches any of the delimiters' start.
+func (h *Handle) matchStart(line string) bool {
 	for _, dd := range h.opts.AllDelimiters {
 		if strings.TrimSpace(line) == dd.Start {
 			return true
 		}
+	}
+	return false
+}
+
+// matchEnd returns true if the line matches any of the delimiters' end.
+func (h *Handle) matchEnd(line string) bool {
+	for _, dd := range h.opts.AllDelimiters {
 		if strings.TrimSpace(line) == dd.End {
 			return true
 		}
