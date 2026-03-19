@@ -1731,7 +1731,7 @@ func TestGetLocalPlugin(t *testing.T) {
 		t.Fatalf("os.WriteFile(%s) failed unexpectedly with error: %v", filepath.Join(localDir, "PluginA", manifestFile), err)
 	}
 
-	got, err := pm.GetLocalPlugin(ctx, "PluginA")
+	got, err := pm.getLocalPlugin(ctx, "PluginA")
 	if err != nil {
 		t.Fatalf("GetLocalPlugin(ctx, %s) failed unexpectedly with error: %v", "PluginA", err)
 	}

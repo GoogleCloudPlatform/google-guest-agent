@@ -19,6 +19,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,6 +58,13 @@ const (
 	maxMetricDatapoints = 60
 	// CorePluginName is the name of the guest agent core plugin.
 	CorePluginName = "GuestAgentCorePlugin"
+
+	// maxJitterSleepSeconds is the maximum jitter sleep time for plugin manager
+	// initialization, in seconds.
+	maxJitterSleepSeconds = 5
+	// minJitterSleepSeconds is the minimum jitter sleep time for plugin manager
+	// initialization, in seconds.
+	minJitterSleepSeconds = 1
 )
 
 var (
@@ -227,45 +235,7 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 		return nil, fmt.Errorf("failed to register plugin command handler: %w", err)
 	}
 
-	wg := sync.WaitGroup{}
-	pluginManager.pendingPluginRevisionsMu.Lock()
-
-	for _, p := range plugins {
-		pluginManager.inProgressPluginRequests[p.Name] = true
-		wg.Add(1)
-
-		go func(p *Plugin) {
-			// Regardless of the outcome, we should remove the plugin from the pending
-			// list as request is no longer in process for this plugin.
-			defer func() {
-				pluginManager.pendingPluginRevisionsMu.Lock()
-				defer pluginManager.pendingPluginRevisionsMu.Unlock()
-				delete(pluginManager.inProgressPluginRequests, p.Name)
-				wg.Done()
-			}()
-
-			if p.Name == CorePluginName && p.Revision != version {
-				// If core plugin is already running, just set the state to running and
-				// return. If the revision is different, it means the core plugin is
-				// being updated and there's no need to relaunch if not running.
-				if p.IsRunning(ctx) {
-					p.setState(acpb.CurrentPluginStates_RUNNING)
-				}
-				galog.Infof("Plugin %q state is different from expected revision %q, skipping relaunch", p.FullName(), version)
-				return
-			}
-
-			if err := connectOrReLaunch(ctx, p); err != nil {
-				galog.Errorf("Failed to connect or relaunch plugin %q: %v", p.FullName(), err)
-			} else {
-				pluginManager.startPluginSchedulers(ctx, p)
-			}
-		}(p)
-	}
 	pluginManager.IsInitialized.Store(true)
-	pluginManager.pendingPluginRevisionsMu.Unlock()
-	wg.Wait()
-
 	// TCP is always supported, so if the forced connection type is TCP, we can
 	// return early.
 	connType := cfg.Retrieve().Plugin.ConnectionType
@@ -506,7 +476,7 @@ func (m *PluginManager) configurePlugin(ctx context.Context, req *acpb.Configure
 		} else {
 			// Find if there's a local installation of the plugin. If found, upgrade to
 			// it, otherwise remove the plugin.
-			localInstallation, err := m.GetLocalPlugin(ctx, req.GetPlugin().GetName())
+			localInstallation, err := m.getLocalPlugin(ctx, req.GetPlugin().GetName())
 			if err != nil {
 				galog.Errorf("Failed to get local plugin %q: %v", req.GetPlugin().GetName(), err)
 			} else {
@@ -922,6 +892,7 @@ func (m *PluginManager) stopMetricsMonitoring(p *Plugin) {
 // connectOrReLaunch connects to the plugin and launches the plugin if needed.
 func connectOrReLaunch(ctx context.Context, p *Plugin) error {
 	if p.IsRunning(ctx) {
+		galog.V(3).Debugf("Plugin %q is already running", p.FullName())
 		p.setState(acpb.CurrentPluginStates_RUNNING)
 		return nil
 	}
@@ -978,6 +949,13 @@ func load(stateDir string) (map[string]*Plugin, error) {
 		if plugin.Name == CorePluginName {
 			plugin.Manifest.PluginType = acpb.PluginType_DAEMON
 			plugin.Manifest.PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
+			if plugin.Manifest.ExecutionModel == nil {
+				plugin.Manifest.ExecutionModel = &ExecutionModel{
+					BootCritical: true,
+				}
+			} else {
+				plugin.Manifest.ExecutionModel.BootCritical = true
+			}
 		}
 	}
 	return plugins, nil
@@ -1003,9 +981,163 @@ func sendEvent(ctx context.Context, p *Plugin, evType acpb.PluginEventMessage_Pl
 	}()
 }
 
-// GetLocalPlugin returns the local plugin configuration for the given plugin
+// StartPlugins aggregates all local and dynamic plugins and starts them based
+// on whether they are boot critical or not.
+func (m *PluginManager) StartPlugins(ctx context.Context, config map[string]LocalPluginInstallation) error {
+	// Get the list of local plugins that should be installed.
+	var configurePlugins *acpb.ConfigurePluginStates
+	var onReadyFuncs map[string]func(context.Context)
+	var err error
+
+	// Ignore local plugins if they are not enabled.
+	if cfg.Retrieve().Core.EnableLocalPlugins {
+		configurePlugins, onReadyFuncs, err = m.GetLocalPlugins(ctx, config)
+		if err != nil {
+			galog.Warnf("Failed to get local plugins: %v", err)
+		}
+	}
+
+	// Split the plugins into boot critical and non-boot critical plugins.
+	bootCriticalPlugins := make(map[string]any)
+	nonBootCriticalPlugins := make(map[string]any)
+
+	// Start with the cached plugins.
+	m.mu.RLock()
+	for _, p := range m.plugins {
+		// If the plugin is boot critical, add it to the boot critical plugins map,
+		// otherwise add it to the non-boot critical plugins map.
+		if p.IsBootCritical() {
+			galog.V(2).Debugf("Adding boot critical plugin %q during initialization", p.FullName())
+			bootCriticalPlugins[p.Name] = p
+		} else {
+			galog.V(2).Debugf("Adding non-boot critical plugin %q during initialization", p.FullName())
+			nonBootCriticalPlugins[p.Name] = p
+		}
+	}
+	m.mu.RUnlock()
+
+	// Add the local plugins to the boot critical or non-boot critical plugins map.
+	for _, req := range configurePlugins.GetConfigurePlugins() {
+		// If the plugin is already cached by the guest agent, and it either has
+		// the same revision or is a dynamic plugin, then we don't need to
+		// install it.
+		if p, ok := bootCriticalPlugins[req.GetPlugin().GetName()]; ok {
+			plugin, ok := p.(*Plugin)
+			if ok && (plugin.Revision == req.GetPlugin().GetRevisionId() || plugin.IsDynamic()) {
+				galog.V(2).Debugf("Skipping boot critical plugin %q during initialization because a dynamic version exists or the revision is the same", req.GetPlugin().GetName())
+				continue
+			}
+		}
+		if p, ok := nonBootCriticalPlugins[req.GetPlugin().GetName()]; ok {
+			plugin, ok := p.(*Plugin)
+			if ok && (plugin.Revision == req.GetPlugin().GetRevisionId() || plugin.IsDynamic()) {
+				galog.V(2).Debugf("Skipping non-boot critical plugin %q during initialization because a dynamic version exists or the revision is the same", req.GetPlugin().GetName())
+				continue
+			}
+		}
+
+		if req.GetManifest().GetExecutionModel().GetBootCritical() {
+			galog.V(2).Debugf("Adding boot critical plugin %q during initialization", req.GetPlugin().GetName())
+			bootCriticalPlugins[req.GetPlugin().GetName()] = req
+		} else {
+			galog.V(2).Debugf("Adding non-boot critical plugin %q during initialization", req.GetPlugin().GetName())
+			nonBootCriticalPlugins[req.GetPlugin().GetName()] = req
+		}
+	}
+
+	// Start all the boot critical plugins first.
+	var errs []error
+	var errMu sync.Mutex
+	var wg sync.WaitGroup
+	for _, req := range bootCriticalPlugins {
+		wg.Go(func() {
+			if err := m.initStartPlugin(ctx, req, onReadyFuncs); err != nil {
+				errMu.Lock()
+				errs = append(errs, err)
+				errMu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+
+	// After all the boot critical plugins are started, we can start the non-boot
+	// critical plugins. This is done in a separate go routine so that the main
+	// thread is not blocked.
+	go func() {
+		for _, p := range nonBootCriticalPlugins {
+			// Sleep for some random amount of time to avoid starting all the non-boot
+			// critical plugins at the same time.
+			sleepTime := time.Duration(rand.Intn(maxJitterSleepSeconds-minJitterSleepSeconds)+minJitterSleepSeconds) * time.Second
+			galog.V(1).Debugf("Sleeping for %v before starting plugin %v", sleepTime, p)
+			time.Sleep(sleepTime)
+
+			// Since these aren't critical, we don't want to block the main thread,
+			// so we start them in a go routine and log any errors.
+			go func() {
+				if err := m.initStartPlugin(ctx, p, onReadyFuncs); err != nil {
+					galog.Warnf("Failed to start plugin %v: %v", p, err)
+				}
+			}()
+		}
+	}()
+	return errors.Join(errs...)
+}
+
+// initStartPlugin starts a plugin, only to be used during the plugin manager
+// initialization process.
+func (m *PluginManager) initStartPlugin(ctx context.Context, p any, onReadyFuncs map[string]func(context.Context)) error {
+	if req, ok := p.(*acpb.ConfigurePluginStates_ConfigurePlugin); ok {
+		galog.Debugf("Installing local plugin %q with revision %q", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
+		// Install a new local revision.
+		m.configurePlugin(ctx, req, true)
+
+		if err := m.VerifyPluginRunning(ctx, req); err != nil {
+			return fmt.Errorf("failed to verify local plugins are running: %w", err)
+		} else {
+			if onReady, ok := onReadyFuncs[req.GetPlugin().GetName()]; ok {
+				onReady(ctx)
+			}
+		}
+		return nil
+	} else if plugin, ok := p.(*Plugin); ok {
+		// Plugin is already cached by the guest agent. Use that instead of the local.
+		defer func() {
+			m.pendingPluginRevisionsMu.Lock()
+			defer m.pendingPluginRevisionsMu.Unlock()
+			delete(m.inProgressPluginRequests, plugin.Name)
+		}()
+
+		if plugin.Name == CorePluginName && plugin.Revision != cfg.Retrieve().Core.Version {
+			// If core plugin is already running, just set the state to running and
+			// return. If the revision is different, it means the core plugin is
+			// being updated and there's no need to relaunch if not running.
+			if plugin.IsRunning(ctx) {
+				plugin.setState(acpb.CurrentPluginStates_RUNNING)
+			}
+			galog.Infof("Plugin %q state is different from expected revision %q, skipping relaunch", plugin.FullName(), cfg.Retrieve().Core.Version)
+			return nil
+		}
+
+		galog.Debugf("Connecting to plugin %q", plugin.FullName())
+
+		if err := connectOrReLaunch(ctx, plugin); err != nil {
+			galog.Errorf("Failed to connect or relaunch plugin %q: %v", plugin.FullName(), err)
+		} else {
+			m.startPluginSchedulers(ctx, plugin)
+
+			// Run the OnReady function for the plugin.
+			if onReady, ok := onReadyFuncs[plugin.Name]; ok {
+				onReady(ctx)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown plugin type: %T", p)
+}
+
+// getLocalPlugin returns the local plugin configuration for the given plugin
 // name. If the plugin does not have a local installation, this will return nil.
-func (m *PluginManager) GetLocalPlugin(ctx context.Context, name string) (*acpb.ConfigurePluginStates_ConfigurePlugin, error) {
+func (m *PluginManager) getLocalPlugin(ctx context.Context, name string) (*acpb.ConfigurePluginStates_ConfigurePlugin, error) {
 	galog.Debugf("Getting local plugin %q", name)
 	localPluginDir := cfg.Retrieve().Plugin.LocalPluginDir
 	textprotoFile := filepath.Join(localPluginDir, name, manifestFile)
@@ -1036,35 +1168,28 @@ func (m *PluginManager) GetLocalPlugin(ctx context.Context, name string) (*acpb.
 	return req, nil
 }
 
-// StartLocalPlugins starts all local plugins that are not running and for which
-// there are no dynamically installed versions of the plugin.
-//
-// The enable map is used to determine which plugins to start. By default, a
-// local plugin will be run if no dynamically installed version exists. If the
-// enable map is provided, and a local plugin has an entry disabling it, then
-// the local plugin will not be started.
-func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string]LocalPluginInstallation) error {
-	galog.Infof("Starting local plugins")
+// GetLocalPlugins returns a list of local plugins that should be installed.
+func (m *PluginManager) GetLocalPlugins(ctx context.Context, config map[string]LocalPluginInstallation) (*acpb.ConfigurePluginStates, map[string]func(context.Context), error) {
 	localPluginDir := cfg.Retrieve().Plugin.LocalPluginDir
 	files, err := os.ReadDir(localPluginDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			galog.Debugf("Local plugins directory %q does not exist, nothing to start", localPluginDir)
-			return nil
+			return nil, nil, nil
 		}
-		return fmt.Errorf("unable to read local plugins directory %s: %w", localPluginDir, err)
+		return nil, nil, fmt.Errorf("unable to read local plugins directory %s: %w", localPluginDir, err)
 	}
 
-	var installPlugins []string
 	configurePlugins := &acpb.ConfigurePluginStates{}
+	onReadyFuncs := make(map[string]func(context.Context))
 	for _, f := range files {
 		if !f.IsDir() {
 			continue
 		}
 		galog.V(1).Debugf("Found local plugin directory %q", f.Name())
-		req, err := m.GetLocalPlugin(ctx, f.Name())
+		req, err := m.getLocalPlugin(ctx, f.Name())
 		if err != nil {
-			return fmt.Errorf("failed to get local plugin %q: %w", f.Name(), err)
+			return nil, nil, fmt.Errorf("failed to get local plugin %q: %w", f.Name(), err)
 		}
 		if req == nil {
 			galog.Warnf("Local plugin %q does not have local manifest file, skipping local installation", f.Name())
@@ -1077,6 +1202,10 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 		if ok && !installation.Enable {
 			galog.Infof("Local plugin %q is not enabled, skipping local installation", pluginName)
 			continue
+		}
+
+		if installation.OnReady != nil {
+			onReadyFuncs[pluginName] = installation.OnReady
 		}
 
 		// Check if the plugin is already installed.
@@ -1106,48 +1235,14 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 			}
 		}
 		configurePlugins.ConfigurePlugins = append(configurePlugins.ConfigurePlugins, req)
-
-		// Add the plugin name to the list of plugins to install.
-		installPlugins = append(installPlugins, pluginName)
 	}
 
-	if len(configurePlugins.GetConfigurePlugins()) > 0 {
-		galog.Infof("Installing local plugins: %v", installPlugins)
-		toProcess := m.filterPendingPluginRevisions(ctx, configurePlugins, true)
-		var wg sync.WaitGroup
-		var errs []error
-		var errMu sync.Mutex
-		for _, req := range toProcess {
-			// Each plugin installation is done in parallel. This is to avoid cases
-			// where one slow plugin installation blocks the readiness of other
-			// plugins.
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				m.configurePlugin(ctx, req, true)
-
-				// Verify the plugin is running after installation.
-				if err := m.VerifyPluginRunning(ctx, req); err != nil {
-					errMu.Lock()
-					errs = append(errs, fmt.Errorf("failed to verify local plugins are running: %w", err))
-					errMu.Unlock()
-				} else {
-					galog.Debugf("Running OnReady function for plugin %q", req.GetPlugin().GetName())
-					if installation, ok := config[req.GetPlugin().GetName()]; ok && installation.OnReady != nil {
-						installation.OnReady(ctx)
-					}
-				}
-			}()
-		}
-		wg.Wait()
-		return errors.Join(errs...)
-	}
-	galog.Infof("No local plugins to install")
-	return nil
+	return configurePlugins, onReadyFuncs, nil
 }
 
 // VerifyPluginRunning verifies that the configured plugins are running.
 func (m *PluginManager) VerifyPluginRunning(ctx context.Context, plugin *acpb.ConfigurePluginStates_ConfigurePlugin) error {
+	galog.V(1).Debugf("Verifying plugin %q with revision %q is running", plugin.GetPlugin().GetName(), plugin.GetPlugin().GetRevisionId())
 	currPlugins := m.list()
 
 	var found bool
