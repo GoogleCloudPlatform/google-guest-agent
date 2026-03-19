@@ -4,7 +4,7 @@
 # LINT.IfChange
 plugin: {
   name: "GuestTelemetryExtension"
-  entry_point: "C:\\Program Files\\Compute Engine\\agent\\GuestTelemetryExtension\\GuestTelemetry.exe"
+  entry_point: "C:\\Program Files\\Google\\Compute Engine\\agent\\GuestTelemetryExtension\\GuestTelemetry.exe"
   revision_id: "1.0"
 }
 manifest: {
