@@ -24,6 +24,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/commandlineexecutor"
 	defpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/definition/proto"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/engine/versioncommands"
 )
 
 // VMInfo contains discovered information about the VM to be used for rule evaluation.
@@ -33,52 +34,6 @@ type VMInfo struct {
 	ProcessArgs    []string
 	ProcessEnvVars []string
 	OSName         string
-}
-
-// VersionCommands contains the command to be executed to gather version information.
-type VersionCommands struct {
-	cmd []string
-}
-
-var versionCommands *VersionCommands = &VersionCommands{
-	// Order matters. The order here needs to match the order in the enum in definition.proto.
-	cmd: []string{
-		"unspecified",
-		"cat",
-		"/usr/sbin/apache2",
-		"/usr/sbin/httpd",
-		"postgres",
-		"psql",
-		"nodetool",
-		"mongod",
-		"/usr/sbin/mysqld",
-		"sqlplus",
-		"redis-server",
-		"mariadb",
-		// wildcard because we don't know the SID.
-		"/usr/sap/*/SYS/exe/run/gwrd",
-		"grep",
-		"Get-Command",
-		"$IQDIR15/bin64/start_iq",
-		"$IQDIR16/bin64/start_iq",
-		"C:\\SAP\\IQ-16_0\\bin64\\iqsrv16.exe",
-		"C:\\SAP\\IQ-15_0\\bin64\\iqsrv15.exe",
-		"$(find /usr/sap -maxdepth 5 -name disp+work -print -quit)",
-		"/usr/sbin/pacemakerd",
-		"sqlservr",
-		"Get-ItemPropertyValue",
-		"$ORACLE_HOME/OPatch/opatch",
-		"$ORACLE_HOME/bin/dgmgrl",
-		"java",
-		"$OGG_HOME/ggsci",
-		"$PS_HOME/appserv/psadmin",
-		"/hana/shared/WHP/hdblcm/hdblcm",
-		"mysql",
-		"/usr/share/cassandra/bin/nodetool",
-		"/usr/sbin/nodetool",
-		"/opt/mssql/bin/sqlservr",
-		"USE_DISCOVERED_PROCESS_PATH",
-	},
 }
 
 var versionNumberRegex = regexp.MustCompile(`\.?\d+(\.\d+)*`)
@@ -166,7 +121,7 @@ func executeVersionRules(rule *defpb.DiscoveryRule, processPath string) string {
 		}
 		versionCommandArgs := versionRule.GetCommandArgs()
 		versionRegex := versionRule.GetRegexMatch()
-		cmd := versionCommands.cmd[versionCommand]
+		cmd := versioncommands.Commands.Cmd[versionCommand]
 		if cmd == "USE_DISCOVERED_PROCESS_PATH" {
 			cmd = processPath
 		}

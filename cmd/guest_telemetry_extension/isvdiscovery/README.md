@@ -15,10 +15,10 @@ present workload if the process named `mariadbd` is running.
 a Redis-compatible data store built to run natively on Windows.
 - In many cases the best version command would require using a restricted
 command line argument such as a pipe or semicolon. Consequently, we lack
-functional version detection for certain workloads on Windows. Additionally,
+functional version detection for certain workloads. Additionally,
 some of the commands used are not what would be preferred without these
 restrictions.
-- Many of the version commands will need to be in the global PATH in order to work.
+- Some of the version commands will need to be in the global PATH in order to work.
 - We originally planned to detect SAP System and SAP Web AS as two separate
 workloads. However, SAP System is a cluster made up of several instances
 running various workloads. To identify it, we'd really just be looking for the
