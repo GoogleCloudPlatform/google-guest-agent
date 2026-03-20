@@ -133,10 +133,7 @@ func main() {
 	flag.Parse()
 
 	// Setup error logging. This should only be used for critical errors that cause the program to crash.
-	errorLogger, file := errorLogger(*errorlogfile)
-	if file != nil {
-		defer file.Close()
-	}
+	errorLogger := errorLogger(*errorlogfile)
 	// Setup panic recovery. This will catch any panics caused by errors in the extension and log them to the error log file.
 	defer func() {
 		if r := recover(); r != nil {
@@ -260,9 +257,25 @@ func setupDebugLogging() *os.File {
 	return file
 }
 
-func errorLogger(errorLogFile string) (*slog.Logger, *os.File) {
-	var file *os.File
-	var err error
+type logWriter struct {
+	filename string
+}
+
+// Write opens the log file, writes the given byte slice to the log file, and then closes the file.
+func (w *logWriter) Write(p []byte) (int, error) {
+	f, err := os.OpenFile(w.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return 0, err
+	}
+	n, writeErr := f.Write(p)
+	closeErr := f.Close()
+	if closeErr != nil {
+		return n, closeErr
+	}
+	return n, writeErr
+}
+
+func errorLogger(errorLogFile string) *slog.Logger {
 	var handler slog.Handler
 	if errorLogFile == "" {
 		// If no error log file is specified, exit the program with an error.
@@ -270,13 +283,17 @@ func errorLogger(errorLogFile string) (*slog.Logger, *os.File) {
 		fmt.Fprintln(os.Stderr, "No error log file specified, exiting with an error.")
 		os.Exit(1)
 	} else {
-		file, err = os.OpenFile(errorLogFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		file, err := os.OpenFile(errorLogFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			slog.Error(fmt.Sprintf("Failed to open error log file: %v", err))
 			os.Exit(1)
 		}
-		handler = slog.NewTextHandler(file, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: true})
+		err = file.Close()
+		if err != nil {
+			slog.Error(fmt.Sprintf("Failed to close error log file: %v", err))
+		}
+		handler = slog.NewTextHandler(&logWriter{filename: errorLogFile}, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: true})
 	}
 	slog.Info("Error log file opened successfully")
-	return slog.New(handler), file
+	return slog.New(handler)
 }
