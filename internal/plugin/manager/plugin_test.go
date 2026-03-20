@@ -170,6 +170,14 @@ func TestApply(t *testing.T) {
 			}
 		})
 	}
+
+	// No connection, skip apply.
+	plugin.client = nil
+	msg := `plugin "testplugin_1" is not connected`
+	_, err := plugin.Apply(ctx, &ServiceConfig{Simple: "success"})
+	if err == nil || !strings.Contains(err.Message(), msg) {
+		t.Errorf("plugin.Apply(ctx, success) = error: %v, want error containing: %v", err.Message(), msg)
+	}
 }
 
 func TestStart(t *testing.T) {
@@ -240,6 +248,16 @@ func TestStart(t *testing.T) {
 			}
 		})
 	}
+
+	// No connection, skip start.
+	plugin.client = nil
+	plugin.Manifest.StartTimeout = time.Second * 5
+	plugin.Manifest.StartConfig = &ServiceConfig{Simple: "success"}
+	msg := `plugin "testplugin_1" is not connected`
+	_, grpcStatus := plugin.Start(ctx)
+	if grpcStatus == nil || !strings.Contains(grpcStatus.Message(), msg) {
+		t.Errorf("plugin.Start(ctx) = error: %v, want error containing: %v", grpcStatus.Message(), msg)
+	}
 }
 
 func TestStop(t *testing.T) {
@@ -284,10 +302,10 @@ func TestStop(t *testing.T) {
 
 	// No connection, skip stop.
 	plugin.client = nil
-	msg := `plugin "testplugin_1" is not connected, cannot call Stop RPC`
+	msg := `plugin "testplugin_1" is not connected`
 	_, err := plugin.Stop(ctx, false)
-	if err.Message() != msg {
-		t.Errorf("plugin.Stop(ctx, false) = error: %v, want error: %v", err, msg)
+	if err == nil || !strings.Contains(err.Message(), msg) {
+		t.Errorf("plugin.Stop(ctx, false) = error: %v, want error containing: %v", err.Message(), msg)
 	}
 }
 
@@ -330,6 +348,14 @@ func TestGetStatus(t *testing.T) {
 				t.Errorf("plugin.GetStatus(ctx) returned diff (-want +got):\n%s", diff)
 			}
 		})
+	}
+
+	// No connection, skip get status.
+	plugin := Plugin{Name: "testplugin", Revision: "1"}
+	msg := `plugin "testplugin_1" is not connected`
+	_, err := plugin.GetStatus(ctx, "")
+	if err == nil || !strings.Contains(err.Message(), msg) {
+		t.Errorf("plugin.GetStatus(ctx) = error: %v, want error containing: %v", err.Message(), msg)
 	}
 }
 

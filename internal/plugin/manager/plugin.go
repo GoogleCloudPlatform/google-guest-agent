@@ -64,6 +64,8 @@ type Plugin struct {
 	EntryPath string
 	// Protocol is the protocol used for communication with the plugin.
 	Protocol string
+	// clientMu protects client connection with the plugin.
+	clientMu sync.RWMutex
 	// client is grpc client connection with the plugin.
 	client *grpc.ClientConn
 	// Manifest is plugin configuration defining various agent/plugin behavior.
@@ -331,6 +333,7 @@ func (p *Plugin) runSteps(ctx context.Context, steps []Step) error {
 		galog.Debugf("Running %q on plugin %q", step.Name(), p.FullName())
 		p.setState(step.Status())
 		if err := ctx.Err(); err != nil {
+			p.setState(step.ErrorStatus())
 			return fmt.Errorf("%q failed, context error: %w", step.Name(), err)
 		}
 		if err := step.Run(ctx, p); err != nil {
@@ -342,8 +345,13 @@ func (p *Plugin) runSteps(ctx context.Context, steps []Step) error {
 }
 
 // PluginService returns the underlying plugin service client.
-func (p *Plugin) PluginService() pb.GuestAgentPluginClient {
-	return pb.NewGuestAgentPluginClient(p.client)
+func (p *Plugin) PluginService() (pb.GuestAgentPluginClient, error) {
+	p.clientMu.RLock()
+	defer p.clientMu.RUnlock()
+	if p.client == nil {
+		return nil, fmt.Errorf("plugin %q is not connected", p.FullName())
+	}
+	return pb.NewGuestAgentPluginClient(p.client), nil
 }
 
 // buildStartRequest generates Start RPC request based on what service config
@@ -375,6 +383,11 @@ func (p *Plugin) buildStartRequest(ctx context.Context) (*pb.StartRequest, error
 func (p *Plugin) Start(ctx context.Context) (*pb.StartResponse, *status.Status) {
 	galog.Debugf("Executing start request on plugin %q", p.FullName())
 
+	svc, err := p.PluginService()
+	if err != nil {
+		return nil, status.Convert(fmt.Errorf("cannot call start on plugin %q: %w", p.FullName(), err))
+	}
+
 	policy := retry.Policy{MaxAttempts: p.Manifest.StartAttempts, BackoffFactor: 1, Jitter: time.Second}
 	req, err := p.buildStartRequest(ctx)
 	if err != nil {
@@ -385,7 +398,7 @@ func (p *Plugin) Start(ctx context.Context) (*pb.StartResponse, *status.Status) 
 	defer cancel()
 
 	f := func() (*pb.StartResponse, error) {
-		return p.PluginService().Start(tCtx, req, grpc.WaitForReady(true))
+		return svc.Start(tCtx, req, grpc.WaitForReady(true))
 	}
 
 	resp, err := retry.RunWithResponse(tCtx, policy, f)
@@ -396,8 +409,9 @@ func (p *Plugin) Start(ctx context.Context) (*pb.StartResponse, *status.Status) 
 func (p *Plugin) Stop(ctx context.Context, cleanup bool) (*pb.StopResponse, *status.Status) {
 	galog.Debugf("Executing stop request on plugin %q", p.FullName())
 
-	if p.client == nil {
-		return nil, status.Convert(fmt.Errorf("plugin %q is not connected, cannot call Stop RPC", p.FullName()))
+	svc, err := p.PluginService()
+	if err != nil {
+		return nil, status.Convert(fmt.Errorf("cannot call stop on plugin %q: %w", p.FullName(), err))
 	}
 
 	req := &pb.StopRequest{
@@ -407,7 +421,7 @@ func (p *Plugin) Stop(ctx context.Context, cleanup bool) (*pb.StopResponse, *sta
 	tCtx, cancel := context.WithTimeout(ctx, p.Manifest.StopTimeout)
 	defer cancel()
 
-	resp, err := p.PluginService().Stop(tCtx, req, grpc.WaitForReady(true))
+	resp, err := svc.Stop(tCtx, req, grpc.WaitForReady(true))
 	return resp, status.Convert(err)
 }
 
@@ -424,10 +438,15 @@ func (p *Plugin) Apply(ctx context.Context, serviceConfig *ServiceConfig) (*pb.A
 		return nil, status.Convert(err)
 	}
 
+	svc, err := p.PluginService()
+	if err != nil {
+		return nil, status.Convert(fmt.Errorf("cannot call apply on plugin %q: %w", p.FullName(), err))
+	}
+
 	tCtx, cancel := context.WithTimeout(ctx, defaultApplyRPCTimeout)
 	defer cancel()
 
-	resp, err := p.PluginService().Apply(tCtx, req, grpc.WaitForReady(true))
+	resp, err := svc.Apply(tCtx, req, grpc.WaitForReady(true))
 	return resp, status.Convert(err)
 }
 
@@ -454,7 +473,7 @@ func (p *Plugin) buildApplyRequest(serviceConfig *ServiceConfig) (*pb.ApplyReque
 	return req, nil
 }
 
-// GetStatus makes the GetStatus RPC request, [req] includes provides the
+// GetStatus makes the GetStatus RPC request, [req] provides the
 // context on what the request is about. For e.g. if we want status for task A,
 // context could be task ID. For regular health check leave it empty.
 func (p *Plugin) GetStatus(ctx context.Context, req string) (*pb.Status, *status.Status) {
@@ -467,8 +486,14 @@ func (p *Plugin) GetStatus(ctx context.Context, req string) (*pb.Status, *status
 	if req != "" {
 		data = proto.String(req)
 	}
+
+	svc, err := p.PluginService()
+	if err != nil {
+		return nil, status.Convert(fmt.Errorf("cannot call get status on plugin %q: %w", p.FullName(), err))
+	}
+
 	r := &pb.GetStatusRequest{Data: data}
-	resp, err := p.PluginService().GetStatus(tCtx, r, grpc.WaitForReady(true))
+	resp, err := svc.GetStatus(tCtx, r, grpc.WaitForReady(true))
 	return resp, status.Convert(err)
 }
 
@@ -485,6 +510,9 @@ func (p *Plugin) connectAddress() string {
 // Connect tries to establish grpc connection to the plugin server.
 func (p *Plugin) Connect(ctx context.Context) error {
 	galog.Debugf("Dialing in on plugin %q", p.FullName())
+
+	p.clientMu.Lock()
+	defer p.clientMu.Unlock()
 
 	if p.client != nil {
 		// Close the previous client connection before attempting to reconnect.

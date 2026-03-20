@@ -111,16 +111,16 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 		galog.Warnf("Kill %s plugin process completed with: %v", p.FullName(), err)
 	}
 
+	p.clientMu.Lock()
 	if p.client != nil {
 		if err := p.client.Close(); err != nil {
 			galog.Warnf("Close %s plugin client failed with error: %v", p.FullName(), err)
 		}
+		p.client = nil
 	}
+	p.clientMu.Unlock()
 
 	p.setState(acmpb.CurrentPluginStates_STOPPED)
-
-	// Reset the plugin client and process PID.
-	p.client = nil
 	p.setPid(0)
 
 	// Cleanup is set to true only on plugin removal.

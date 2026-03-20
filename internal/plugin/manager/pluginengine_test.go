@@ -268,10 +268,10 @@ func TestRunStepsError(t *testing.T) {
 		},
 		{
 			desc:          "fail_immediately",
-			steps:         []Step{&testStep{status: acmpb.CurrentPluginStates_INSTALLING}},
+			steps:         []Step{&testStep{status: acmpb.CurrentPluginStates_INSTALLING, errorStatus: acmpb.CurrentPluginStates_INSTALL_FAILED}},
 			wantError:     context.Canceled,
 			cancelContext: true,
-			wantState:     acmpb.CurrentPluginStates_INSTALLING,
+			wantState:     acmpb.CurrentPluginStates_INSTALL_FAILED,
 		},
 	}
 
