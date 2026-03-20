@@ -224,6 +224,18 @@ func TestCheckCondition(t *testing.T) {
 			wantPath: "/path/proc1",
 		},
 		{
+			name: "process path substring match",
+			condition: defpb.Condition_builder{
+				StringMatch: defpb.StringMatchCondition_builder{
+					VmField:    defpb.StringMatchCondition_VM_PROCESS_PATH.Enum(),
+					RegexMatch: "proc1",
+				}.Build(),
+			}.Build(),
+			vmInfo:   testVMInfo,
+			want:     true,
+			wantPath: "/path/proc1",
+		},
+		{
 			name: "os name match",
 			condition: defpb.Condition_builder{
 				StringMatch: defpb.StringMatchCondition_builder{

@@ -300,6 +300,7 @@ func (d *ISVDiscovery) runDiscoveryFromFile(ctx context.Context, errorLogger *sl
 		return err
 	}
 	slog.Info("Parsed definitions from file successfully")
+	slog.Info(fmt.Sprintf("Definitions: %s", prototext.Format(definitions)))
 	// Run discovery against the definitions.
 	res, err := RunEngine(ctx, definitions)
 	if err != nil {
@@ -307,14 +308,14 @@ func (d *ISVDiscovery) runDiscoveryFromFile(ctx context.Context, errorLogger *sl
 		errorLogger.Error(fmt.Sprintf("Failed to discover workloads: %v", err))
 		return err
 	}
-	slog.Info(fmt.Sprintf("Discovered workloads successfully.  Result: %s", res.String()))
+	slog.Info(fmt.Sprintf("Discovered workloads successfully.  Result: %s", prototext.Format(res)))
 	anyRes, err := anypb.New(res)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Failed to marshal discovered data to any: %v", err))
 		errorLogger.Error(fmt.Sprintf("Failed to marshal discovered data to any: %v", err))
 		return err
 	}
-	slog.Info(fmt.Sprintf("Marshalled discovered data to any successfully. Data: %s", anyRes.String()))
+	slog.Info(fmt.Sprintf("Marshalled discovered data to any successfully. Data: %s", prototext.Format(anyRes)))
 
 	// Write the discovered data to the data file.
 	bytes, err := proto.Marshal(anyRes)
