@@ -1806,6 +1806,9 @@ func TestStartLocalPlugin(t *testing.T) {
 					DownloadAttemptCount:   2,
 					DownloadTimeout:        &dpb.Duration{Seconds: 5},
 					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+					ExecutionModel: &acpb.ExecutionModel{
+						BootCritical: true,
+					},
 				},
 			}
 			reqBytes, err := proto.Marshal(req)

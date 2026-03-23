@@ -1105,7 +1105,12 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 				continue
 			}
 		}
-		configurePlugins.ConfigurePlugins = append(configurePlugins.ConfigurePlugins, req)
+		// Make sure the core plugin is always the first in the list.
+		if pluginName == CorePluginName {
+			configurePlugins.ConfigurePlugins = append([]*acpb.ConfigurePluginStates_ConfigurePlugin{req}, configurePlugins.ConfigurePlugins...)
+		} else {
+			configurePlugins.ConfigurePlugins = append(configurePlugins.ConfigurePlugins, req)
+		}
 
 		// Add the plugin name to the list of plugins to install.
 		installPlugins = append(installPlugins, pluginName)
@@ -1115,34 +1120,62 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 		galog.Infof("Installing local plugins: %v", installPlugins)
 		toProcess := m.filterPendingPluginRevisions(ctx, configurePlugins, true)
 		var wg sync.WaitGroup
+		var nonBootCriticalPlugins []*acpb.ConfigurePluginStates_ConfigurePlugin
 		var errs []error
 		var errMu sync.Mutex
 		for _, req := range toProcess {
 			// Each plugin installation is done in parallel. This is to avoid cases
 			// where one slow plugin installation blocks the readiness of other
 			// plugins.
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				m.configurePlugin(ctx, req, true)
-
-				// Verify the plugin is running after installation.
-				if err := m.VerifyPluginRunning(ctx, req); err != nil {
-					errMu.Lock()
-					errs = append(errs, fmt.Errorf("failed to verify local plugins are running: %w", err))
-					errMu.Unlock()
-				} else {
-					galog.Debugf("Running OnReady function for plugin %q", req.GetPlugin().GetName())
-					if installation, ok := config[req.GetPlugin().GetName()]; ok && installation.OnReady != nil {
-						installation.OnReady(ctx)
+			//
+			// Only block on boot critical plugins. Other plugins can be installed
+			// in the background.
+			if req.Manifest.ExecutionModel != nil && req.Manifest.ExecutionModel.BootCritical {
+				wg.Add(1)
+				go func(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, config map[string]LocalPluginInstallation) {
+					defer wg.Done()
+					if err := m.configureAndVerifyPlugin(ctx, req, config); err != nil {
+						errMu.Lock()
+						errs = append(errs, err)
+						errMu.Unlock()
 					}
-				}
-			}()
+				}(ctx, req, config)
+			} else {
+				nonBootCriticalPlugins = append(nonBootCriticalPlugins, req)
+			}
 		}
 		wg.Wait()
-		return errors.Join(errs...)
+		if err := errors.Join(errs...); err != nil {
+			return err
+		}
+
+		// Run the non-boot critical plugins in the background.
+		for _, req := range nonBootCriticalPlugins {
+			go func(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, config map[string]LocalPluginInstallation) {
+				if err := m.configureAndVerifyPlugin(ctx, req, config); err != nil {
+					galog.Warnf("Failed to configure and verify local plugin %q: %v", req.GetPlugin().GetName(), err)
+				}
+			}(ctx, req, config)
+		}
 	}
 	galog.Infof("No local plugins to install")
+	return nil
+}
+
+// configureAndVerify configures the plugin and verifies that it is running.
+func (m *PluginManager) configureAndVerifyPlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, config map[string]LocalPluginInstallation) error {
+	m.configurePlugin(ctx, req, true)
+
+	// Verify the plugin is running after installation.
+	if err := m.VerifyPluginRunning(ctx, req); err != nil {
+		return fmt.Errorf("failed to verify local plugin %q is running: %v", req.GetPlugin().GetName(), err)
+	}
+
+	// Run the OnReady function if it exists for the plugin.
+	galog.Debugf("Running OnReady function for plugin %q", req.GetPlugin().GetName())
+	if installation, ok := config[req.GetPlugin().GetName()]; ok && installation.OnReady != nil {
+		installation.OnReady(ctx)
+	}
 	return nil
 }
 
