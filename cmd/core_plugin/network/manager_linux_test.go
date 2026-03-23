@@ -24,7 +24,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/route"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/google/go-cmp/cmp"
 )
@@ -468,7 +467,7 @@ func TestNetworkInterfacesSetupDisabled(t *testing.T) {
 	t.Cleanup(func() {
 		routeSetup = oldRouteSetup
 	})
-	routeSetup = func(ctx context.Context, opts *route.SetupOptions) error {
+	routeSetup = func(ctx context.Context, opts *service.Options) error {
 		routeSetupCalled = true
 		return nil
 	}
@@ -476,7 +475,7 @@ func TestNetworkInterfacesSetupDisabled(t *testing.T) {
 	testOpts := service.NewOptions(nil, []*nic.Configuration{
 		{Index: 1},
 	})
-	if err := managerSetup(ctx, testOpts.NICConfigs(), networkChanged{true, true, route.SetupOptions{}}); err != nil {
+	if err := managerSetup(ctx, testOpts.NICConfigs(), networkChanged{true, false}); err != nil {
 		t.Errorf("managerSetup(ctx, %+v) = %v, want nil", testOpts, err)
 	}
 
@@ -580,7 +579,7 @@ func TestManagerSetup(t *testing.T) {
 				defaultLinuxManagers = oldManagers
 			})
 
-			err := managerSetup(ctx, tc.opts.NICConfigs(), networkChanged{true, false, route.SetupOptions{ServiceOptions: tc.opts}})
+			err := managerSetup(ctx, tc.opts.NICConfigs(), networkChanged{true, false})
 			if (err == nil) == tc.wantError {
 				t.Errorf("runManagerSetup(ctx, %+v) = %v, want error", tc.opts, err)
 			}

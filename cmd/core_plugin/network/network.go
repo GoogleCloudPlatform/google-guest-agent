@@ -155,7 +155,7 @@ func (mod *module) networkSetup(ctx context.Context, config *cfg.Sections, mds *
 	// If the metadata has not changed then we return early to avoid unnecessary
 	// work.
 	metadataChanged := mod.networkMetadataChanged(mds, config)
-	routeChanged, setupOptions := mod.routeChanged(ctx, nicConfigs)
+	routeChanged := mod.routeChanged(ctx, nicConfigs)
 	if !metadataChanged && !routeChanged && !mod.failedConfiguration {
 		return true, nil
 	}
@@ -163,7 +163,7 @@ func (mod *module) networkSetup(ctx context.Context, config *cfg.Sections, mds *
 	galog.V(1).Debugf("Network metadata has changed or failed configuration, setting up network interfaces.")
 
 	// Forward the network configuration to the platform's network manager.
-	if err := managerSetup(ctx, nicConfigs, networkChanged{networkInterfaces: metadataChanged, routes: routeChanged, routeSetupOptions: setupOptions}); err != nil {
+	if err := managerSetup(ctx, nicConfigs, networkChanged{networkInterfaces: metadataChanged, routes: routeChanged}); err != nil {
 		failedSetup = true
 		return false, fmt.Errorf("failed to setup network interfaces: %v", err)
 	}
@@ -178,8 +178,6 @@ type networkChanged struct {
 	networkInterfaces bool
 	// routes indicates if the routes have changed.
 	routes bool
-	// routeSetupOptions is the route setup options.
-	routeSetupOptions route.SetupOptions
 }
 
 // networkMetadataChanged returns true if the metadata has changed or if it's being
@@ -215,36 +213,26 @@ func (mod *module) networkMetadataChanged(mds *metadata.Descriptor, config *cfg.
 // routeChanged returns true if the route metadata has changed, or if the routes
 // present on the system have changed from what is expected based on the network
 // interfaces configuration.
-func (mod *module) routeChanged(ctx context.Context, nicConfigs []*nic.Configuration) (bool, route.SetupOptions) {
-	missingRoutes := make(map[string][]route.Handle)
-	extraRoutes := make(map[string][]route.Handle)
-
-	var foundChanged bool
+func (mod *module) routeChanged(ctx context.Context, nicConfigs []*nic.Configuration) bool {
 	for _, nic := range nicConfigs {
 		if nic.Invalid || nic.Interface == nil {
 			continue
 		}
 		wantedRoutes := nic.ExtraAddresses.MergedMap()
 
-		missing, err := route.MissingRoutes(ctx, nic.Interface.Name(), wantedRoutes)
-		if err != nil {
+		if missing, err := route.MissingRoutes(ctx, nic.Interface.Name(), wantedRoutes); err != nil {
 			galog.V(2).Debugf("Failed to get missing routes for interface %q: %v", nic.Interface.Name(), err)
+			continue
 		} else if len(missing) > 0 {
-			foundChanged = true
-			missingRoutes[nic.Interface.Name()] = missing
+			return true
 		}
 
-		extra, err := route.ExtraRoutes(ctx, nic.Interface.Name(), wantedRoutes)
-		if err != nil {
+		if extra, err := route.ExtraRoutes(ctx, nic.Interface.Name(), wantedRoutes); err != nil {
 			galog.V(2).Debugf("Failed to get extra routes for interface %q: %v", nic.Interface.Name(), err)
+			continue
 		} else if len(extra) > 0 {
-			foundChanged = true
-			extraRoutes[nic.Interface.Name()] = extra
+			return true
 		}
 	}
-	return foundChanged, route.SetupOptions{
-		AlreadyChecked: true,
-		MissingRoutes:  missingRoutes,
-		ExtraRoutes:    extraRoutes,
-	}
+	return false
 }

@@ -61,12 +61,8 @@ func managerSetup(ctx context.Context, nics []*nic.Configuration, networkChanged
 	}
 
 	// Attempt to setup the routes.
-	if networkChanged.routes {
-		if err := routeSetup(ctx, &networkChanged.routeSetupOptions); err != nil {
-			return fmt.Errorf("failed to setup routes: %w", err)
-		}
-	} else {
-		galog.Debugf("No routes to setup.")
+	if err := routeSetup(ctx, opts); err != nil {
+		return fmt.Errorf("failed to setup routes: %w", err)
 	}
 
 	galog.Infof("Finished linux network management module setup.")
