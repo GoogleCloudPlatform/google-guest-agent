@@ -107,12 +107,16 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 
 	args := p.Manifest.LaunchArguments
 	args = append(args, fmt.Sprintf("--protocol=%s", l.protocol), fmt.Sprintf("--address=%s", p.Address), fmt.Sprintf("--errorlogfile=%s", p.logfile()))
+	pluginExecMode := run.ExecModeDetach
+	if p.IsLocal() {
+		pluginExecMode = run.ExecModeAsync
+	}
 
 	launchFunc := func() error {
 		opts := run.Options{
 			Name:     p.EntryPath,
 			Args:     args,
-			ExecMode: run.ExecModeDetach,
+			ExecMode: pluginExecMode,
 		}
 		res, err := run.WithContext(ctx, opts)
 		if err != nil {
