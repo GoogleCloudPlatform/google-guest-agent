@@ -18,6 +18,7 @@ package resource
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,8 @@ type constraintTestOpts struct {
 	hasCPUController bool
 	// hasMemoryController indicates if cgroupv1 has the memory controller.
 	hasMemoryController bool
+	// hasPidsController indicates if cgroupv2 has the pids controller.
+	hasPidsController bool
 }
 
 func constraintTestSetup(t *testing.T, opts constraintTestOpts) (ConstraintClient, string) {
@@ -81,14 +84,33 @@ func constraintTestSetup(t *testing.T, opts constraintTestOpts) (ConstraintClien
 	if opts.hasMemoryController || opts.overrideAll {
 		controllers = append(controllers, "memory")
 	}
-	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.controllers"), []byte("cpu memory"), 0755); err != nil {
+	if opts.hasPidsController || opts.overrideAll {
+		controllers = append(controllers, "pids")
+	}
+	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.controllers"), []byte("cpu memory pids"), 0755); err != nil {
 		t.Fatalf("failed to write cgroup.controllers file: %v", err)
 	}
 
 	// Write a cgroup.subtree_control file.
-	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.subtree_control"), []byte(strings.Join(controllers, " ")), 0755); err != nil {
+	controlContents := strings.Join(controllers, " ")
+	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.subtree_control"), []byte(controlContents), 0755); err != nil {
 		t.Fatalf("failed to write cgroup.subtree_control file: %v", err)
 	}
+
+	// Make a fake guest agent cgroup directory.
+	if err := os.MkdirAll(filepath.Join(testCgroupDir, guestAgentCgroupDir), 0755); err != nil {
+		t.Fatalf("failed to create guest agent cgroup directory: %v", err)
+	}
+
+	// Set up the controller and subtree control files. Usually, these are
+	// automatically created when the guest agent cgroup directory is created.
+	if err := os.WriteFile(filepath.Join(testCgroupDir, guestAgentCgroupDir, "cgroup.controllers"), []byte(controlContents), 0755); err != nil {
+		t.Fatalf("failed to write cgroup.controllers file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(testCgroupDir, guestAgentCgroupDir, "cgroup.subtree_control"), []byte(controlContents), 0755); err != nil {
+		t.Fatalf("failed to write cgroup.subtree_control file: %v", err)
+	}
+
 	return &cgroupv2Client{
 		cgroupsDir:      testCgroupDir,
 		memoryLimitFile: "memory.max",
@@ -169,6 +191,7 @@ func TestApplyResourceConstraintsV1(t *testing.T) {
 				cgroupVersion:       1,
 				hasCPUController:    true,
 				hasMemoryController: true,
+				hasPidsController:   true,
 			},
 		},
 		{
@@ -287,9 +310,8 @@ func TestApplyResourceConstraintsV1(t *testing.T) {
 
 func TestApplyResourceConstraintsV2(t *testing.T) {
 	tests := []struct {
-		name      string
-		opts      constraintTestOpts
-		expectErr bool
+		name string
+		opts constraintTestOpts
 	}{
 		{
 			name: "success",
@@ -297,22 +319,28 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 				cgroupVersion:       2,
 				hasCPUController:    true,
 				hasMemoryController: true,
+				hasPidsController:   true,
 			},
 		},
 		{
-			name:      "miss-cpu-controller",
-			opts:      constraintTestOpts{cgroupVersion: 2, hasMemoryController: true},
-			expectErr: true,
+			name: "miss-cpu-controller",
+			opts: constraintTestOpts{cgroupVersion: 2, hasMemoryController: true, hasPidsController: true},
 		},
 		{
-			name:      "miss-memory-controller",
-			opts:      constraintTestOpts{cgroupVersion: 2, hasCPUController: true},
-			expectErr: true,
+			name: "miss-memory-controller",
+			opts: constraintTestOpts{cgroupVersion: 2, hasCPUController: true, hasPidsController: true},
 		},
 		{
-			name:      "miss-cpu-and-memory-controllers",
-			opts:      constraintTestOpts{cgroupVersion: 2},
-			expectErr: true,
+			name: "miss-pids-controller",
+			opts: constraintTestOpts{
+				cgroupVersion:       2,
+				hasCPUController:    true,
+				hasMemoryController: true,
+			},
+		},
+		{
+			name: "miss-cpu-and-memory-controllers",
+			opts: constraintTestOpts{cgroupVersion: 2, hasPidsController: true},
 		},
 	}
 
@@ -324,13 +352,7 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 
 			err := c.Apply(testConstraint)
 			if err != nil {
-				if !test.expectErr {
-					t.Fatalf("applyResourceConstraints(ctx, %+v) returned unexpected err %v, expected nil", testConstraint, err)
-				}
-				return
-			}
-			if test.expectErr {
-				t.Fatalf("applyResourceConstraints(ctx, %+v) returned nil, expected err", testConstraint)
+				t.Fatalf("applyResourceConstraints(ctx, %+v) returned unexpected err %v, expected nil", testConstraint, err)
 			}
 
 			// Check that the mock test cgroup fs has the correct files written.
@@ -352,7 +374,12 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 				}
 			}
 			if !foundFile {
-				t.Fatalf("cgroup directory for test plugin %q was not created", testName)
+				if test.opts.hasCPUController || test.opts.hasMemoryController {
+					t.Fatalf("cgroup directory for test plugin %q was not created", testName)
+				} else {
+					// If neither controller is enabled, then the cgroup directory should not be created.
+					return
+				}
 			}
 
 			// Verify the procs file.
@@ -366,20 +393,28 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 
 			// Verify the memory.max file.
 			memoryContents, err := os.ReadFile(filepath.Join(cgroupsDir, guestAgentCgroupDir, testName, "memory.max"))
-			if err != nil {
+			if err != nil && test.opts.hasMemoryController {
 				t.Fatalf("failed to read memory.max file for test plugin: %v", err)
+			} else if !test.opts.hasMemoryController && (err == nil || !errors.Is(err, os.ErrNotExist)) {
+				t.Fatalf("memory.max file for the test plugin should not exist if the memory controller is not enabled.")
 			}
-			if string(memoryContents) != "50000" {
-				t.Fatalf("memory.max file got %s, expected 50000", string(memoryContents))
+			if test.opts.hasMemoryController {
+				if string(memoryContents) != "50000" {
+					t.Fatalf("memory.max file got %s, expected 50000", string(memoryContents))
+				}
 			}
 
 			// Verify the cpu.max file.
 			cpuMaxContents, err := os.ReadFile(filepath.Join(cgroupsDir, guestAgentCgroupDir, testName, "cpu.max"))
-			if err != nil {
+			if err != nil && test.opts.hasCPUController {
 				t.Fatalf("failed to read cpu.max file for test plugin: %v", err)
+			} else if !test.opts.hasCPUController && (err == nil || !errors.Is(err, os.ErrNotExist)) {
+				t.Fatalf("cpu.max file for the test plugin should not exist if the cpu controller is not enabled.")
 			}
-			if string(cpuMaxContents) != "10000 100000" {
-				t.Fatalf("cpu.max file got %s, expected \"10000 100000\".", string(cpuMaxContents))
+			if test.opts.hasCPUController {
+				if string(cpuMaxContents) != "10000 100000" {
+					t.Fatalf("cpu.max file got %s, expected \"10000 100000\".", string(cpuMaxContents))
+				}
 			}
 		})
 	}
