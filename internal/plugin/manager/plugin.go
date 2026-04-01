@@ -44,8 +44,9 @@ const (
 	// waiting for a response forever.
 	defaultApplyRPCTimeout  = time.Second * 5
 	defaultStatusRPCTimeout = time.Second * 2
-	// defaultConnectTimeoutTries is the default number of tries for connecting to a plugin.
-	defaultConnectTimeoutTries = 30
+	// defaultConnectTimeoutTries is the default number of tries for connecting to
+	// a plugin. The plugin manager will wait for one second between each try.
+	defaultConnectTimeoutTries = 15
 )
 
 // Plugin struct represents the plugin information.
