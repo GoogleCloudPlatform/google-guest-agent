@@ -1146,6 +1146,13 @@ func TestSetupUsrEtcOSLoginDirs(t *testing.T) {
 			dstShouldExist: false,
 		},
 		{
+			name:           "opensuse15-no-copy",
+			info:           osinfo.OSInfo{OS: "opensuse-leap", Version: osinfo.Ver{Major: 15}},
+			createSrc:      true,
+			createDst:      false,
+			dstShouldExist: false,
+		},
+		{
 			name:           "sles15-no-copy",
 			info:           osinfo.OSInfo{OS: "sles", Version: osinfo.Ver{Major: 15}},
 			createSrc:      true,
@@ -1155,6 +1162,14 @@ func TestSetupUsrEtcOSLoginDirs(t *testing.T) {
 		{
 			name:           "sles16-copy",
 			info:           osinfo.OSInfo{OS: "sles", Version: osinfo.Ver{Major: 16}},
+			createSrc:      true,
+			createDst:      false,
+			dstShouldExist: true,
+			dstContent:     "test",
+		},
+		{
+			name:           "opensuse16-copy",
+			info:           osinfo.OSInfo{OS: "opensuse-leap", Version: osinfo.Ver{Major: 16}},
 			createSrc:      true,
 			createDst:      false,
 			dstShouldExist: true,

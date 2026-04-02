@@ -328,8 +328,8 @@ func (mod *osloginModule) setupSles16OSLoginDirs(ctx context.Context) error {
 	}
 
 	info := osinfoRead()
-
-	if !strings.Contains(info.OS, "sles") || info.Version.Major != 16 {
+	isSles16 := strings.Contains(info.OS, "sles") || strings.Contains(info.OS, "opensuse")
+	if !isSles16 || info.Version.Major != 16 {
 		galog.Infof("Skipping OSLogin SLES 16 specific setup on %s %d", info.OS, info.Version.Major)
 		mod.sles16Setup.Store(true)
 		return nil
