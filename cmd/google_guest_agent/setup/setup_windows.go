@@ -74,8 +74,6 @@ type mobIPForwardRow struct {
 }
 
 // addMDSRoute adds a route to MDS on windows.
-// TODO(b/441114413): Update this to use routes module once its updated with
-// right syscalls.
 func addMDSRoute(ctx context.Context) error {
 	fes, err := getIPForwardEntries()
 	if err != nil {
