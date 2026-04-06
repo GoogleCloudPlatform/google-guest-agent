@@ -129,12 +129,6 @@ func writeCPUControllerConfig(controllerDir string, constraint Constraint, versi
 		return fmt.Errorf("MaxCPUUsage must be <= 100, got %d", constraint.MaxCPUUsage)
 	}
 
-	// Write a pids file containing the plugin's PID. This moves this process to
-	// this subgroup.
-	if err := os.WriteFile(filepath.Join(controllerDir, "cgroup.procs"), []byte(strconv.Itoa(constraint.PID)), 0755); err != nil {
-		return fmt.Errorf("failed to write cpu cgroup.procs file: %w", err)
-	}
-
 	// Write file to constrain CPU usage.
 	// The values in the file are the number of cycles allowed per maximum number
 	// of cycles, both configurable by the user.
@@ -158,13 +152,6 @@ func writeCPUControllerConfig(controllerDir string, constraint Constraint, versi
 }
 
 func writeMemoryControllerConfig(controllerDir string, constraint Constraint, memoryLimitFile string) error {
-	// Write a pids file containing the plugin's PID. This moves this process to
-	// this subgroup.
-	procsFile := filepath.Join(controllerDir, "cgroup.procs")
-	if err := os.WriteFile(procsFile, []byte(strconv.Itoa(constraint.PID)), 0755); err != nil {
-		return fmt.Errorf("failed to write memory cgroup.procs file: %w", err)
-	}
-
 	// Write a file to limit memory usage.
 	memoryFile := filepath.Join(controllerDir, memoryLimitFile)
 	if err := os.WriteFile(memoryFile, []byte(strconv.Itoa(int(constraint.MaxMemoryUsage))), 0755); err != nil {
@@ -176,38 +163,41 @@ func writeMemoryControllerConfig(controllerDir string, constraint Constraint, me
 // Apply applies resource constraints to the process with the given PID using
 // cgroupv1.
 func (c cgroupv1Client) Apply(constraint Constraint) error {
-	if constraint.MaxCPUUsage != 0 && constraint.MaxMemoryUsage != 0 {
-		// If we want to set both limits, but one of the controllers do not exist,
-		// use fallback option for consistency.
-		if c.cpuController == "" && c.memoryController == "" {
-			return fmt.Errorf("failed to find both cpu and memory controllers")
-		}
-	}
-
 	// Write CPU controller configs if MaxCPUUsage is set.
 	if constraint.MaxCPUUsage != 0 {
 		if c.cpuController == "" {
-			return fmt.Errorf("failed to find cpu controller")
-		}
-		cpuControllerDir := filepath.Join(c.cgroupsDir, c.cpuController, constraint.Name)
-		if err := os.MkdirAll(cpuControllerDir, 0755); err != nil {
-			return fmt.Errorf("failed to create cgroup cpu controller directory: %w", err)
-		}
-		if err := writeCPUControllerConfig(cpuControllerDir, constraint, cgroupv1); err != nil {
-			return err
+			galog.Warnf("Cgroup CPU controller is disabled")
+		} else {
+			cpuControllerDir := filepath.Join(c.cgroupsDir, c.cpuController, constraint.Name)
+			if err := os.MkdirAll(cpuControllerDir, 0755); err != nil {
+				return fmt.Errorf("failed to create cgroup cpu controller directory: %w", err)
+			}
+			if err := writeCPUControllerConfig(cpuControllerDir, constraint, cgroupv1); err != nil {
+				return err
+			}
+
+			// Write the PID to the cgroup.procs file.
+			if err := os.WriteFile(filepath.Join(cpuControllerDir, "cgroup.procs"), []byte(strconv.Itoa(constraint.PID)), 0755); err != nil {
+				return fmt.Errorf("failed to write cpu cgroup.procs file: %w", err)
+			}
 		}
 	}
 	// Write memory controller configs if MaxMemoryUsage is set.
 	if constraint.MaxMemoryUsage != 0 {
 		if c.memoryController == "" {
-			return fmt.Errorf("failed to find memory controller")
-		}
-		memoryControllerDir := filepath.Join(c.cgroupsDir, c.memoryController, constraint.Name)
-		if err := os.MkdirAll(memoryControllerDir, 0755); err != nil {
-			return fmt.Errorf("failed to create cgroup memory controller directory: %w", err)
-		}
-		if err := writeMemoryControllerConfig(memoryControllerDir, constraint, c.memoryLimitFile); err != nil {
-			return err
+			galog.Warnf("Cgroup memory controller is disabled")
+		} else {
+			memoryControllerDir := filepath.Join(c.cgroupsDir, c.memoryController, constraint.Name)
+			if err := os.MkdirAll(memoryControllerDir, 0755); err != nil {
+				return fmt.Errorf("failed to create cgroup memory controller directory: %w", err)
+			}
+			if err := writeMemoryControllerConfig(memoryControllerDir, constraint, c.memoryLimitFile); err != nil {
+				return err
+			}
+			// Write the PID to the cgroup.procs file.
+			if err := os.WriteFile(filepath.Join(memoryControllerDir, "cgroup.procs"), []byte(strconv.Itoa(constraint.PID)), 0755); err != nil {
+				return fmt.Errorf("failed to write memory cgroup.procs file: %w", err)
+			}
 		}
 	}
 
@@ -233,18 +223,35 @@ func (c cgroupv2Client) Apply(constraint Constraint) error {
 	if err != nil {
 		return fmt.Errorf("failed to read cgroup.controllers file: %w", err)
 	}
+	galog.V(2).Debugf("cgroup.contollers file contents: %s", string(controlContents))
 	controlContentsSplit := strings.Fields(string(controlContents))
 	cpuEnabled := slices.Contains(controlContentsSplit, "cpu")
 	memoryEnabled := slices.Contains(controlContentsSplit, "memory")
+	pidsEnabled := slices.Contains(controlContentsSplit, "pids")
+	galog.V(2).Debugf("cpuEnabled: %t, memoryEnabled: %t, pidsEnabled: %t", cpuEnabled, memoryEnabled, pidsEnabled)
 
-	// Now check that the subtree_control file enables cpu and memory controllers.
-	subtreeControlContents, err := os.ReadFile(filepath.Join(c.cgroupsDir, "cgroup.subtree_control"))
-	if err != nil {
-		return fmt.Errorf("failed to read cgroup.subtree_control file: %w", err)
+	// If the PIDs controller is disabled, we can skip resource constraints.
+	// This is because the PIDs controller is required to ensure that the cgroup
+	// constraints are properly applied.
+	if !pidsEnabled {
+		galog.Warnf("Cgroup PIDs controllers is disabled, skipping resource constraints for plugin %q", constraint.Name)
+		return nil
 	}
-	subtreeControlContentsSplit := strings.Fields(string(subtreeControlContents))
-	cpuEnabled = cpuEnabled && !slices.Contains(subtreeControlContentsSplit, "-cpu") && slices.Contains(subtreeControlContentsSplit, "cpu")
-	memoryEnabled = memoryEnabled && !slices.Contains(subtreeControlContentsSplit, "-memory") && slices.Contains(subtreeControlContentsSplit, "memory")
+
+	// Now check that the subtree_control file enables cpu, memory, and pids controllers.
+	subtreeControlCPUEnabled, subtreeControlMemoryEnabled, subtreeControlPidsEnabled, err := c.checkEnabledControllers(filepath.Join(c.cgroupsDir, "cgroup.subtree_control"))
+	if err != nil {
+		return fmt.Errorf("failed to check enabled controllers: %w", err)
+	}
+	cpuEnabled = cpuEnabled && subtreeControlCPUEnabled
+	memoryEnabled = memoryEnabled && subtreeControlMemoryEnabled
+	pidsEnabled = pidsEnabled && subtreeControlPidsEnabled
+
+	// If the PIDs controllers is disabled for subtree, we can skip resource constraints.
+	if !pidsEnabled {
+		galog.Warnf("Cgroup PIDs controllers is disabled for subtree_control, skipping resource constraints for plugin %q", constraint.Name)
+		return nil
+	}
 
 	// Make the guest_agent cgroup dir.
 	// Only make and setup the directory if one of the controllers are enabled.
@@ -253,52 +260,79 @@ func (c cgroupv2Client) Apply(constraint Constraint) error {
 
 		// Only try to create the guest-agent directory if it doesn't exist.
 		if !file.Exists(guestAgentDir, file.TypeDir) {
-			if err := os.MkdirAll(filepath.Join(c.cgroupsDir, guestAgentCgroupDir), 0755); err != nil {
+			galog.V(1).Debugf("Creating guest_agent cgroup directory %q", guestAgentDir)
+			if err := os.MkdirAll(guestAgentDir, 0755); err != nil {
 				return fmt.Errorf("failed to create guest_agent cgroup: %w", err)
 			}
+		}
 
+		// Read the subtree_control file.
+		guestAgentSubtreeControlFile := filepath.Join(guestAgentDir, "cgroup.subtree_control")
+		guestAgentSubtreeControlCPUEnabled, guestAgentSubtreeControlMemoryEnabled, guestAgentSubtreeControlPidsEnabled, err := c.checkEnabledControllers(guestAgentSubtreeControlFile)
+		if err != nil {
+			return fmt.Errorf("failed to check enabled controllers: %w", err)
+		}
+		allControllersEnabled := guestAgentSubtreeControlCPUEnabled && guestAgentSubtreeControlMemoryEnabled && guestAgentSubtreeControlPidsEnabled
+
+		// Only update the subtree_control file if not all controllers are enabled.
+		if !allControllersEnabled {
+			// Add the controllers that are enabled to the subtree_control file.
 			subtreeControl := make([]string, 0)
 			if cpuEnabled {
+				galog.V(2).Debugf("Enabling cpu controller")
 				subtreeControl = append(subtreeControl, "+cpu")
 			}
 			if memoryEnabled {
+				galog.V(2).Debugf("Enabling memory controller")
 				subtreeControl = append(subtreeControl, "+memory")
 			}
+			subtreeControl = append(subtreeControl, "+pids")
 
 			// Ensure the proper controllers are enabled.
-			guestAgentControlFile := filepath.Join(c.cgroupsDir, guestAgentCgroupDir, "cgroup.subtree_control")
-			if err := os.WriteFile(guestAgentControlFile, []byte(strings.Join(subtreeControl, " ")), 0755); err != nil {
-				return fmt.Errorf("failed to write cgroup.subtree_control file: %w", err)
+			if err := os.WriteFile(guestAgentSubtreeControlFile, []byte(strings.Join(subtreeControl, " ")), 0755); err != nil {
+				return fmt.Errorf("failed to write guest_agent cgroup.subtree_control file: %w", err)
 			}
 		}
 	}
 
 	if constraint.MaxCPUUsage != 0 && constraint.MaxMemoryUsage != 0 {
 		if !cpuEnabled && !memoryEnabled {
-			return fmt.Errorf("both cpu and memory controllers disabled")
+			galog.Warnf("Both cgroup cpu and memory controllers disabled")
+			return nil
 		}
 	}
 	if constraint.MaxCPUUsage != 0 || constraint.MaxMemoryUsage != 0 {
-		// Create a cgroup directory for all things guest-agent related.
+		// Create a cgroup directory for this specific plugin.
 		pluginPath := filepath.Join(c.cgroupsDir, guestAgentCgroupDir, constraint.Name)
 		if err := os.MkdirAll(pluginPath, 0755); err != nil {
 			return fmt.Errorf("failed to create cgroup directory for %s: %v", constraint.Name, err)
 		}
 
+		// Write a pids file containing the plugin's PID. This moves this process to
+		// this subgroup.
+		procsFile := filepath.Join(pluginPath, "cgroup.procs")
+		if err := os.WriteFile(procsFile, []byte(strconv.Itoa(constraint.PID)), 0755); err != nil {
+			return fmt.Errorf("failed to write cgroup.procs file: %w", err)
+		}
+
+		// Write CPU controller configs if MaxCPUUsage is set.
 		if constraint.MaxCPUUsage != 0 {
 			if !cpuEnabled {
-				return fmt.Errorf("cpu controller disabled")
-			}
-			if err := writeCPUControllerConfig(pluginPath, constraint, cgroupv2); err != nil {
-				return err
+				galog.Warnf("Cgroup CPU controller is disabled")
+			} else {
+				if err := writeCPUControllerConfig(pluginPath, constraint, cgroupv2); err != nil {
+					return err
+				}
 			}
 		}
+		// Write memory controller configs if MaxMemoryUsage is set.
 		if constraint.MaxMemoryUsage != 0 {
 			if !memoryEnabled {
-				return fmt.Errorf("memory controller disabled")
-			}
-			if err := writeMemoryControllerConfig(pluginPath, constraint, c.memoryLimitFile); err != nil {
-				return err
+				galog.Warnf("Cgroup memory controller is disabled")
+			} else {
+				if err := writeMemoryControllerConfig(pluginPath, constraint, c.memoryLimitFile); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -328,4 +362,18 @@ func removeCgroup(ctx context.Context, dir string) error {
 		}
 		return nil
 	})
+}
+
+// checkEnabledControllers checks if the controllers are enabled in the subtree_control file.
+func (c cgroupv2Client) checkEnabledControllers(path string) (bool, bool, bool, error) {
+	// Read the subtree_control file.
+	subtreeControlContents, err := os.ReadFile(path)
+	if err != nil {
+		return false, false, false, err
+	}
+	subtreeControlContentsSplit := strings.Fields(string(subtreeControlContents))
+	cpuEnabled := slices.Contains(subtreeControlContentsSplit, "cpu")
+	memoryEnabled := slices.Contains(subtreeControlContentsSplit, "memory")
+	pidsEnabled := slices.Contains(subtreeControlContentsSplit, "pids")
+	return cpuEnabled, memoryEnabled, pidsEnabled, nil
 }
