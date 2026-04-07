@@ -152,6 +152,33 @@ func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Option
 		}
 	}
 
+	// NetworkManager will not create a default connection if we are removing the
+	// one we manage, in that case we need to force it to connect and then with
+	// that create a default connection.
+	//
+	// We only do this if we are not managing the primary NIC to avoid unnecessary
+	// reloads. Otherwise the primary NIC will be reloaded twice.
+	if sn.reconnectPrimaryNIC && !cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC {
+		// Get the primary NIC.
+		primaryNIC, err := opts.GetPrimaryNIC()
+		if err != nil {
+			galog.Warnf("Failed to get primary NIC, skipping reconnect: %v", err)
+			return nil
+		}
+		if primaryNIC.Interface == nil {
+			galog.Warnf("Primary NIC has no interface, skipping reconnect.")
+			return nil
+		}
+
+		// Force-reconnect the primary NIC to NetworkManager.
+		galog.Debugf("Reconnecting NetworkManager connection(%q).", primaryNIC.Interface.Name())
+		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"device", "connect", primaryNIC.Interface.Name()}}
+		if _, err := run.WithContext(ctx, opt); err != nil {
+			return fmt.Errorf("error reconnecting NetworkManager connection(%q): %w", primaryNIC.Interface.Name(), err)
+		}
+		galog.Debugf("Successfully reconnected NetworkManager connection(%q).", primaryNIC.Interface.Name())
+	}
+
 	galog.Info("Finished setting up NetworkManager interfaces.")
 	return nil
 }
@@ -372,8 +399,7 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 		}
 	}
 
-	var reconnectPrimaryNic bool
-	var primaryOp removeOp
+	// Remove the config files and check if we need to reconnect the primary NIC.
 	for _, op := range deleteMe {
 		galog.Debugf("Removing NetworkManager configuration: %q", op.configFile)
 		err := os.RemoveAll(op.configFile)
@@ -383,10 +409,7 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 
 		// If the primary NIC config file was removed successfully, we need to
 		// reconnect it to NetworkManager.
-		if op.primary && err == nil {
-			reconnectPrimaryNic = true
-			primaryOp = op
-		}
+		sn.reconnectPrimaryNIC = op.primary && err == nil
 	}
 
 	if _, err := execLookPath("nmcli"); err != nil {
@@ -397,20 +420,6 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 	if !active {
 		if err := sn.reloadInterfaces(ctx); err != nil {
 			return fmt.Errorf("failed to reload NetworkManager interfaces: %w", err)
-		}
-		return nil
-	}
-
-	// NetworkManager will not create a default connection if we are removing the
-	// one we manage, in that case we need to force it to connect and then with
-	// that create a default connection.
-	//
-	// We only do this if we are not managing the primary NIC to avoid unnecessary
-	// reloads. Otherwise the primary NIC will be reloaded twice.
-	if reconnectPrimaryNic && !cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC {
-		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"device", "connect", primaryOp.name}}
-		if _, err := run.WithContext(ctx, opt); err != nil {
-			return fmt.Errorf("error reconnecting device(%q): %w", primaryOp.name, err)
 		}
 	}
 
