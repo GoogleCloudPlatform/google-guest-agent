@@ -151,15 +151,19 @@ func cleanup(ctx context.Context, p *Plugin) error {
 		if err := os.RemoveAll(p.InstallPath); err != nil {
 			errs = append(errs, fmt.Errorf("%s plugin install path (%s) removal failed with error: %w", p.FullName(), p.InstallPath, err))
 		}
+	} else {
+		galog.V(2).Debugf("Skipping removal of local plugin %q install path (%q)", p.FullName(), p.InstallPath)
 	}
 
 	if p.Protocol == udsProtocol {
+		galog.V(2).Debugf("Removing %s plugin socket file (%s)", p.FullName(), p.Address)
 		if err := os.RemoveAll(p.Address); err != nil {
 			errs = append(errs, fmt.Errorf("%s plugin socket file (%s) removal failed with error: %w", p.FullName(), p.Address, err))
 		}
 	}
 
 	stateFile := p.stateFile()
+	galog.V(2).Debugf("Removing %s plugin state file (%s)", p.FullName(), stateFile)
 	if err := os.RemoveAll(stateFile); err != nil {
 		errs = append(errs, fmt.Errorf("%s plugin state (%s) removal failed with error: %w", p.FullName(), stateFile, err))
 	}

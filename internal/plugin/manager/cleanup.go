@@ -179,6 +179,7 @@ func (s *CleanupJob) ShouldEnable(context.Context) bool {
 func (s *CleanupJob) Run(ctx context.Context) (bool, error) {
 	galog.Debugf("Running cleanup job")
 	noop, err := s.pm.retryFailedRemovals(ctx)
+	galog.Warnf("Failed to run cleanup job: %v", err)
 	galog.Debugf("Finished running cleanup job")
-	return noop, err
+	return noop, nil
 }

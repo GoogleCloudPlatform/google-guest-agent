@@ -259,6 +259,14 @@ func (p *Plugin) IsDynamic() bool {
 	return p.Manifest.PluginInstallationType == acmpb.PluginInstallationType_DYNAMIC_INSTALLATION
 }
 
+// IsBootCritical returns true if the plugin is a boot critical plugin.
+func (p *Plugin) IsBootCritical() bool {
+	if p.Manifest.ExecutionModel == nil {
+		return false
+	}
+	return p.Manifest.ExecutionModel.BootCritical
+}
+
 // pendingPluginStatus struct represents the pending plugin status. This is
 // set only when a plugin revision is being changed.
 type pendingPluginStatus struct {

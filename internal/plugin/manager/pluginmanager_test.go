@@ -1731,7 +1731,7 @@ func TestGetLocalPlugin(t *testing.T) {
 		t.Fatalf("os.WriteFile(%s) failed unexpectedly with error: %v", filepath.Join(localDir, "PluginA", manifestFile), err)
 	}
 
-	got, err := pm.GetLocalPlugin(ctx, "PluginA")
+	got, err := pm.getLocalPlugin(ctx, "PluginA")
 	if err != nil {
 		t.Fatalf("GetLocalPlugin(ctx, %s) failed unexpectedly with error: %v", "PluginA", err)
 	}
@@ -1741,7 +1741,7 @@ func TestGetLocalPlugin(t *testing.T) {
 	}
 }
 
-func TestStartLocalPlugin(t *testing.T) {
+func TestStartPlugins(t *testing.T) {
 	connections := t.TempDir()
 	state := t.TempDir()
 	setBaseStateDir(t, state)
@@ -1850,8 +1850,8 @@ func TestStartLocalPlugin(t *testing.T) {
 			}
 
 			// Start the local plugins for the test.
-			if err := pm.StartLocalPlugins(ctx, installations); err != nil {
-				t.Fatalf("StartLocalPlugins(ctx, %+v) = error: %v, want no error", installations, err)
+			if err := pm.StartPlugins(ctx, installations); err != nil {
+				t.Fatalf("StartPlugins(ctx, %+v) = error: %v, want no error", installations, err)
 			}
 
 			// Fresh install should not have any pending plugins.

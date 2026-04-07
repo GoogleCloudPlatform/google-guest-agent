@@ -25,6 +25,7 @@ import (
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/handler"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/watcher"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/command"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -179,20 +180,24 @@ func Run(ctx context.Context, c Config) error {
 		coreReady(ctx, c)
 	}
 
-	if c.EnableLocalPlugins {
-		if err := pm.StartLocalPlugins(ctx, map[string]manager.LocalPluginInstallation{
-			manager.CorePluginName: manager.LocalPluginInstallation{
-				// Only enable core plugin locally if core plugin initialization is not
-				// skipped and local launch is enabled.
-				Enable: !c.SkipCorePlugin,
-				OnReady: func(ctx context.Context) {
-					coreReady(ctx, c)
-				},
+	// Start all other plugins after the core plugin is installed (if the core
+	// plugin is to be installed manually)
+	if err := pm.StartPlugins(ctx, map[string]manager.LocalPluginInstallation{
+		manager.CorePluginName: manager.LocalPluginInstallation{
+			// Only enable core plugin locally if core plugin initialization is not
+			// skipped and local launch is enabled.
+			Enable: !c.SkipCorePlugin,
+			OnReady: func(ctx context.Context) {
+				coreReady(ctx, c)
 			},
-		}); err != nil {
-			return fmt.Errorf("start local plugins: %w", err)
-		}
-	} else {
+		},
+	}); err != nil {
+		return fmt.Errorf("start local plugins: %w", err)
+	}
+
+	// Only manually install the core plugin if local launch is disabled and the
+	// core plugin is enabled.
+	if !cfg.Retrieve().Core.EnableLocalPlugins && !c.SkipCorePlugin {
 		galog.Debugf("Skipped dynamic local launch of core plugin, attempting to install core plugin with hardcoded config...")
 		if err := install(ctx, pm, c); err != nil {
 			return fmt.Errorf("core plugin installation: %w", err)
@@ -212,11 +217,6 @@ func Run(ctx context.Context, c Config) error {
 
 // install installs the core plugin and verifies if its running.
 func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
-	if c.SkipCorePlugin {
-		galog.Debug("Core plugin installation is skipped, skipping core plugin installation")
-		return nil
-	}
-
 	req := &acpb.ConfigurePluginStates{
 		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
@@ -232,6 +232,9 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 					StopTimeout:            &dpb.Duration{Seconds: 30},
 					PluginType:             acpb.PluginType_DAEMON,
 					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+					ExecutionModel: &acpb.ExecutionModel{
+						BootCritical: true,
+					},
 				},
 			},
 		},
