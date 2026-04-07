@@ -465,12 +465,15 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 		failed = true
 	}
 
-	// Fill NSS cache.
+	// Tickle the systemd service to fill the NSS cache.
+	galog.Infof("Triggering NSS cache refresh via systemd.")
 	if _, err := run.WithContext(ctx, run.Options{
-		Name:       "google_oslogin_nss_cache",
+		Name:       "systemctl",
+		Args:       []string{"start", "google-oslogin-cache.service"},
 		OutputType: run.OutputNone,
+		ExecMode:   run.ExecModeAsync,
 	}); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("failed to fill NSS cache: %w", err))
+		errs = errors.Join(errs, fmt.Errorf("failed to trigger NSS cache refresh via systemd: %w", err))
 		failed = true
 	}
 
