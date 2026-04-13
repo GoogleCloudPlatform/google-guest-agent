@@ -36,6 +36,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/lru"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
@@ -91,6 +92,11 @@ func NewModule(_ context.Context) *manager.Module {
 
 // moduleSetup initializes the module.
 func (mod *module) moduleSetup(ctx context.Context, data any) error {
+	if cfg.Retrieve().AccountManager != nil && cfg.Retrieve().AccountManager.Disable {
+		galog.Infof("Account manager is disabled, skipping windows password reset module setup.")
+		return nil
+	}
+
 	galog.Debug("Initializing windows password reset module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {

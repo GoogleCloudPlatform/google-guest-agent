@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/accounts"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/reg"
@@ -75,10 +76,11 @@ func TestModuleSetup(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		desc      any
-		opts      winpassTestOpts
-		expectErr bool
+		name                   string
+		desc                   any
+		accountManagerDisabled bool
+		opts                   winpassTestOpts
+		expectErr              bool
 	}{
 		{
 			name: "success",
@@ -90,6 +92,10 @@ func TestModuleSetup(t *testing.T) {
 				overrideRegRead:       true,
 				testRegEntries:        []string{`{"UserName": "test-user", "PasswordLength": 20}`},
 			},
+		},
+		{
+			name:                   "account_manager_disabled",
+			accountManagerDisabled: true,
 		},
 		{
 			name: "fail_setup_accounts",
@@ -110,7 +116,15 @@ func TestModuleSetup(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if err := cfg.Load(nil); err != nil {
+				t.Fatalf("cfg.Load(nil) failed: %v", err)
+			}
+
 			winpassTestSetup(t, test.opts)
+
+			if test.accountManagerDisabled {
+				cfg.Retrieve().AccountManager = &cfg.AccountManager{Disable: true}
+			}
 
 			mod := &module{}
 			if err := mod.moduleSetup(ctx, test.desc); (err == nil) == test.expectErr {
