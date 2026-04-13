@@ -18,7 +18,6 @@ package resource
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,8 +34,6 @@ type constraintTestOpts struct {
 	hasCPUController bool
 	// hasMemoryController indicates if cgroupv1 has the memory controller.
 	hasMemoryController bool
-	// hasPidsController indicates if cgroupv2 has the pids controller.
-	hasPidsController bool
 }
 
 func constraintTestSetup(t *testing.T, opts constraintTestOpts) (ConstraintClient, string) {
@@ -84,33 +81,14 @@ func constraintTestSetup(t *testing.T, opts constraintTestOpts) (ConstraintClien
 	if opts.hasMemoryController || opts.overrideAll {
 		controllers = append(controllers, "memory")
 	}
-	if opts.hasPidsController || opts.overrideAll {
-		controllers = append(controllers, "pids")
-	}
-	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.controllers"), []byte("cpu memory pids"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.controllers"), []byte("cpu memory"), 0755); err != nil {
 		t.Fatalf("failed to write cgroup.controllers file: %v", err)
 	}
 
 	// Write a cgroup.subtree_control file.
-	controlContents := strings.Join(controllers, " ")
-	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.subtree_control"), []byte(controlContents), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(testCgroupDir, "cgroup.subtree_control"), []byte(strings.Join(controllers, " ")), 0755); err != nil {
 		t.Fatalf("failed to write cgroup.subtree_control file: %v", err)
 	}
-
-	// Make a fake guest agent cgroup directory.
-	if err := os.MkdirAll(filepath.Join(testCgroupDir, guestAgentCgroupDir), 0755); err != nil {
-		t.Fatalf("failed to create guest agent cgroup directory: %v", err)
-	}
-
-	// Set up the controller and subtree control files. Usually, these are
-	// automatically created when the guest agent cgroup directory is created.
-	if err := os.WriteFile(filepath.Join(testCgroupDir, guestAgentCgroupDir, "cgroup.controllers"), []byte(controlContents), 0755); err != nil {
-		t.Fatalf("failed to write cgroup.controllers file: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(testCgroupDir, guestAgentCgroupDir, "cgroup.subtree_control"), []byte(controlContents), 0755); err != nil {
-		t.Fatalf("failed to write cgroup.subtree_control file: %v", err)
-	}
-
 	return &cgroupv2Client{
 		cgroupsDir:      testCgroupDir,
 		memoryLimitFile: "memory.max",
@@ -181,8 +159,9 @@ func TestInitCgroupv1(t *testing.T) {
 // cgroupv1.
 func TestApplyResourceConstraintsV1(t *testing.T) {
 	tests := []struct {
-		name string
-		opts constraintTestOpts
+		name      string
+		opts      constraintTestOpts
+		expectErr bool
 	}{
 		{
 			name: "success",
@@ -190,20 +169,22 @@ func TestApplyResourceConstraintsV1(t *testing.T) {
 				cgroupVersion:       1,
 				hasCPUController:    true,
 				hasMemoryController: true,
-				hasPidsController:   true,
 			},
 		},
 		{
-			name: "miss-cpu-controller",
-			opts: constraintTestOpts{cgroupVersion: 1, hasMemoryController: true},
+			name:      "miss-cpu-controller",
+			opts:      constraintTestOpts{cgroupVersion: 1, hasMemoryController: true},
+			expectErr: true,
 		},
 		{
-			name: "miss-memory-controller",
-			opts: constraintTestOpts{cgroupVersion: 1, hasCPUController: true},
+			name:      "miss-memory-controller",
+			opts:      constraintTestOpts{cgroupVersion: 1, hasCPUController: true},
+			expectErr: true,
 		},
 		{
-			name: "miss-cpu-and-memory-controllers",
-			opts: constraintTestOpts{cgroupVersion: 1},
+			name:      "miss-cpu-and-memory-controllers",
+			opts:      constraintTestOpts{cgroupVersion: 1},
+			expectErr: true,
 		},
 	}
 
@@ -211,108 +192,94 @@ func TestApplyResourceConstraintsV1(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			c, cgroupsDir := constraintTestSetup(t, test.opts)
 			testName := "testPlugin_A"
-			testConstraint := Constraint{
-				PID:            1,
-				Name:           testName,
-				MaxMemoryUsage: 50000,
-				MaxCPUUsage:    10,
-			}
+			testConstraint := Constraint{1, testName, 50000, 10}
 
 			// Apply constraints and check errors.
 			err := c.Apply(testConstraint)
 			if err != nil {
-				t.Fatalf("Apply(%+v) returned unexpected err %v, expected nil", testConstraint, err)
+				if !test.expectErr {
+					t.Fatalf("Apply(ctx, %+v) returned unexpected err %v, expected nil", testConstraint, err)
+				}
+				return
+			}
+			if test.expectErr {
+				t.Fatalf("Apply(ctx, %+v) returned nil, expected err", testConstraint)
 			}
 
 			// Check that the mock test cgroup fs has the correct files written.
 			// First check the fake CPU controller.
-			if test.opts.hasCPUController {
-				files, err := os.ReadDir(filepath.Join(cgroupsDir, "cpu"))
-				if err != nil {
-					t.Fatalf("failed to read cpu directory: %v", err)
-				}
+			files, err := os.ReadDir(filepath.Join(cgroupsDir, "cpu"))
+			if err != nil {
+				t.Fatalf("failed to read cpu directory: %v", err)
+			}
 
-				// See if a group was created for it.
-				var passed bool
-				for _, file := range files {
-					if !file.IsDir() {
-						continue
-					}
-					if file.Name() == testName {
-						passed = true
-						break
-					}
+			// See if a group was created for it.
+			for _, file := range files {
+				if file.IsDir() {
+					continue
 				}
-				if !passed {
-					t.Fatalf("plugin cgroup %q for cpu was not created", testName)
+				if file.Name() != testName {
+					t.Fatalf("plugin cgroup %q for cpu was not created", file.Name())
 				}
-
-				// Check that a cgroup.procs file was written with the PID.
-				procsContents, err := os.ReadFile(filepath.Join(cgroupsDir, "cpu", testName, "cgroup.procs"))
-				if err != nil {
-					t.Fatalf("failed to read cgroup.procs file: %v", err)
-				}
-				if string(procsContents) != "1" {
-					t.Fatalf("cgroup.procs file for test plugin should contain 1.")
-				}
-
-				// Verify both CPU files.
-				cpuPeriodContents, err := os.ReadFile(filepath.Join(cgroupsDir, "cpu", testName, "cpu.cfs_period_us"))
-				if err != nil {
-					t.Fatalf("failed to read cpu.cfs_period_us file: %v", err)
-				}
-				if string(cpuPeriodContents) != "100000" {
-					t.Fatalf("cpu.cfs_period_us file for test plugin should contain 100000.")
-				}
-
-				cpuQuotaContents, err := os.ReadFile(filepath.Join(cgroupsDir, "cpu", testName, "cpu.cfs_quota_us"))
-				if err != nil {
-					t.Fatalf("failed to read cpu.cfs_quota_us file: %v", err)
-				}
-				if string(cpuQuotaContents) != "10000" {
-					t.Fatalf("cpu.cfs_quota_us file for test plugin should contain 10000.")
-				}
+			}
+			// Check that a cgroup.procs file was written with the PID.
+			procsContents, err := os.ReadFile(filepath.Join(cgroupsDir, "cpu", testName, "cgroup.procs"))
+			if err != nil {
+				t.Fatalf("failed to read cgroup.procs file: %v", err)
+			}
+			if string(procsContents) != "1" {
+				t.Fatalf("cgroup.procs file for test plugin should contain 1.")
 			}
 
 			// Now check the fake memory controller.
-			if test.opts.hasMemoryController {
-				files, err := os.ReadDir(filepath.Join(cgroupsDir, "memory"))
-				if err != nil {
-					t.Fatalf("failed to read cpu directory: %v", err)
-				}
+			files, err = os.ReadDir(filepath.Join(cgroupsDir, "memory"))
+			if err != nil {
+				t.Fatalf("failed to read cpu directory: %v", err)
+			}
 
-				// See if a group was created for it.
-				var passed bool
-				for _, file := range files {
-					if !file.IsDir() {
-						continue
-					}
-					if file.Name() == testName {
-						passed = true
-						break
-					}
+			// See if a group was created for it.
+			for _, file := range files {
+				if file.IsDir() {
+					continue
 				}
-				if !passed {
-					t.Fatalf("plugin cgroup %q for memory was not created", testName)
+				if file.Name() != testName {
+					t.Fatalf("plugin cgroup %q for memory was not created", file.Name())
 				}
+			}
 
-				// Check that a cgroup.procs file was written with the PID.
-				procsContents, err := os.ReadFile(filepath.Join(cgroupsDir, "memory", testName, "cgroup.procs"))
-				if err != nil {
-					t.Fatalf("failed to read cgroup.procs file: %v", err)
-				}
-				if string(procsContents) != "1" {
-					t.Fatalf("cgroup.procs file for test plugin should contain 1.")
-				}
+			// Check that a cgroup.procs file was written with the PID.
+			procsContents, err = os.ReadFile(filepath.Join(cgroupsDir, "memory", testName, "cgroup.procs"))
+			if err != nil {
+				t.Fatalf("failed to read cgroup.procs file: %v", err)
+			}
+			if string(procsContents) != "1" {
+				t.Fatalf("cgroup.procs file for test plugin should contain 1.")
+			}
 
-				// Verify the memory file contains the correct contents.
-				memoryContents, err := os.ReadFile(filepath.Join(cgroupsDir, "memory", testName, "memory.limit_in_bytes"))
-				if err != nil {
-					t.Fatalf("failed to read memory.max file: %v", err)
-				}
-				if string(memoryContents) != "50000" {
-					t.Fatalf("memory.max file for test plugin should contain 50000.")
-				}
+			// Verify the memory file contains the correct contents.
+			memoryContents, err := os.ReadFile(filepath.Join(cgroupsDir, "memory", testName, "memory.limit_in_bytes"))
+			if err != nil {
+				t.Fatalf("failed to read memory.max file: %v", err)
+			}
+			if string(memoryContents) != "50000" {
+				t.Fatalf("memory.max file for test plugin should contain 50000.")
+			}
+
+			// Verify both CPU files.
+			cpuPeriodContents, err := os.ReadFile(filepath.Join(cgroupsDir, "cpu", testName, "cpu.cfs_period_us"))
+			if err != nil {
+				t.Fatalf("failed to read cpu.cfs_period_us file: %v", err)
+			}
+			if string(cpuPeriodContents) != "100000" {
+				t.Fatalf("cpu.cfs_period_us file for test plugin should contain 100000.")
+			}
+
+			cpuQuotaContents, err := os.ReadFile(filepath.Join(cgroupsDir, "cpu", testName, "cpu.cfs_quota_us"))
+			if err != nil {
+				t.Fatalf("failed to read cpu.cfs_quota_us file: %v", err)
+			}
+			if string(cpuQuotaContents) != "10000" {
+				t.Fatalf("cpu.cfs_quota_us file for test plugin should contain 10000.")
 			}
 		})
 	}
@@ -320,8 +287,9 @@ func TestApplyResourceConstraintsV1(t *testing.T) {
 
 func TestApplyResourceConstraintsV2(t *testing.T) {
 	tests := []struct {
-		name string
-		opts constraintTestOpts
+		name      string
+		opts      constraintTestOpts
+		expectErr bool
 	}{
 		{
 			name: "success",
@@ -329,32 +297,22 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 				cgroupVersion:       2,
 				hasCPUController:    true,
 				hasMemoryController: true,
-				hasPidsController:   true,
 			},
 		},
 		{
-			name: "miss-cpu-controller",
-			opts: constraintTestOpts{cgroupVersion: 2, hasMemoryController: true, hasPidsController: true},
+			name:      "miss-cpu-controller",
+			opts:      constraintTestOpts{cgroupVersion: 2, hasMemoryController: true},
+			expectErr: true,
 		},
 		{
-			name: "miss-memory-controller",
-			opts: constraintTestOpts{cgroupVersion: 2, hasCPUController: true, hasPidsController: true},
+			name:      "miss-memory-controller",
+			opts:      constraintTestOpts{cgroupVersion: 2, hasCPUController: true},
+			expectErr: true,
 		},
 		{
-			name: "miss-pids-controller",
-			opts: constraintTestOpts{
-				cgroupVersion:       2,
-				hasCPUController:    true,
-				hasMemoryController: true,
-			},
-		},
-		{
-			name: "miss-cpu-and-memory-controllers",
-			opts: constraintTestOpts{cgroupVersion: 2, hasPidsController: true},
-		},
-		{
-			name: "miss-all-controllers",
-			opts: constraintTestOpts{cgroupVersion: 2},
+			name:      "miss-cpu-and-memory-controllers",
+			opts:      constraintTestOpts{cgroupVersion: 2},
+			expectErr: true,
 		},
 	}
 
@@ -366,7 +324,13 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 
 			err := c.Apply(testConstraint)
 			if err != nil {
-				t.Fatalf("applyResourceConstraints(ctx, %+v) returned unexpected err %v, expected nil", testConstraint, err)
+				if !test.expectErr {
+					t.Fatalf("applyResourceConstraints(ctx, %+v) returned unexpected err %v, expected nil", testConstraint, err)
+				}
+				return
+			}
+			if test.expectErr {
+				t.Fatalf("applyResourceConstraints(ctx, %+v) returned nil, expected err", testConstraint)
 			}
 
 			// Check that the mock test cgroup fs has the correct files written.
@@ -388,12 +352,7 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 				}
 			}
 			if !foundFile {
-				if test.opts.hasPidsController && (test.opts.hasCPUController || test.opts.hasMemoryController) {
-					t.Fatalf("cgroup directory for test plugin %q was not created", testName)
-				}
-				// If neither cpu nor memory controllers are enabled, then the cgroup
-				// directory should not be created.
-				return
+				t.Fatalf("cgroup directory for test plugin %q was not created", testName)
 			}
 
 			// Verify the procs file.
@@ -407,28 +366,20 @@ func TestApplyResourceConstraintsV2(t *testing.T) {
 
 			// Verify the memory.max file.
 			memoryContents, err := os.ReadFile(filepath.Join(cgroupsDir, guestAgentCgroupDir, testName, "memory.max"))
-			if err != nil && test.opts.hasMemoryController {
+			if err != nil {
 				t.Fatalf("failed to read memory.max file for test plugin: %v", err)
-			} else if !test.opts.hasMemoryController && (err == nil || !errors.Is(err, os.ErrNotExist)) {
-				t.Fatalf("memory.max file for the test plugin should not exist if the memory controller is not enabled.")
 			}
-			if test.opts.hasMemoryController {
-				if string(memoryContents) != "50000" {
-					t.Fatalf("memory.max file got %s, expected 50000", string(memoryContents))
-				}
+			if string(memoryContents) != "50000" {
+				t.Fatalf("memory.max file got %s, expected 50000", string(memoryContents))
 			}
 
 			// Verify the cpu.max file.
 			cpuMaxContents, err := os.ReadFile(filepath.Join(cgroupsDir, guestAgentCgroupDir, testName, "cpu.max"))
-			if err != nil && test.opts.hasCPUController {
+			if err != nil {
 				t.Fatalf("failed to read cpu.max file for test plugin: %v", err)
-			} else if !test.opts.hasCPUController && (err == nil || !errors.Is(err, os.ErrNotExist)) {
-				t.Fatalf("cpu.max file for the test plugin should not exist if the cpu controller is not enabled.")
 			}
-			if test.opts.hasCPUController {
-				if string(cpuMaxContents) != "10000 100000" {
-					t.Fatalf("cpu.max file got %s, expected \"10000 100000\".", string(cpuMaxContents))
-				}
+			if string(cpuMaxContents) != "10000 100000" {
+				t.Fatalf("cpu.max file got %s, expected \"10000 100000\".", string(cpuMaxContents))
 			}
 		})
 	}
