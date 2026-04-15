@@ -198,15 +198,34 @@ func (m *PluginManager) generateInstallWorkflow(ctx context.Context, req *acmpb.
 	}
 
 	steps = append(steps, m.preLaunchWorkflow(ctx, req)...)
-	steps = append(steps, m.newLaunchStep(req))
+	switch req.GetManifest().GetPluginType() {
+	case acmpb.PluginType_DAEMON:
+		steps = append(steps, m.newDaemonLaunchStep(req))
+	case acmpb.PluginType_ONE_SHOT:
+		steps = append(steps, m.newOneShotStep(req))
+	default:
+		galog.Errorf("Unexpected plugin type: %v. Treating it as a DAEMON.", req.GetManifest().GetPluginType())
+		steps = append(steps, m.newDaemonLaunchStep(req))
+	}
 
 	return steps
 }
 
-func (m *PluginManager) newLaunchStep(req *acmpb.ConfigurePluginStates_ConfigurePlugin) Step {
+func pluginEntryPath(statePath string, req *acmpb.ConfigurePluginStates_ConfigurePlugin) string {
+	if req.GetManifest().GetPluginInstallationType() == acmpb.PluginInstallationType_LOCAL_INSTALLATION {
+		// Since the plugin is already present on disk, entry point is not prepended
+		// with the state directory as is done for dynamic plugins.
+		return req.GetPlugin().GetEntryPoint()
+	}
+
+	return filepath.Join(statePath, req.GetPlugin().GetEntryPoint())
+}
+
+func (m *PluginManager) newDaemonLaunchStep(req *acmpb.ConfigurePluginStates_ConfigurePlugin) Step {
 	state := pluginInstallPath(req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
-	l := &launchStep{
-		entryPath:      filepath.Join(state, req.GetPlugin().GetEntryPoint()),
+	entryPath := pluginEntryPath(state, req)
+	l := &daemonLaunchStep{
+		entryPath:      entryPath,
 		maxMemoryUsage: req.GetManifest().GetMaxMemoryUsageBytes(),
 		maxCPUUsage:    req.GetManifest().GetMaxCpuUsagePercentage(),
 		startAttempts:  int(req.GetManifest().GetStartAttemptCount()),
@@ -214,13 +233,16 @@ func (m *PluginManager) newLaunchStep(req *acmpb.ConfigurePluginStates_Configure
 		extraArgs:      req.GetPlugin().GetArguments(),
 	}
 
-	if req.GetManifest().GetPluginInstallationType() == acmpb.PluginInstallationType_LOCAL_INSTALLATION {
-		// Since plugin is already present on disk entry point is not prepended with
-		// state directory (install path as its done for dynamic plugins).
-		l.entryPath = req.GetPlugin().GetEntryPoint()
-	}
-
 	return l
+}
+
+func (m *PluginManager) newOneShotStep(req *acmpb.ConfigurePluginStates_ConfigurePlugin) Step {
+	state := pluginInstallPath(req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
+	entryPath := pluginEntryPath(state, req)
+	return &oneShotLaunchStep{
+		entryPath: entryPath,
+		extraArgs: req.GetPlugin().GetArguments(),
+	}
 }
 
 // relaunchWorkflow generates the workflow for a re-launching a plugin.
@@ -229,7 +251,7 @@ func relaunchWorkflow(ctx context.Context, p *Plugin) []Step {
 	// Relaunch means we're not removing plugin, always set cleanup to false.
 	s := &stopStep{cleanup: false}
 
-	l := &launchStep{
+	l := &daemonLaunchStep{
 		entryPath:      p.EntryPath,
 		maxMemoryUsage: p.Manifest.MaxMemoryUsage,
 		maxCPUUsage:    p.Manifest.MaxCPUUsage,

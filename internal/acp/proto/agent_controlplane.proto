@@ -202,6 +202,8 @@ message CurrentPluginStates {
     // Installing or failed to install.
     INSTALLING = 6;
     INSTALL_FAILED = 7;
+    EXECUTION_COMPLETED = 8;
+    EXECUTION_FAILED = 9;
   }
 
   message Status {
@@ -467,6 +469,12 @@ message PluginEventMessage {
     // agent will run restart workflow on the plugin with new config and
     // will not trigger this event.
     PLUGIN_CONFIG_APPLY_FAILED = 13;
+    // Indicates that the plugin finished execution gracefully and is no longer
+    // running.
+    PLUGIN_EXECUTION_COMPLETED = 14;
+    // Indicates that the plugin finished execution in a failure state and is no
+    // longer running.
+    PLUGIN_EXECUTION_FAILED = 15;
   }
 
   // EventType categorizes the event (e.g., CRASH, STOP, START, INSTALL_FAILED).

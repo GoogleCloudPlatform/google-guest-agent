@@ -693,7 +693,9 @@ func (m *PluginManager) runlaunchPluginSteps(ctx context.Context, plugin *Plugin
 		return fmt.Errorf("install plugin %q: %w", plugin.FullName(), err)
 	}
 
-	m.startPluginSchedulers(ctx, plugin)
+	if !plugin.IsOneShot() {
+		m.startPluginSchedulers(ctx, plugin)
+	}
 	sendEvent(ctx, plugin, acpb.PluginEventMessage_PLUGIN_INSTALLED, "Successfully installed the plugin.")
 
 	galog.Infof("Successfully installed plugin %q", plugin.FullName())
@@ -746,7 +748,7 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 		return fmt.Errorf("failed to remove plugin: %w", err)
 	}
 
-	return m.runlaunchPluginSteps(ctx, plugin, []Step{m.newLaunchStep(req)})
+	return m.runlaunchPluginSteps(ctx, plugin, []Step{m.newDaemonLaunchStep(req)})
 }
 
 // stopAndRemovePlugin stops the given plugin, all of its schedulers and removes
@@ -1182,7 +1184,8 @@ func (m *PluginManager) VerifyPluginRunning(ctx context.Context, plugin *acpb.Co
 	var found bool
 	for _, currPlugin := range currPlugins {
 		if currPlugin.Name == plugin.GetPlugin().GetName() {
-			if currPlugin.State() != acpb.CurrentPluginStates_RUNNING || currPlugin.Revision != plugin.GetPlugin().GetRevisionId() {
+			stateIsIntended := currPlugin.State() == acpb.CurrentPluginStates_RUNNING || currPlugin.State() == acpb.CurrentPluginStates_EXECUTION_COMPLETED
+			if !stateIsIntended || currPlugin.Revision != plugin.GetPlugin().GetRevisionId() {
 				return fmt.Errorf("plugin %q with revision %q is not running, current status: %+v", plugin.GetPlugin().GetName(), plugin.GetPlugin().GetRevisionId(), currPlugin.State())
 			}
 			found = true
