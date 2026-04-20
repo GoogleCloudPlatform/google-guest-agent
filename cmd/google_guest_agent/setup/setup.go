@@ -185,9 +185,6 @@ func Run(ctx context.Context, c Config) error {
 				// Only enable core plugin locally if core plugin initialization is not
 				// skipped and local launch is enabled.
 				Enable: !c.SkipCorePlugin,
-				OnReady: func(ctx context.Context) {
-					coreReady(ctx, c)
-				},
 			},
 		}); err != nil {
 			return fmt.Errorf("start local plugins: %w", err)
