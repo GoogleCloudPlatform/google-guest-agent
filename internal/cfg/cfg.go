@@ -66,7 +66,7 @@ log_verbosity = 0
 log_file =
 on_demand_plugins = true
 acs_client = true
-enable_local_plugins = true
+enable_local_plugins = false
 
 [Telemetry]
 metric_collection_enabled = true
