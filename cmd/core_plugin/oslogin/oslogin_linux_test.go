@@ -730,9 +730,10 @@ func TestSetupOpenSSH(t *testing.T) {
 	createTestFiles(t, module, osloginTestFileOpts{testSSHD: true})
 
 	tests := []struct {
-		name          string
-		desc          string
-		expectedLines []string
+		name            string
+		desc            string
+		certAuthEnabled bool
+		expectedLines   []string
 	}{
 		{
 			name: "no_cert_no_2fa",
@@ -745,6 +746,7 @@ func TestSetupOpenSSH(t *testing.T) {
 				}
 			}
 			`,
+			certAuthEnabled: true,
 			expectedLines: []string{
 				"TrustedUserCAKeys /etc/ssh/oslogin_trustedca.pub",
 				"AuthorizedPrincipalsCommand /usr/bin/google_authorized_principals %u %k",
@@ -755,7 +757,8 @@ func TestSetupOpenSSH(t *testing.T) {
 			},
 		},
 		{
-			name: "cert",
+			name:            "cert",
+			certAuthEnabled: true,
 			desc: `
 			{
 				"instance": {
@@ -774,7 +777,8 @@ func TestSetupOpenSSH(t *testing.T) {
 			},
 		},
 		{
-			name: "2fa",
+			name:            "2fa",
+			certAuthEnabled: true,
 			desc: `
 			{
 				"instance": {
@@ -799,7 +803,8 @@ func TestSetupOpenSSH(t *testing.T) {
 			},
 		},
 		{
-			name: "cert_and_2fa",
+			name:            "cert_and_2fa",
+			certAuthEnabled: true,
 			desc: `
 			{
 				"instance": {
@@ -823,7 +828,8 @@ func TestSetupOpenSSH(t *testing.T) {
 			},
 		},
 		{
-			name: "sk",
+			name:            "sk",
+			certAuthEnabled: true,
 			desc: `
 			{
 				"instance": {
@@ -840,6 +846,46 @@ func TestSetupOpenSSH(t *testing.T) {
 				"Include /var/google-users.d/*",
 			},
 		},
+		{
+			name:            "cert_disabled",
+			certAuthEnabled: false,
+			desc: `
+			{
+				"instance": {
+					"attributes": {
+						"enable-oslogin": "true"
+					}
+				}
+			}
+			`,
+			expectedLines: []string{
+				fmt.Sprintf("AuthorizedKeysCommand %s", module.authorizedKeysCommandPaths[0]),
+				"AuthorizedKeysCommandUser root",
+				"Include /var/google-users.d/*",
+			},
+		},
+		{
+			name:            "cert_metadata_disabled_cert_auth_enabled",
+			certAuthEnabled: true,
+			desc: `
+			{
+				"instance": {
+					"attributes": {
+						"enable-oslogin": "true",
+						"enable-oslogin-certificates": "false"
+					}
+				}
+			}
+			`,
+			expectedLines: []string{
+				"TrustedUserCAKeys /etc/ssh/oslogin_trustedca.pub",
+				"AuthorizedPrincipalsCommand /usr/bin/google_authorized_principals %u %k",
+				"AuthorizedPrincipalsCommandUser root",
+				fmt.Sprintf("AuthorizedKeysCommand %s", module.authorizedKeysCommandPaths[0]),
+				"AuthorizedKeysCommandUser root",
+				"Include /var/google-users.d/*",
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -848,6 +894,11 @@ func TestSetupOpenSSH(t *testing.T) {
 			if err != nil {
 				t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", test.desc, err)
 			}
+
+			if err := cfg.Load(nil); err != nil {
+				t.Fatalf("Failed to load config: %v", err)
+			}
+			cfg.Retrieve().OSLogin.CertAuthentication = test.certAuthEnabled
 
 			err = module.setupOpenSSH(desc)
 			if err != nil {
