@@ -695,9 +695,6 @@ func TestInstallPlugin(t *testing.T) {
 	runner.pid = -6666
 	defer server.Close()
 
-	orig := pluginManager
-	t.Cleanup(func() { pluginManager = orig })
-
 	req := &acpb.ConfigurePluginStates_ConfigurePlugin{
 		Action: acpb.ConfigurePluginStates_INSTALL,
 		Plugin: &acpb.ConfigurePluginStates_Plugin{
@@ -755,7 +752,6 @@ func TestInstallPlugin(t *testing.T) {
 			if tc.local {
 				req.Manifest.PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
 			}
-			pluginManager = pm
 			err := pm.installPlugin(ctx, req, tc.local)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("installPlugin(ctx, %+v) = error: %v, want error: %t", req, err, tc.wantErr)
