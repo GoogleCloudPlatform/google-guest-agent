@@ -28,7 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/go-ini/ini"
+	"gopkg.in/ini.v1"
 )
 
 const (

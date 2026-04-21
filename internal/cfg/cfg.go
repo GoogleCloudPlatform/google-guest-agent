@@ -26,7 +26,7 @@ import (
 	"text/template"
 
 	"github.com/GoogleCloudPlatform/galog"
-	"github.com/go-ini/ini"
+	"gopkg.in/ini.v1"
 )
 
 var (

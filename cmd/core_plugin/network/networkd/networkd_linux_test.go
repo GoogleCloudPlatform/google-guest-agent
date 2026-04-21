@@ -34,7 +34,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
-	"github.com/go-ini/ini"
+	"gopkg.in/ini.v1"
 )
 
 // mockSystemd is the test systemd-networkd implementation to use for testing.
