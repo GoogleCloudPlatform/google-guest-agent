@@ -191,19 +191,19 @@ func (u *unpackStep) Run(ctx context.Context, p *Plugin) error {
 }
 
 // generateInstallWorkflow generates the workflow for a plugin installation.
-func (m *PluginManager) generateInstallWorkflow(ctx context.Context, req *acmpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) []Step {
+func (m *PluginManager) generateInstallWorkflow(ctx context.Context, req *acmpb.ConfigurePluginStates_ConfigurePlugin) []Step {
 	var steps []Step
 	if req.GetAction() != acmpb.ConfigurePluginStates_INSTALL {
 		return steps
 	}
 
-	steps = append(steps, m.preLaunchWorkflow(ctx, req, localPlugin)...)
-	steps = append(steps, m.newLaunchStep(req, localPlugin))
+	steps = append(steps, m.preLaunchWorkflow(ctx, req)...)
+	steps = append(steps, m.newLaunchStep(req))
 
 	return steps
 }
 
-func (m *PluginManager) newLaunchStep(req *acmpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) Step {
+func (m *PluginManager) newLaunchStep(req *acmpb.ConfigurePluginStates_ConfigurePlugin) Step {
 	state := pluginInstallPath(req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
 	l := &launchStep{
 		entryPath:      filepath.Join(state, req.GetPlugin().GetEntryPoint()),
@@ -214,7 +214,7 @@ func (m *PluginManager) newLaunchStep(req *acmpb.ConfigurePluginStates_Configure
 		extraArgs:      req.GetPlugin().GetArguments(),
 	}
 
-	if localPlugin {
+	if req.GetManifest().GetPluginInstallationType() == acmpb.PluginInstallationType_LOCAL_INSTALLATION {
 		// Since plugin is already present on disk entry point is not prepended with
 		// state directory (install path as its done for dynamic plugins).
 		l.entryPath = req.GetPlugin().GetEntryPoint()
@@ -243,11 +243,11 @@ func relaunchWorkflow(ctx context.Context, p *Plugin) []Step {
 
 // preLaunchWorkflow generates the workflow to run before attempting any action
 // on a plugin revision.
-func (m *PluginManager) preLaunchWorkflow(ctx context.Context, req *acmpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) []Step {
+func (m *PluginManager) preLaunchWorkflow(ctx context.Context, req *acmpb.ConfigurePluginStates_ConfigurePlugin) []Step {
 
 	// Plugins that are already on disk (generally installed by package manager)
 	// don't need download/unpack step, simply launch them.
-	if localPlugin {
+	if req.GetManifest().GetPluginInstallationType() == acmpb.PluginInstallationType_LOCAL_INSTALLATION {
 		return nil
 	}
 

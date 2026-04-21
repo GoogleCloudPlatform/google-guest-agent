@@ -59,9 +59,8 @@ func (m *testPluginManager) ListPluginStates(context.Context, *acpb.ListPluginSt
 	return &acpb.CurrentPluginStates{DaemonPluginStates: states}
 }
 
-func (m *testPluginManager) ConfigurePluginStates(ctx context.Context, req *acpb.ConfigurePluginStates, local bool) {
+func (m *testPluginManager) ConfigurePluginStates(ctx context.Context, req *acpb.ConfigurePluginStates) {
 	m.seenRequest = req
-	m.seenLocal = local
 	m.plugins = m.setOnInstall
 }
 
@@ -109,13 +108,11 @@ func TestInstall(t *testing.T) {
 		wantErr    bool
 		runError   []bool
 		wantReq    *acpb.ConfigurePluginStates
-		wantLocal  bool
 	}{
 		{
-			desc:      "install_success",
-			wantReq:   wantReq,
-			runError:  []bool{true, false},
-			wantLocal: true,
+			desc:     "install_success",
+			wantReq:  wantReq,
+			runError: []bool{true, false},
 		},
 		{
 			desc:       "install_skipped",
@@ -123,11 +120,10 @@ func TestInstall(t *testing.T) {
 			shouldSkip: true,
 		},
 		{
-			desc:      "install_failure",
-			wantErr:   true,
-			wantLocal: true,
-			runError:  []bool{true, true},
-			wantReq:   wantReq,
+			desc:     "install_failure",
+			wantErr:  true,
+			runError: []bool{true, true},
+			wantReq:  wantReq,
 		},
 	}
 
@@ -145,10 +141,6 @@ func TestInstall(t *testing.T) {
 			gotErr := install(ctx, testManager, c)
 			if (gotErr != nil) != tc.wantErr {
 				t.Errorf("install(ctx, %+v, %+v) = %v, want error %t", testManager, c, gotErr, tc.wantErr)
-			}
-
-			if testManager.seenLocal != tc.wantLocal {
-				t.Errorf("install(ctx, %+v, %+v) set local to %t, want %t", testManager, c, testManager.seenLocal, tc.wantLocal)
 			}
 
 			if diff := cmp.Diff(tc.wantReq, testManager.seenRequest, protocmp.Transform()); diff != "" {
