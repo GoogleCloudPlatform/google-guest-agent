@@ -160,7 +160,16 @@ func Run(ctx context.Context, c Config) error {
 		galog.Infof("ACS watcher config enabled: %t, service account is present: %t, skipping ACS watcher and handler initialization. On Demand plugins will not be available.", c.EnableACSWatcher, conf.svcActPresent)
 	}
 
-	pm, err := manager.InitPluginManager(ctx, conf.id)
+	pm, err := manager.InitPluginManager(ctx, conf.id, map[string]manager.LocalPluginInstallation{
+		manager.CorePluginName: manager.LocalPluginInstallation{
+			// Only enable core plugin locally if core plugin initialization is not
+			// skipped and local launch is enabled.
+			//
+			// Don't define OnReady callback since the plugin watcher will take care
+			// of running the callback after successful initialization.
+			Enable: !c.SkipCorePlugin,
+		},
+	})
 	if err != nil {
 		return fmt.Errorf("plugin manager initialization: %w", err)
 	}
@@ -180,13 +189,7 @@ func Run(ctx context.Context, c Config) error {
 	}
 
 	if c.EnableLocalPlugins {
-		if err := pm.StartLocalPlugins(ctx, map[string]manager.LocalPluginInstallation{
-			manager.CorePluginName: manager.LocalPluginInstallation{
-				// Only enable core plugin locally if core plugin initialization is not
-				// skipped and local launch is enabled.
-				Enable: !c.SkipCorePlugin,
-			},
-		}); err != nil {
+		if err := pm.StartLocalPlugins(ctx); err != nil {
 			return fmt.Errorf("start local plugins: %w", err)
 		}
 	} else {

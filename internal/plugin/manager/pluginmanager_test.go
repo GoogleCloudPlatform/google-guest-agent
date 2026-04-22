@@ -335,7 +335,7 @@ func TestInitPluginManagerError(t *testing.T) {
 		t.Fatalf("RegisterCmdHandler(ctx) failed unexpectedly with error: %v", err)
 	}
 	id := "5555555555"
-	if _, err := InitPluginManager(ctx, id); err == nil {
+	if _, err := InitPluginManager(ctx, id, nil); err == nil {
 		t.Errorf("InitPluginManager(ctx) succeeded, want register command handler error")
 	}
 	if got := Instance().currentInstanceID(); got != id {
@@ -367,7 +367,7 @@ func TestInitPluginManager(t *testing.T) {
 		t.Fatalf("plugin.Store() failed unexpectedly with error: %v", err)
 	}
 
-	pm, err := InitPluginManager(ctx, "1234567890")
+	pm, err := InitPluginManager(ctx, "1234567890", nil)
 	if err != nil {
 		t.Fatalf("InitPluginManager(ctx) failed unexpectedly with error: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestInitPluginManagerConfig(t *testing.T) {
 			t.Cleanup(func() { isUDSSupported = oldIsUDSSupported })
 			isUDSSupported = func() bool { return tc.isUDSSupported }
 
-			pm, err := InitPluginManager(ctx, "1234567890")
+			pm, err := InitPluginManager(ctx, "1234567890", nil)
 			if err != nil {
 				t.Fatalf("InitPluginManager(ctx) failed unexpectedly with error: %v", err)
 			}
@@ -1762,7 +1762,6 @@ func TestStartLocalPlugin(t *testing.T) {
 		name     string
 		url      string
 		disabled bool
-		onReady  bool
 	}{
 		{
 			name: "success",
@@ -1771,10 +1770,6 @@ func TestStartLocalPlugin(t *testing.T) {
 		{
 			name:     "disabled",
 			disabled: true,
-		},
-		{
-			name:    "on-ready",
-			onReady: true,
 		},
 	}
 
@@ -1833,42 +1828,33 @@ func TestStartLocalPlugin(t *testing.T) {
 			}
 			pluginManager = pm
 
-			var onReadyCalled bool
 			// Set the installations map to disable the plugin if needed, and set the
 			// on-ready callback if needed.
 			installations := make(map[string]LocalPluginInstallation)
-			if tc.disabled || tc.onReady {
+			if tc.disabled {
 				localInstallation := LocalPluginInstallation{
 					Enable: !tc.disabled,
 				}
-				if tc.onReady {
-					localInstallation.OnReady = func(context.Context) {
-						onReadyCalled = true
-					}
-				}
 				installations["PluginA"] = localInstallation
 			}
+			pm.installations = installations
 
 			// Start the local plugins for the test.
-			if err := pm.StartLocalPlugins(ctx, installations); err != nil {
-				t.Fatalf("StartLocalPlugins(ctx, %+v) = error: %v, want no error", installations, err)
+			if err := pm.StartLocalPlugins(ctx); err != nil {
+				t.Fatalf("StartLocalPlugins(ctx) = error: %v, want no error", err)
 			}
 
 			// Fresh install should not have any pending plugins.
 			if len(seenPendingPlugins.revisions) != 0 || len(seenPendingPlugins.status) != 0 {
-				t.Errorf("StartLocalPlugins(ctx, %+v) set pending plugins = %+v, want empty revision and status map", installations, seenPendingPlugins)
+				t.Errorf("StartLocalPlugins(ctx) set pending plugins = %+v, want empty revision and status map", seenPendingPlugins)
 			}
 
 			// If the plugin is disabled or an error is expected, the plugin list should be empty.
 			if tc.disabled {
 				if len(pm.plugins) != 0 {
-					t.Errorf("StartLocalPlugins(ctx, %+v) = %+v, want no plugin", installations, pm.plugins)
+					t.Errorf("StartLocalPlugins(ctx) = %+v, want no plugin", pm.plugins)
 				}
 				return
-			}
-
-			if tc.onReady && !onReadyCalled {
-				t.Errorf("StartLocalPlugins(ctx, %+v) did not call on-ready callback", installations)
 			}
 
 			entryPoint := "test-entry-point"
@@ -1885,27 +1871,27 @@ func TestStartLocalPlugin(t *testing.T) {
 			want.Manifest.PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
 
 			if runner.seenCommand != entryPoint {
-				t.Errorf("StartLocalPlugins(ctx, %+v) executed %q, want %q", installations, runner.seenCommand, entryPoint)
+				t.Errorf("StartLocalPlugins(ctx) executed %q, want %q", runner.seenCommand, entryPoint)
 			}
 
 			got, ok := pm.plugins[req.Plugin.Name]
 			if !ok {
-				t.Fatalf("StartLocalPlugins(ctx, %+v) did not create plugin %q", installations, req.Plugin.Name)
+				t.Fatalf("StartLocalPlugins(ctx) did not create plugin %q", req.Plugin.Name)
 			}
 			if diff := cmp.Diff(want, got, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}, Manifest{}), cmpopts.IgnoreFields(ServiceConfig{}, "Simple"), cmpopts.IgnoreFields(Plugin{}, "InstallPath")); diff != "" {
 				t.Errorf("pm.plugins[%s] returned unexpected diff (-want +got):\n%s", req.Plugin.Name, diff)
 			}
 
 			if got.State() != acpb.CurrentPluginStates_RUNNING {
-				t.Errorf("StartLocalPlugins(ctx, %+v) = plugin state %q, want %q", installations, got.State(), acpb.CurrentPluginStates_RUNNING)
+				t.Errorf("StartLocalPlugins(ctx) = plugin state %q, want %q", got.State(), acpb.CurrentPluginStates_RUNNING)
 			}
 
 			if pm.requestCount[acpb.ConfigurePluginStates_INSTALL][true] != 1 {
-				t.Errorf("StartLocalPlugins(ctx, %+v) called ConfigurePluginStates %d times, want 1 time", installations, pm.requestCount[acpb.ConfigurePluginStates_INSTALL][true])
+				t.Errorf("StartLocalPlugins(ctx) called ConfigurePluginStates %d times, want 1 time", pm.requestCount[acpb.ConfigurePluginStates_INSTALL][true])
 			}
 
 			if ps.ctrs[tc.name] != 1 {
-				t.Errorf("StartLocalPlugins(ctx, %+v) called start RPC %d times, want 1 time on plugin %q", installations, ps.ctrs[tc.name], req.Plugin.Name)
+				t.Errorf("StartLocalPlugins(ctx) called start RPC %d times, want 1 time on plugin %q", ps.ctrs[tc.name], req.Plugin.Name)
 			}
 			c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
 			err = retry.Run(ctx, c, func() error {
@@ -1913,7 +1899,7 @@ func TestStartLocalPlugin(t *testing.T) {
 				defer pm.pluginMonitorMu.Unlock()
 				_, ok := pm.pluginMonitors[want.FullName()]
 				if !ok {
-					return fmt.Errorf("StartLocalPlugins(ctx, %+v) did not create monitor for plugin %q", installations, req.Plugin.Name)
+					return fmt.Errorf("StartLocalPlugins(ctx) did not create monitor for plugin %q", req.Plugin.Name)
 				}
 				return nil
 			})
