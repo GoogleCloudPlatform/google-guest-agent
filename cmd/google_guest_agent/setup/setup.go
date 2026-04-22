@@ -49,7 +49,7 @@ type PluginManagerInterface interface {
 	// ListPluginStates returns the plugin states and cached health check information.
 	ListPluginStates(context.Context, *acpb.ListPluginStates) *acpb.CurrentPluginStates
 	// ConfigurePluginStates configures the plugin states as stated in the request.
-	ConfigurePluginStates(context.Context, *acpb.ConfigurePluginStates, bool)
+	ConfigurePluginStates(context.Context, *acpb.ConfigurePluginStates)
 	// VerifyPluginRunning verifies that the configured plugins are running.
 	VerifyPluginRunning(context.Context, *acpb.ConfigurePluginStates_ConfigurePlugin) error
 }
@@ -248,9 +248,7 @@ func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 
 	// ConfigurePluginStates will launch the core plugin. This is blocking call
 	// and would wait until request is completed.
-	// Note that core plugin is already present on disk and must pass [true]
-	// to indicate local plugin.
-	pm.ConfigurePluginStates(ctx, req, true)
+	pm.ConfigurePluginStates(ctx, req)
 
 	// As above request is completed this check should pass/fail right away
 	// no need to retry or wait.

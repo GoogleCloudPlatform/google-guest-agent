@@ -185,7 +185,20 @@ func (f *dataFetchers) configurePluginStates(ctx context.Context, msg *acpb.Mess
 		return
 	}
 
-	f.pluginManager.ConfigurePluginStates(ctx, req, false)
+	// Previous versions of the code propagated an implication of
+	// DYNAMIC_INSTALLATION, without checking the request.
+	// We may be able to remove this check entirely if configuration of
+	// non-dynamic plugins via ACS is desired in the future.
+	for _, c := range req.GetConfigurePlugins() {
+		installationType := c.GetManifest().GetPluginInstallationType()
+		if installationType != acppb.PluginInstallationType_DYNAMIC_INSTALLATION {
+			galog.Errorf("Plugin %q specifies a non-DYNAMIC installation type %v in its manifest, but this is not supported.", c.GetPlugin().GetName(), installationType)
+			// Fail the entire request on purpose so we get noticed.
+			return
+		}
+	}
+
+	f.pluginManager.ConfigurePluginStates(ctx, req)
 }
 
 func (f *dataFetchers) listPluginStates(ctx context.Context, msg *acpb.MessageBody) *acppb.CurrentPluginStates {
