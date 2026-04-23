@@ -73,12 +73,10 @@ func (mod *module) setup(ctx context.Context, data any) error {
 		return nil
 	}
 
-	galog.Debugf("Initializing %s module", networkModuleID)
 	var err error
-
+	desc, ok := data.(*metadata.Descriptor)
 	// In normal use cases, the data is not a metadata descriptor. This is just
 	// used for testing so we can avoid doing an actual metadata fetch.
-	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		// This error case should only ever be hit in tests.
 		if mod.skipMDS {
@@ -89,6 +87,13 @@ func (mod *module) setup(ctx context.Context, data any) error {
 			return fmt.Errorf("failed to get metadata descriptor: %v", err)
 		}
 	}
+
+	if desc.AddressManagerDisabled() {
+		galog.Infof("Address manager is disabled, skipping network module setup.")
+		return nil
+	}
+
+	galog.Debugf("Initializing %s module", networkModuleID)
 
 	// Perform early network platform-specific initialization.
 	if err := platformEarlyInit(ctx); err != nil {
