@@ -91,11 +91,17 @@ func moduleSetup(ctx context.Context, data any) error {
 		return nil
 	}
 
-	galog.Debug("Initializing Metadata SSH Key module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("expected metadata descriptor data in moduleSetup call")
 	}
+
+	if desc.AccountManagerDisabled() {
+		galog.Infof("Account manager is disabled, skipping metadata ssh key setup.")
+		return nil
+	}
+
+	galog.Debug("Initializing Metadata SSH Key module.")
 
 	_, errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
 	for _, err := range errs {

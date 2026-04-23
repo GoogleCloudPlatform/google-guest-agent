@@ -97,11 +97,17 @@ func (mod *module) moduleSetup(ctx context.Context, data any) error {
 		return nil
 	}
 
-	galog.Debug("Initializing windows password reset module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("winpass module expects a metadata descriptor in the data pointer")
 	}
+
+	if desc.AccountManagerDisabled() {
+		galog.Infof("Account manager is disabled, skipping windows password reset module setup.")
+		return nil
+	}
+
+	galog.Debug("Initializing windows password reset module.")
 
 	if _, err := mod.setupAccounts(ctx, desc.Instance().Attributes().WindowsKeys()); err != nil {
 		galog.Errorf("failed to reset password: %v", err)
