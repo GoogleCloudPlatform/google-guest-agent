@@ -272,3 +272,18 @@ func TestRunEngine(t *testing.T) {
 		})
 	}
 }
+
+func TestVmInfo_Usernames(t *testing.T) {
+	procs = fakeProcessLister{
+		processes: []ProcessWrapper{
+			&fakeProcess{name: "workload1", username: "test_user"},
+		},
+	}
+	got, err := vmInfo()
+	if err != nil {
+		t.Fatalf("vmInfo() unexpected error: %v", err)
+	}
+	if len(got.Usernames) != 1 || got.Usernames[0] != "test_user" {
+		t.Errorf("vmInfo() Usernames = %v, want [test_user]", got.Usernames)
+	}
+}
