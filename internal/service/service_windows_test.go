@@ -19,7 +19,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
+	"syscall"
 	"testing"
 	"time"
 
@@ -136,6 +138,76 @@ func TestNotInService(t *testing.T) {
 
 	if len(ws.stateTransitions) != 0 {
 		t.Fatalf("stateTransitions = %v, want no transitions for non-service run", ws.stateTransitions)
+	}
+}
+
+func TestShouldHandleSignal(t *testing.T) {
+	tests := []struct {
+		name      string
+		sig       os.Signal
+		isService bool
+		want      bool
+	}{
+		{
+			name:      "SIGTERM_service",
+			sig:       syscall.SIGTERM,
+			isService: true,
+			want:      false,
+		},
+		{
+			name:      "SIGTERM_not_service",
+			sig:       syscall.SIGTERM,
+			isService: false,
+			want:      true,
+		},
+		{
+			name:      "SIGINT_service",
+			sig:       syscall.SIGINT,
+			isService: true,
+			want:      true,
+		},
+		{
+			name:      "SIGINT_not_service",
+			sig:       syscall.SIGINT,
+			isService: false,
+			want:      true,
+		},
+		{
+			name:      "SIGHUP_service",
+			sig:       syscall.SIGHUP,
+			isService: true,
+			want:      true,
+		},
+		{
+			name:      "SIGHUP_not_service",
+			sig:       syscall.SIGHUP,
+			isService: false,
+			want:      true,
+		},
+		{
+			name:      "SIGQUIT_service",
+			sig:       syscall.SIGQUIT,
+			isService: true,
+			want:      true,
+		},
+		{
+			name:      "SIGQUIT_not_service",
+			sig:       syscall.SIGQUIT,
+			isService: false,
+			want:      true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &winService{
+				windowsService: tc.isService,
+			}
+			got := ws.shouldHandleSignal(tc.sig)
+			if got != tc.want {
+				t.Fatalf("shouldHandleSignal(%v) = %v, want: %v", tc.sig, got, tc.want)
+			}
+		})
 	}
 }
 

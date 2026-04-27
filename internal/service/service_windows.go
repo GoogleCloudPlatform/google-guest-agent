@@ -19,6 +19,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
+	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"golang.org/x/sys/windows"
@@ -81,7 +83,7 @@ func (ws *winService) register(ctx context.Context) error {
 
 	if !ws.windowsService {
 		galog.Info("Not running as a Windows service, skipping service registration")
-		return nil
+		return &notRunningAsServiceError{}
 	}
 
 	go func() {
@@ -148,4 +150,23 @@ func (ws *winService) setState(ctx context.Context, state State) error {
 	// deadlock.
 	ws.stateTransitionChan <- state
 	return nil
+}
+
+// handleSIGTERM handles the SIGTERM (and other signals like SIGINT, SIGQUIT,
+// SIGHUP) signal from the OS. If running as a windows service, we ignore the
+// SIGTERM signal and rely on the service manager signal to handle shutdown.
+//
+// Returns true if the application should exit after handling the signal.
+func (ws *winService) shouldHandleSignal(sig os.Signal) bool {
+	// Ignore SIGTERM if running as windows service. We rely on the service
+	// manager signal to handle shutdown. Otherwise, during shutdown, there is a
+	// race condition where Windows sends a SIGTERM signal before the SCM sends its
+	// svc.Shutdown request, in which case the application would exit before
+	// processing the shutdown request. During the shutdown process, this would
+	// result in the SCM thinking the application is unexpectedly terminated,
+	// and try to restart it despite the system shutting down.
+	if sig == syscall.SIGTERM && ws.windowsService {
+		return false
+	}
+	return true
 }

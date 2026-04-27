@@ -17,6 +17,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,6 +48,22 @@ var (
 	serviceManagerSignal = make(chan bool)
 )
 
+// notRunningAsServiceError is returned when the agent is not running as a
+// service and cannot perform service management operations.
+type notRunningAsServiceError struct{}
+
+// Error returns the error message for the notRunningAsServiceError.
+func (e *notRunningAsServiceError) Error() string {
+	return fmt.Sprintf("not running as service")
+}
+
+// Is checks if the error is a notRunningAsServiceError and returns true if it
+// is, false otherwise.
+func (e *notRunningAsServiceError) Is(err error) bool {
+	_, ok := err.(*notRunningAsServiceError)
+	return ok
+}
+
 // serviceHandler is the OS specific implementation interface.
 type serviceHandler interface {
 	// register registers the application into the service manager. It will
@@ -55,6 +73,9 @@ type serviceHandler interface {
 	setState(ctx context.Context, state State) error
 	// serviceID returns the service implementation ID.
 	serviceID() string
+	// shouldHandleSignal handles the SIGTERM (and other signals like SIGINT,
+	// SIGQUIT, SIGHUP) signal from the OS.
+	shouldHandleSignal(os.Signal) bool
 }
 
 // Init initializes the service management channels and signal handling.
@@ -62,16 +83,26 @@ func Init(ctx context.Context, cancel context.CancelFunc, serviceName string) er
 	nativeServiceName = serviceName
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGHUP)
+
+	if err := nativeHandler.register(ctx); err != nil {
+		if errors.Is(err, &notRunningAsServiceError{}) {
+			galog.Infof("Skipping service initialization as the agent is not running as a service.")
+			return nil
+		}
+		return fmt.Errorf("failed to register with service manager: %w", err)
+	}
 	go func() {
 		select {
 		case sig := <-sigChan:
-			galog.Infof("GCE Guest Agent got signal: %d, leaving...", sig)
-			close(sigChan)
-			cancel()
+			if nativeHandler.shouldHandleSignal(sig) {
+				galog.Infof("GCE Guest Agent got signal: %d, leaving...", sig)
+				close(sigChan)
+				cancel()
+			}
 		case <-ctx.Done():
 			break
 		case <-serviceManagerSignal:
-			// Cancels the context case the OS service manager notifies us it's
+			// Cancels the context in case the OS service manager notifies us it's
 			// shutting down/stopping.
 			cancel()
 		}
