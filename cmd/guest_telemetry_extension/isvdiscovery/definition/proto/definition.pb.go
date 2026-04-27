@@ -1078,12 +1078,13 @@ func (*stringMatchCondition_VmField_) isStringMatchCondition_Fields() {}
 // Each version rule command will be run in order until one of them gives back a
 // string that contains a regex match defined by the rule.
 type DiscoveryVersionRule struct {
-	state                  protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Command     VersionCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=guesttelemetryextension.isvdiscovery.VersionCommand"`
-	xxx_hidden_CommandArgs []string               `protobuf:"bytes,2,rep,name=command_args,json=commandArgs,proto3"`
-	xxx_hidden_RegexMatch  string                 `protobuf:"bytes,3,opt,name=regex_match,json=regexMatch,proto3"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	state                                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Command                    VersionCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=guesttelemetryextension.isvdiscovery.VersionCommand"`
+	xxx_hidden_CommandArgs                []string               `protobuf:"bytes,2,rep,name=command_args,json=commandArgs,proto3"`
+	xxx_hidden_RegexMatch                 string                 `protobuf:"bytes,3,opt,name=regex_match,json=regexMatch,proto3"`
+	xxx_hidden_RunAsDiscoveredProcessUser bool                   `protobuf:"varint,4,opt,name=run_as_discovered_process_user,json=runAsDiscoveredProcessUser,proto3"`
+	unknownFields                         protoimpl.UnknownFields
+	sizeCache                             protoimpl.SizeCache
 }
 
 func (x *DiscoveryVersionRule) Reset() {
@@ -1132,6 +1133,13 @@ func (x *DiscoveryVersionRule) GetRegexMatch() string {
 	return ""
 }
 
+func (x *DiscoveryVersionRule) GetRunAsDiscoveredProcessUser() bool {
+	if x != nil {
+		return x.xxx_hidden_RunAsDiscoveredProcessUser
+	}
+	return false
+}
+
 func (x *DiscoveryVersionRule) SetCommand(v VersionCommand) {
 	x.xxx_hidden_Command = v
 }
@@ -1142,6 +1150,10 @@ func (x *DiscoveryVersionRule) SetCommandArgs(v []string) {
 
 func (x *DiscoveryVersionRule) SetRegexMatch(v string) {
 	x.xxx_hidden_RegexMatch = v
+}
+
+func (x *DiscoveryVersionRule) SetRunAsDiscoveredProcessUser(v bool) {
+	x.xxx_hidden_RunAsDiscoveredProcessUser = v
 }
 
 type DiscoveryVersionRule_builder struct {
@@ -1155,6 +1167,8 @@ type DiscoveryVersionRule_builder struct {
 	// the string that contains the version.  This will be further parsed to only
 	// get numerical values.
 	RegexMatch string
+	// If true, use su to run the command as the discovered process user.
+	RunAsDiscoveredProcessUser bool
 }
 
 func (b0 DiscoveryVersionRule_builder) Build() *DiscoveryVersionRule {
@@ -1164,6 +1178,7 @@ func (b0 DiscoveryVersionRule_builder) Build() *DiscoveryVersionRule {
 	x.xxx_hidden_Command = b.Command
 	x.xxx_hidden_CommandArgs = b.CommandArgs
 	x.xxx_hidden_RegexMatch = b.RegexMatch
+	x.xxx_hidden_RunAsDiscoveredProcessUser = b.RunAsDiscoveredProcessUser
 	return m0
 }
 
@@ -1344,12 +1359,13 @@ const file_isvdiscovery_definition_definition_proto_rawDesc = "" +
 	"VM_OS_NAME\x10\x03\x12\x0f\n" +
 	"\vVM_CLI_ARGS\x10\x04\x12\x0f\n" +
 	"\vVM_ENV_VARS\x10\x05B\b\n" +
-	"\x06fields\"\xaa\x01\n" +
+	"\x06fields\"\xee\x01\n" +
 	"\x14DiscoveryVersionRule\x12N\n" +
 	"\acommand\x18\x01 \x01(\x0e24.guesttelemetryextension.isvdiscovery.VersionCommandR\acommand\x12!\n" +
 	"\fcommand_args\x18\x02 \x03(\tR\vcommandArgs\x12\x1f\n" +
 	"\vregex_match\x18\x03 \x01(\tR\n" +
-	"regexMatch\"j\n" +
+	"regexMatch\x12B\n" +
+	"\x1erun_as_discovered_process_user\x18\x04 \x01(\bR\x1arunAsDiscoveredProcessUser\"j\n" +
 	"\x0fDiscoveryResult\x12W\n" +
 	"\rdetected_data\x18\x01 \x03(\v22.guesttelemetryextension.isvdiscovery.DetectedDataR\fdetectedData\"<\n" +
 	"\fDetectedData\x12\x12\n" +
