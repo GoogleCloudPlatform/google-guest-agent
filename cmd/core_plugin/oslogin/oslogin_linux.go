@@ -163,7 +163,7 @@ var (
 	osloginConfigOpts = textconfig.Options{
 		Delimiters: &textconfig.Delimiter{
 			Start: "#### Google OS Login control. Do not edit this section. ####",
-			End:   "#### End Google OS Login control section. ####",
+			End:   "#### End Google OS Login control section. ####\n",
 		},
 	}
 
@@ -503,15 +503,20 @@ func (mod *osloginModule) setupOpenSSH(desc *metadata.Descriptor) error {
 
 	cfg := cfg.Retrieve()
 	certReq := desc.CertRequiredEnabled()
+	skEnabled := desc.SecurityKeyEnabled()
 	// Certificates can be used to bypass OS Login security key authentication. Certificate based
 	// authentication will only be enabled if security keys are not enabled.
-	if (certReq || cfg.OSLogin.CertAuthentication) && !desc.SecurityKeyEnabled() {
+	if certReq && !skEnabled {
 		// Add the relevant certificate authority keys.
 		block.Append("TrustedUserCAKeys", defaultPipePath)
 		block.Append("AuthorizedPrincipalsCommand", "/usr/bin/google_authorized_principals %u %k")
 		block.Append("AuthorizedPrincipalsCommandUser", "root")
-	}
-	if !certReq && cfg.OSLogin.CertAuthentication {
+	} else {
+		if cfg.OSLogin.CertAuthentication && !skEnabled {
+			block.Append("TrustedUserCAKeys", defaultPipePath)
+			block.Append("AuthorizedPrincipalsCommand", "/usr/bin/google_authorized_principals %u %k")
+			block.Append("AuthorizedPrincipalsCommandUser", "root")
+		}
 		block.Append("AuthorizedKeysCommand", authorizedKeysCommand)
 		block.Append("AuthorizedKeysCommandUser", "root")
 	}
