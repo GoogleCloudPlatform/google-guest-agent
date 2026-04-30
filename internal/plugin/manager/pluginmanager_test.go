@@ -539,7 +539,7 @@ func TestConfigurePluginStates(t *testing.T) {
 	pm := &PluginManager{plugins: m, inProgressPluginRequests: make(map[string]bool), requestCount: make(map[acpb.ConfigurePluginStates_Action]map[bool]int)}
 
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
-	pm.ConfigurePluginStates(ctx, req, false)
+	pm.ConfigurePluginStates(ctx, req)
 	// Should be a no-op.
 	if diff := cmp.Diff(m, pm.plugins, cmpopts.IgnoreUnexported(Plugin{})); diff != "" {
 		t.Errorf("ConfigurePluginStates(ctx, %+v) returned diff (-want +got):\n%s", req, diff)
@@ -604,11 +604,10 @@ func installSetup(t *testing.T, ps *testPluginServer, addr string) (*httptest.Se
 
 func TestSetMetricConfig(t *testing.T) {
 	tests := []struct {
-		desc        string
-		req         *acpb.ConfigurePluginStates_ConfigurePlugin
-		localPlugin bool
-		want        *Plugin
-		capacity    uint
+		desc     string
+		req      *acpb.ConfigurePluginStates_ConfigurePlugin
+		want     *Plugin
+		capacity uint
 	}{
 		{
 			desc: "plugin_defaults",
@@ -717,24 +716,26 @@ func TestInstallPlugin(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		url     string
-		local   bool
-		wantErr bool
+		name             string
+		url              string
+		installationType acpb.PluginInstallationType
+		wantErr          bool
 	}{
 		{
-			name:    "success_dynamic_plugin",
-			url:     server.URL,
-			wantErr: false,
+			name:             "success_dynamic_plugin",
+			url:              server.URL,
+			installationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+			wantErr:          false,
 		},
 		{
-			name:    "success_local_plugin",
-			local:   true,
-			wantErr: false,
+			name:             "success_local_plugin",
+			installationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+			wantErr:          false,
 		},
 		{
-			name:    "failure",
-			wantErr: true,
+			name:             "failure",
+			installationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+			wantErr:          true,
 		},
 	}
 
@@ -742,6 +743,7 @@ func TestInstallPlugin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req.Plugin.GcsSignedUrl = tc.url
 			req.Manifest.Config = &acpb.ConfigurePluginStates_Manifest_StringConfig{StringConfig: tc.name}
+			req.Manifest.PluginInstallationType = tc.installationType
 			s := scheduler.Instance()
 			t.Cleanup(s.Stop)
 			pm := &PluginManager{
@@ -752,11 +754,8 @@ func TestInstallPlugin(t *testing.T) {
 				scheduler:                s,
 				inProgressPluginRequests: make(map[string]bool),
 			}
-			if tc.local {
-				req.Manifest.PluginInstallationType = acpb.PluginInstallationType_LOCAL_INSTALLATION
-			}
 			pluginManager = pm
-			err := pm.installPlugin(ctx, req, tc.local)
+			err := pm.installPlugin(ctx, req)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("installPlugin(ctx, %+v) = error: %v, want error: %t", req, err, tc.wantErr)
 			}
@@ -776,16 +775,16 @@ func TestInstallPlugin(t *testing.T) {
 			pluginBase := pluginInstallPath(req.Plugin.Name, req.Plugin.GetRevisionId())
 			entryPoint := "test-entry-point"
 
-			want, err := newPlugin(req, tc.local)
+			want, err := newPlugin(req)
 			if err != nil {
-				t.Fatalf("newPlugin(%+v, %t) failed unexpectedly with error: %v", req, tc.local, err)
+				t.Fatalf("newPlugin(%+v) failed unexpectedly with error: %v", req, err)
 			}
 
 			want.RuntimeInfo.Pid = runner.pid
 			want.Address = addr
 			want.Protocol = udsProtocol
 
-			if !tc.local {
+			if tc.installationType == acpb.PluginInstallationType_DYNAMIC_INSTALLATION {
 				want.InstallPath = pluginBase
 				entryPoint = filepath.Join(pluginBase, entryPoint)
 			}
@@ -886,7 +885,7 @@ func TestUpgradePlugin(t *testing.T) {
 		inProgressPluginRequests: make(map[string]bool),
 	}
 	pluginManager = pm
-	if err := pm.installPlugin(ctx, req, false); err != nil {
+	if err := pm.installPlugin(ctx, req); err != nil {
 		t.Fatalf("installPlugin(ctx, %+v) failed unexpectedly with error: %v", req, err)
 	}
 
@@ -1220,7 +1219,7 @@ func TestUpgradePluginError(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			err := pm.upgradePlugin(context.Background(), tc.req, false)
+			err := pm.upgradePlugin(context.Background(), tc.req)
 			if err == nil {
 				t.Errorf("upgradePlugin(ctx, %+v) succeeded, want error", tc.req)
 			}
@@ -1873,9 +1872,9 @@ func TestStartLocalPlugin(t *testing.T) {
 
 			entryPoint := "test-entry-point"
 
-			want, err := newPlugin(req, true)
+			want, err := newPlugin(req)
 			if err != nil {
-				t.Fatalf("newPlugin(%+v, %t) failed unexpectedly with error: %v", req, true, err)
+				t.Fatalf("newPlugin(%+v) failed unexpectedly with error: %v", req, err)
 			}
 
 			want.RuntimeInfo.Pid = runner.pid

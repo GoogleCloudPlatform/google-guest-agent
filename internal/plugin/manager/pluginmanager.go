@@ -419,12 +419,8 @@ func (m *PluginManager) filterPendingPluginRevisions(ctx context.Context, req *a
 }
 
 // ConfigurePluginStates configures the plugin states as stated in the request.
-// localPlugin identifies if the plugin is a core plugin. These core plugins are
-// installed by package managers but not launched along with Guest Agent binary.
-// Plugin Manager will launch and manage lifecycle of core plugins along with
-// other dynamic plugins.
-func (m *PluginManager) ConfigurePluginStates(ctx context.Context, req *acpb.ConfigurePluginStates, localPlugin bool) {
-	galog.Debugf("Handling configure plugin state request: %+v, local plugin: %t", req, localPlugin)
+func (m *PluginManager) ConfigurePluginStates(ctx context.Context, req *acpb.ConfigurePluginStates) {
+	galog.Debugf("Handling configure plugin state request: %+v", req)
 	wg := sync.WaitGroup{}
 
 	toProcess := m.filterPendingPluginRevisions(ctx, req, true)
@@ -433,7 +429,7 @@ func (m *PluginManager) ConfigurePluginStates(ctx context.Context, req *acpb.Con
 		wg.Add(1)
 		go func(req *acpb.ConfigurePluginStates_ConfigurePlugin) {
 			defer wg.Done()
-			m.configurePlugin(ctx, req, localPlugin)
+			m.configurePlugin(ctx, req)
 		}(req)
 	}
 
@@ -477,7 +473,7 @@ func (m *PluginManager) delete(name string) {
 	delete(m.plugins, name)
 }
 
-func (m *PluginManager) configurePlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) {
+func (m *PluginManager) configurePlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin) {
 	// Regardless of the outcome, we should remove the plugin from the pending
 	// list as request is no longer in process for this plugin.
 	defer func() {
@@ -489,7 +485,7 @@ func (m *PluginManager) configurePlugin(ctx context.Context, req *acpb.Configure
 	var success bool
 	switch req.GetAction() {
 	case acpb.ConfigurePluginStates_INSTALL:
-		if err := m.installPlugin(ctx, req, localPlugin); err != nil {
+		if err := m.installPlugin(ctx, req); err != nil {
 			galog.Errorf("Failed to install plugin %q, revision %q: %v", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId(), err)
 		} else {
 			success = true
@@ -512,7 +508,7 @@ func (m *PluginManager) configurePlugin(ctx context.Context, req *acpb.Configure
 			} else {
 				if localInstallation != nil {
 					galog.Debugf("Local installation of plugin %q with revision %q found, attempting to install.", localInstallation.GetPlugin().GetName(), localInstallation.GetPlugin().GetRevisionId())
-					if err = m.installPlugin(ctx, localInstallation, true); err != nil {
+					if err = m.installPlugin(ctx, localInstallation); err != nil {
 						galog.Errorf("Failed to install local plugin %q, revision %q: %v", localInstallation.GetPlugin().GetName(), localInstallation.GetPlugin().GetRevisionId(), err)
 					}
 				} else {
@@ -610,7 +606,7 @@ func newPluginManifest(req *acpb.ConfigurePluginStates_ConfigurePlugin) (*Manife
 // newPlugin creates a new plugin instance from the request.
 // Rest of the plugin instance values are set at run time when install
 // steps are executed on it.
-func newPlugin(req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) (*Plugin, error) {
+func newPlugin(req *acpb.ConfigurePluginStates_ConfigurePlugin) (*Plugin, error) {
 	p := &Plugin{
 		Name:        req.GetPlugin().GetName(),
 		Revision:    req.GetPlugin().GetRevisionId(),
@@ -639,10 +635,10 @@ func newPlugin(req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool
 
 // installPlugin installs checks if the plugin already exists and does a
 // fresh install or removes existing plugin revision and installs a new one.
-func (m *PluginManager) installPlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) error {
+func (m *PluginManager) installPlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
 	galog.Infof("Installing plugin %q, revision %q", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
 
-	plugin, err := newPlugin(req, localPlugin)
+	plugin, err := newPlugin(req)
 	if err != nil {
 		return fmt.Errorf("failed to create new plugin instance: %w", err)
 	}
@@ -655,10 +651,10 @@ func (m *PluginManager) installPlugin(ctx context.Context, req *acpb.ConfigurePl
 	}
 
 	if currPlugin != nil {
-		return m.upgradePlugin(ctx, req, localPlugin)
+		return m.upgradePlugin(ctx, req)
 	}
 
-	steps := m.generateInstallWorkflow(ctx, req, localPlugin)
+	steps := m.generateInstallWorkflow(ctx, req)
 	return m.runlaunchPluginSteps(ctx, plugin, steps)
 }
 
@@ -708,10 +704,10 @@ func (m *PluginManager) runlaunchPluginSteps(ctx context.Context, plugin *Plugin
 // upgradePlugin handles the plugin revision upgrades. It downloads and unpacks
 // the new plugin revision, stops the old plugin revision and then launches the
 // new one.
-func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, localPlugin bool) error {
+func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin) error {
 	galog.Debugf("Upgrading plugin %q, revision %q", req.GetPlugin().GetName(), req.GetPlugin().GetRevisionId())
 
-	plugin, err := newPlugin(req, localPlugin)
+	plugin, err := newPlugin(req)
 	if err != nil {
 		return fmt.Errorf("failed to create new plugin instance: %w", err)
 	}
@@ -735,7 +731,7 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 	// Two plugin revisions can co-exist on the same host, but only one of them
 	// can be running. Run pre-launch steps on new plugin revision to reduce
 	// plugin downtime and make sure it can be launched.
-	steps := m.preLaunchWorkflow(ctx, req, localPlugin)
+	steps := m.preLaunchWorkflow(ctx, req)
 	galog.Infof("Running pre-upgrade steps for plugin %q", plugin.FullName())
 	if err := plugin.runSteps(ctx, steps); err != nil {
 		sendEvent(ctx, plugin, acpb.PluginEventMessage_PLUGIN_INSTALL_FAILED, fmt.Sprintf("Failed to run pre-upgrade steps: %v", err))
@@ -750,7 +746,7 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 		return fmt.Errorf("failed to remove plugin: %w", err)
 	}
 
-	return m.runlaunchPluginSteps(ctx, plugin, []Step{m.newLaunchStep(req, localPlugin)})
+	return m.runlaunchPluginSteps(ctx, plugin, []Step{m.newLaunchStep(req)})
 }
 
 // stopAndRemovePlugin stops the given plugin, all of its schedulers and removes
@@ -1164,7 +1160,7 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 
 // configureAndVerify configures the plugin and verifies that it is running.
 func (m *PluginManager) configureAndVerifyPlugin(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, config map[string]LocalPluginInstallation) error {
-	m.configurePlugin(ctx, req, true)
+	m.configurePlugin(ctx, req)
 
 	// Verify the plugin is running after installation.
 	if err := m.VerifyPluginRunning(ctx, req); err != nil {

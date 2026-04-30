@@ -322,13 +322,13 @@ func TestGenerateInstallWorkflow(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name      string
-		local     bool
-		wantSteps []Step
+		name             string
+		installationType acmpb.PluginInstallationType
+		wantSteps        []Step
 	}{
 		{
-			name:  "dynamic-plugin",
-			local: false,
+			name:             "dynamic-plugin",
+			installationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION,
 			wantSteps: []Step{
 				&downloadStep{url: "https://test.com", targetPath: archivePath, checksum: "testPluginChecksum", attempts: 1, timeout: 60 * time.Second},
 				&unpackStep{archivePath: archivePath, targetDir: p},
@@ -336,8 +336,8 @@ func TestGenerateInstallWorkflow(t *testing.T) {
 			},
 		},
 		{
-			name:  "local-plugin",
-			local: true,
+			name:             "local-plugin",
+			installationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
 			wantSteps: []Step{
 				&launchStep{entryPath: "testPluginEntryPoint", maxMemoryUsage: 100, startAttempts: 3, protocol: pm.protocol},
 			},
@@ -346,17 +346,20 @@ func TestGenerateInstallWorkflow(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotSteps := pm.generateInstallWorkflow(ctx, req, tc.local)
+			req.Manifest.PluginInstallationType = tc.installationType
+
+			gotSteps := pm.generateInstallWorkflow(ctx, req)
+
 			allow := []any{downloadStep{}, unpackStep{}, launchStep{}}
 			if diff := cmp.Diff(tc.wantSteps, gotSteps, cmp.AllowUnexported(allow...)); diff != "" {
-				t.Errorf("generateInstallWorkflow(ctx, %+v, %t) returned diff (-want +got):\n%s", req, tc.local, diff)
+				t.Errorf("generateInstallWorkflow(ctx, %+v) returned diff (-want +got):\n%s", req, diff)
 			}
 		})
 	}
 
 	req.Action = acmpb.ConfigurePluginStates_REMOVE
 
-	if gotSteps := pm.generateInstallWorkflow(ctx, req, false); gotSteps != nil {
+	if gotSteps := pm.generateInstallWorkflow(ctx, req); gotSteps != nil {
 		t.Errorf("generateInstallWorkflow(ctx, %+v) = %+v, want empty", req, gotSteps)
 	}
 }

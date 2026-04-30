@@ -53,28 +53,23 @@ func (c *fakeConnection) Receive() (*acpb.MessageBody, error) {
 	return nil, nil
 }
 
+func makeEventData(t *testing.T, msg proto.Message) *acpb.MessageBody {
+	msgBytes, err := proto.Marshal(msg)
+	if err != nil {
+		t.Fatalf("proto.Marshal(%v) = %v, want nil", msg, err)
+	}
+	name := string(proto.MessageName(msg))
+	return &acpb.MessageBody{
+		Labels: map[string]string{messageTypeLabel: name},
+		Body:   &apb.Any{Value: msgBytes, TypeUrl: name},
+	}
+}
+
 func TestHandleMessage(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
 	}
 	cfg.Retrieve().Core.ACSClient = true
-
-	testMsg := &acmpb.ConfigurePluginStates{
-		ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{
-			&acmpb.ConfigurePluginStates_ConfigurePlugin{
-				Action: acmpb.ConfigurePluginStates_INSTALL,
-				Plugin: &acmpb.ConfigurePluginStates_Plugin{
-					Name:       "basic_plugin",
-					RevisionId: "1",
-				},
-			},
-		},
-	}
-
-	msgBytes, err := proto.Marshal(testMsg)
-	if err != nil {
-		t.Fatalf("proto.Marshal(%v) = %v, want nil", testMsg, err)
-	}
 
 	v := "1.0.0"
 	info := osinfo.OSInfo{
@@ -114,7 +109,6 @@ func TestHandleMessage(t *testing.T) {
 		messageType string
 		wantLabels  map[string]string
 		want        proto.Message
-		skipCall    bool
 		eventError  error
 		eventData   proto.Message
 		throwErr    bool
@@ -141,31 +135,55 @@ func TestHandleMessage(t *testing.T) {
 			eventData:   &acpb.MessageBody{Labels: map[string]string{messageTypeLabel: listPluginStatesMsg}},
 		},
 		{
-			desc:        "configure_plugin_states",
+			desc:        "configure_plugin_states_empty",
 			messageType: configurePluginStatesMsg,
-			want:        &acmpb.ConfigurePluginStates{},
+			want:        nil,
 			eventData:   &acpb.MessageBody{Labels: map[string]string{messageTypeLabel: configurePluginStatesMsg}},
 		},
 		{
-			desc:        "configure_plugin_states_skip_call",
+			desc:        "configure_plugin_states_single_plugin",
 			messageType: configurePluginStatesMsg,
-			want:        &acmpb.ConfigurePluginStates{},
-			eventData:   &acpb.MessageBody{Labels: map[string]string{messageTypeLabel: configurePluginStatesMsg}, Body: &apb.Any{Value: msgBytes, TypeUrl: string(proto.MessageName(testMsg))}},
+			want:        nil, // Skipped due to plugin manager not being initialized in test.
+			eventData: makeEventData(t, &acmpb.ConfigurePluginStates{
+				ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{
+					&acmpb.ConfigurePluginStates_ConfigurePlugin{
+						Action: acmpb.ConfigurePluginStates_INSTALL,
+						Plugin: &acmpb.ConfigurePluginStates_Plugin{
+							Name:       "basic_plugin",
+							RevisionId: "1",
+						},
+						Manifest: &acmpb.ConfigurePluginStates_Manifest{},
+					},
+				},
+			}),
+		},
+		{
+			desc: "configure_plugin_states_non_dynamic_plugin",
+			eventData: makeEventData(t, &acmpb.ConfigurePluginStates{
+				ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{
+					&acmpb.ConfigurePluginStates_ConfigurePlugin{
+						Action: acmpb.ConfigurePluginStates_INSTALL,
+						Manifest: &acmpb.ConfigurePluginStates_Manifest{
+							PluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+						},
+					},
+				},
+			}),
+			want: nil, // Skipped due to plugin manager not being initialized in test.
 		},
 		{
 			desc:        "unknown_message_type",
 			messageType: "get_agent_stack_trace",
-			skipCall:    true,
+			want:        nil,
 			eventData:   &acpb.MessageBody{Labels: map[string]string{messageTypeLabel: "get_agent_stack_trace"}},
 		},
 		{
 			desc:       "event_error",
-			skipCall:   true,
 			eventError: fmt.Errorf("test_error"),
 		},
 		{
-			desc:     "invalid_event_data",
-			skipCall: true,
+			desc: "invalid_event_data",
+			want: nil,
 		},
 		{
 			desc:      "send_error_continue",
@@ -194,10 +212,18 @@ func TestHandleMessage(t *testing.T) {
 
 			sentMsg := connection.seenMessage
 
-			if tc.skipCall && sentMsg != nil {
-				t.Fatalf("handleMessage(ctx, %s, nil, %+v) shouldn't have attempted to send a message", "test-event", d)
+			wantMsg := tc.want != nil
+			if (sentMsg != nil) != wantMsg {
+				if wantMsg {
+					t.Fatalf("handleMessage(ctx, %s, nil, %+v) didn't send a message, but wanted one", "test-event", d)
+				} else {
+					t.Fatalf("handleMessage(ctx, %s, nil, %+v) sent a message, but didn't want one", "test-event", d)
+				}
 			}
 
+			if !wantMsg {
+				return
+			}
 			var msg proto.Message
 			switch tc.messageType {
 			case getOSInfoMsg:
@@ -207,8 +233,7 @@ func TestHandleMessage(t *testing.T) {
 			case listPluginStatesMsg:
 				msg = new(acmpb.CurrentPluginStates)
 			default:
-				// If known message type is not set in test run skip following checks.
-				return
+				t.Fatalf("Unhandled message type: %s", tc.messageType)
 			}
 
 			if err := sentMsg.GetBody().UnmarshalTo(msg); err != nil {
