@@ -40,10 +40,29 @@ const (
 	udsProtocol = "unix"
 	// tcpProtocol is TCP protocol name to use for gRPC communication.
 	tcpProtocol = "tcp"
+
+	// defaultOneShotErrCode is the default error code returned when a ONE_SHOT
+	// plugin fails to execute, but we cannot retrieve a specific exit code from
+	// the process (e.g., if the process failed to start).
+	defaultOneShotErrCode = -1
 )
 
-// launchStep implements the plugin launch.
-type launchStep struct {
+// setupPluginState creates the state directory and updates the symlink.
+func setupPluginState(p *Plugin) error {
+	stateDir := p.stateDir()
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return fmt.Errorf("create state directory %q for plugin %q: %w", stateDir, p.FullName(), err)
+	}
+	if !p.IsLocal() {
+		if err := file.UpdateSymlink(p.staticInstallPath(), p.InstallPath); err != nil {
+			return fmt.Errorf("UpdateSymlink(%q, %q) failed for plugin %q: %w", p.staticInstallPath(), p.InstallPath, p.FullName(), err)
+		}
+	}
+	return nil
+}
+
+// daemonLaunchStep implements the plugin launch for DAEMON plugins.
+type daemonLaunchStep struct {
 	// entryPath is the path to binary to launch plugin.
 	entryPath string
 	// maxMemoryUsage is the allowed maximum memory usage, in bytes, for the
@@ -61,20 +80,20 @@ type launchStep struct {
 }
 
 // Name returns the name of the step.
-func (l *launchStep) Name() string { return "LaunchPluginStep" }
+func (l *daemonLaunchStep) Name() string { return "DaemonLaunchPluginStep" }
 
 // Status returns the plugin state for current step.
-func (l *launchStep) Status() acmpb.CurrentPluginStates_StatusValue {
+func (l *daemonLaunchStep) Status() acmpb.CurrentPluginStates_StatusValue {
 	return acmpb.CurrentPluginStates_STARTING
 }
 
-// Status returns the plugin state for current step.
-func (l *launchStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
+// ErrorStatus returns the plugin state for current step.
+func (l *daemonLaunchStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
 	return acmpb.CurrentPluginStates_CRASHED
 }
 
-// Run unpacks to the target directory and deletes the archive file.
-func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
+// Run launches the plugin and waits for it to be ready.
+func (l *daemonLaunchStep) Run(ctx context.Context, p *Plugin) error {
 	policy := retry.Policy{MaxAttempts: l.startAttempts, BackoffFactor: 1, Jitter: time.Second}
 
 	addr, err := address(ctx, l.protocol, p.FullName(), policy)
@@ -90,20 +109,8 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	p.Protocol = l.protocol
 	p.Manifest.LaunchArguments = l.extraArgs
 
-	stateDir := p.stateDir()
-	// Create state directory for the plugin.
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
-		return fmt.Errorf("create state directory %q for plugin %q: %w", stateDir, p.FullName(), err)
-	}
-
-	// Update plugin path symlink to point to latest. Core plugin install path is
-	// static and does not change across revisions. For instance on Linux it is
-	// always /usr/lib/google/guest_agent/core_plugin. Skip symlink setup for core
-	// plugin.
-	if !p.IsLocal() {
-		if err := file.UpdateSymlink(p.staticInstallPath(), p.InstallPath); err != nil {
-			return fmt.Errorf("UpdateSymlink(%q, %q) failed for plugin %q: %w", p.staticInstallPath(), p.InstallPath, p.FullName(), err)
-		}
+	if err := setupPluginState(p); err != nil {
+		return err
 	}
 
 	// Launch the plugin.
@@ -192,6 +199,79 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	}
 
 	return nil
+}
+
+// oneShotLaunchStep implements the plugin launch for ONESHOT plugins.
+type oneShotLaunchStep struct {
+	// entryPath is the path to binary to launch plugin.
+	entryPath string
+	// extraArgs are additional arguments (opaque to agent) set by plugin writers
+	// to pass down on process launch.
+	extraArgs []string
+}
+
+// Name returns the name of the step.
+func (o *oneShotLaunchStep) Name() string { return "OneShotLaunchPluginStep" }
+
+// Status returns the plugin state for current step.
+func (o *oneShotLaunchStep) Status() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_STARTING
+}
+
+// ErrorStatus returns the plugin state for current step.
+func (o *oneShotLaunchStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
+	return acmpb.CurrentPluginStates_EXECUTION_FAILED
+}
+
+// Run launches the plugin synchronously and waits for completion.
+func (o *oneShotLaunchStep) Run(ctx context.Context, p *Plugin) error {
+	p.EntryPath = o.entryPath
+	p.Manifest.LaunchArguments = o.extraArgs
+
+	if err := setupPluginState(p); err != nil {
+		return err
+	}
+
+	var responseCode int32
+	var results []string
+	pluginState := acmpb.CurrentPluginStates_EXECUTION_COMPLETED
+	eventState := acmpb.PluginEventMessage_PLUGIN_EXECUTION_COMPLETED
+	eventStr := ""
+
+	opts := run.Options{
+		Name:       o.entryPath,
+		Args:       o.extraArgs,
+		ExecMode:   run.ExecModeSync,
+		OutputType: run.OutputCombined,
+	}
+	_, err := run.WithContext(ctx, opts)
+
+	if err != nil {
+		galog.Errorf("OneShot plugin %q failed: %v", p.FullName(), err)
+		eventStr = err.Error()
+		responseCode = defaultOneShotErrCode
+		pluginState = acmpb.CurrentPluginStates_EXECUTION_FAILED
+		eventState = acmpb.PluginEventMessage_PLUGIN_EXECUTION_FAILED
+
+		// If it is an exit error, then we actually ran the extension, but it
+		// experienced its own error.
+		if exitErr, ok := run.AsExitError(err); ok {
+			responseCode = int32(exitErr.ExitCode())
+			// Don't want to return this error as it may not be permanent.
+			err = nil
+		}
+
+		results = []string{eventStr}
+	}
+
+	p.setState(pluginState)
+	sendEvent(ctx, p, eventState, eventStr)
+	p.setHealthInfo(&healthCheck{
+		responseCode: responseCode,
+		messages:     results,
+		timestamp:    time.Now(),
+	})
+	return err
 }
 
 // launchPlugin launches the plugin and applies resource constraints.

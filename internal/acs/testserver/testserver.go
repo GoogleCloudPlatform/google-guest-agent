@@ -94,6 +94,8 @@ func (s *acsImplementation) StreamAgentMessages(stream acpb.AgentCommunication_S
 	closed := make(chan struct{})
 	defer close(closed)
 
+	acks := make(chan *acpb.StreamAgentMessagesResponse)
+
 	go func() {
 		for {
 			rec, err := stream.Recv()
@@ -123,9 +125,10 @@ func (s *acsImplementation) StreamAgentMessages(stream acpb.AgentCommunication_S
 			}
 
 			// Acks as if service will ack on receiving msg from agent Send().
-			if err := stream.Send(&acpb.StreamAgentMessagesResponse{MessageId: rec.GetMessageId(), Type: &acpb.StreamAgentMessagesResponse_MessageResponse{}}); err != nil {
-				s.recvErr <- err
+			select {
+			case <-closed:
 				return
+			case acks <- &acpb.StreamAgentMessagesResponse{MessageId: rec.GetMessageId(), Type: &acpb.StreamAgentMessagesResponse_MessageResponse{}}:
 			}
 		}
 	}()
@@ -135,6 +138,11 @@ func (s *acsImplementation) StreamAgentMessages(stream acpb.AgentCommunication_S
 		case msg := <-s.toSend:
 			if err := stream.Send(msg); err != nil {
 				galog.Errorf("[TestACSServer] error sending message [%+v]: %v", msg, err)
+				return err
+			}
+		case ack := <-acks:
+			if err := stream.Send(ack); err != nil {
+				galog.Errorf("[TestACSServer] error sending ack [%+v]: %v", ack, err)
 				return err
 			}
 		case err := <-s.recvErr:

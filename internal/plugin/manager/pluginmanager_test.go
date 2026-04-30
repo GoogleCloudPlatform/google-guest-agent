@@ -1052,13 +1052,13 @@ func TestListPluginStates(t *testing.T) {
 		},
 	}
 	gotResp := pm.ListPluginStates(context.Background(), &acpb.ListPluginStates{})
-	got := gotResp.GetDaemonPluginStates()
+	got := gotResp.GetOneShotPluginStates()
 
 	sort.Slice(got, func(i, j int) bool {
 		return got[i].GetName() < got[j].GetName()
 	})
 
-	if diff := cmp.Diff(want.GetDaemonPluginStates(), got, protocmp.Transform()); diff != "" {
+	if diff := cmp.Diff(want.GetOneShotPluginStates(), got, protocmp.Transform()); diff != "" {
 		t.Errorf("ListPluginStates(ctx, req) returned unexpected diff (-want +got):\n%s", diff)
 	}
 

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -160,24 +161,24 @@ func TestLauncherStep(t *testing.T) {
 		t.Fatalf("Failed to create test plugin install directory: %v", err)
 	}
 	entryPath := filepath.Join(t.TempDir(), "main")
-	step := launchStep{entryPath: entryPath, maxMemoryUsage: 10, maxCPUUsage: 20, startAttempts: 3, protocol: udsProtocol, extraArgs: []string{"--foo=bar"}}
+	step := daemonLaunchStep{entryPath: entryPath, maxMemoryUsage: 10, maxCPUUsage: 20, startAttempts: 3, protocol: udsProtocol, extraArgs: []string{"--foo=bar"}}
 
 	ts := &testPluginServer{ctrs: make(map[string]int)}
 	addr := filepath.Join(t.TempDir(), "pluginA_revisionA.sock")
 	startTestServer(t, ts, udsProtocol, addr)
 
-	wantName := "LaunchPluginStep"
+	wantName := "DaemonLaunchPluginStep"
 	wantStatus := acmpb.CurrentPluginStates_STARTING
 	wantErrorStatus := acmpb.CurrentPluginStates_CRASHED
 
 	if step.Name() != wantName {
-		t.Errorf("launchStep.Name() = %s, want %s", step.Name(), wantName)
+		t.Errorf("daemonLaunchStep.Name() = %s, want %s", step.Name(), wantName)
 	}
 	if step.Status() != wantStatus {
-		t.Errorf("launchStep.Status() = %s, want %s", step.Status(), wantStatus)
+		t.Errorf("daemonLaunchStep.Status() = %s, want %s", step.Status(), wantStatus)
 	}
 	if step.ErrorStatus() != wantErrorStatus {
-		t.Errorf("launchStep.ErrorStatus() = %s, want %s", step.ErrorStatus(), wantErrorStatus)
+		t.Errorf("daemonLaunchStep.ErrorStatus() = %s, want %s", step.ErrorStatus(), wantErrorStatus)
 	}
 
 	setConnectionsDir(t, filepath.Dir(addr))
@@ -248,27 +249,27 @@ func TestLauncherStep(t *testing.T) {
 
 			err := step.Run(ctx, plugin)
 			if (err != nil) != tc.shouldFail {
-				t.Errorf("launchStep.Run(ctx, %+v) = error: %v, want error: %t", plugin, err, tc.shouldFail)
+				t.Errorf("daemonLaunchStep.Run(ctx, %+v) = error: %v, want error: %t", plugin, err, tc.shouldFail)
 			}
 
 			if got := plugin.State(); got != tc.status {
-				t.Errorf("launchStep.Run(ctx, %+v) = plugin state %s, want %s", plugin, got, tc.status)
+				t.Errorf("daemonLaunchStep.Run(ctx, %+v) = plugin state %s, want %s", plugin, got, tc.status)
 			}
 
 			// Test state was stored on successful run.
 			file := plugin.stateFile()
 			if !tc.shouldFail {
 				if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
-					t.Errorf("launchStep.Run(ctx, %+v) did not write plugin state to file %s", plugin, file)
+					t.Errorf("daemonLaunchStep.Run(ctx, %+v) did not write plugin state to file %s", plugin, file)
 				}
 			}
 
 			if tr.seenCommand != entryPath {
-				t.Errorf("launchStep.Run(ctx, %+v) executed %q, want %s ", plugin, tr.seenCommand, entryPath)
+				t.Errorf("daemonLaunchStep.Run(ctx, %+v) executed %q, want %s ", plugin, tr.seenCommand, entryPath)
 			}
 
 			if diff := cmp.Diff(wantArgs, tr.seenArguments); diff != "" {
-				t.Errorf("launchStep.Run(ctx, %+v) executed unexpectedly with diff (-want +got):\n%s", plugin, diff)
+				t.Errorf("daemonLaunchStep.Run(ctx, %+v) executed unexpectedly with diff (-want +got):\n%s", plugin, diff)
 			}
 
 			wantPlugin := &Plugin{
@@ -293,7 +294,7 @@ func TestLauncherStep(t *testing.T) {
 				Protocol:    step.protocol,
 			}
 			if diff := cmp.Diff(wantPlugin, plugin, cmpopts.IgnoreUnexported(Plugin{}, RuntimeInfo{}), cmpopts.IgnoreFields(Plugin{}, "client"), cmpopts.IgnoreUnexported(Manifest{})); diff != "" {
-				t.Errorf("launchStep.Run(ctx, %+v) executed unexpectedly with diff (-want +got):\n%s", plugin, diff)
+				t.Errorf("daemonLaunchStep.Run(ctx, %+v) executed unexpectedly with diff (-want +got):\n%s", plugin, diff)
 			}
 
 			if !tc.launchFail {
@@ -303,7 +304,7 @@ func TestLauncherStep(t *testing.T) {
 					MaxCPUUsage:    wantMaxCPUUsage,
 				}
 				if diff := cmp.Diff(expectedConstraint, ctc.seenConstraint, cmpopts.IgnoreFields(resource.Constraint{}, "Name")); diff != "" {
-					t.Errorf("launchStep.Run(ctx, %+v) applied unexpected constraints (-want +got):\n%s", plugin, diff)
+					t.Errorf("daemonLaunchStep.Run(ctx, %+v) applied unexpected constraints (-want +got):\n%s", plugin, diff)
 				}
 			}
 
@@ -318,7 +319,7 @@ func TestLauncherStep(t *testing.T) {
 					t.Fatalf("os.Readlink(%s) failed unexpectedly with error: %v", plugin.staticInstallPath(), err)
 				}
 				if got != wantPlugin.InstallPath {
-					t.Errorf("launchStep.Run(ctx, %+v) = symlink target %q, want %q", plugin, got, wantPlugin.InstallPath)
+					t.Errorf("daemonLaunchStep.Run(ctx, %+v) = symlink target %q, want %q", plugin, got, wantPlugin.InstallPath)
 				}
 			}
 		})
@@ -363,5 +364,161 @@ func TestIsUDSSupported(t *testing.T) {
 	}
 	if !file.Exists(connectionsDir, file.TypeDir) {
 		t.Errorf("file.Exists(%s, file.TypeDir) = true, want false", connectionsDir)
+	}
+}
+
+type oneShotFakeRunner struct {
+	res      *run.Result
+	err      error
+	seenOpts run.Options
+}
+
+func (f *oneShotFakeRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	f.seenOpts = opts
+	return f.res, f.err
+}
+
+func TestOneShotLauncherStep(t *testing.T) {
+	wantName := "OneShotLaunchPluginStep"
+	wantStatus := acmpb.CurrentPluginStates_STARTING
+	wantErrorStatus := acmpb.CurrentPluginStates_EXECUTION_FAILED
+
+	step := oneShotLaunchStep{entryPath: "/bin/echo", extraArgs: []string{"hello"}}
+
+	if step.Name() != wantName {
+		t.Errorf("oneShotLaunchStep.Name() = %q, want %q", step.Name(), wantName)
+	}
+	if step.Status() != wantStatus {
+		t.Errorf("oneShotLaunchStep.Status() = %q, want %q", step.Status(), wantStatus)
+	}
+	if step.ErrorStatus() != wantErrorStatus {
+		t.Errorf("oneShotLaunchStep.ErrorStatus() = %q, want %q", step.ErrorStatus(), wantErrorStatus)
+	}
+}
+
+// exitError returns a real exit error without hardcoding details about the
+// standard library's internals.
+func exitError(t *testing.T) error {
+	var bin string
+	var args []string
+	if runtime.GOOS == "windows" {
+		bin = "cmd.exe"
+		args = []string{"/c", "exit 1"}
+	} else {
+		bin = "/bin/sh"
+		args = []string{"-c", "exit 1"}
+	}
+	cmd := exec.Command(bin, args...)
+	if err := cmd.Run(); err != nil {
+		return err
+	} else {
+		t.Fatalf("Failed to acquire a realistic exit error")
+		return nil
+	}
+}
+
+func TestOneShotLauncherStepRun(t *testing.T) {
+	if err := cfg.Load([]byte{}); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	cfg.Retrieve().Core.ACSClient = true
+	stateDir := t.TempDir()
+	cfg.Retrieve().Plugin.StateDir = stateDir
+
+	exitErr := exitError(t)
+
+	tests := []struct {
+		name       string
+		runRes     *run.Result
+		runErr     error
+		wantCode   int32
+		wantStatus acmpb.CurrentPluginStates_StatusValue
+		wantEvent  acmpb.PluginEventMessage_PluginEventType
+		wantErr    bool
+	}{
+		{
+			name:       "success",
+			runRes:     &run.Result{Output: "success output\n"},
+			wantCode:   0,
+			wantStatus: acmpb.CurrentPluginStates_EXECUTION_COMPLETED,
+			wantEvent:  acmpb.PluginEventMessage_PLUGIN_EXECUTION_COMPLETED,
+		},
+		{
+			name:       "exit error",
+			runRes:     &run.Result{Output: "failure output\n"},
+			runErr:     exitErr,
+			wantCode:   1,
+			wantStatus: acmpb.CurrentPluginStates_EXECUTION_FAILED,
+			wantEvent:  acmpb.PluginEventMessage_PLUGIN_EXECUTION_FAILED,
+		},
+		{
+			name:       "infra error",
+			runErr:     errors.New("infra error"),
+			wantCode:   -1,
+			wantStatus: acmpb.CurrentPluginStates_EXECUTION_FAILED,
+			wantEvent:  acmpb.PluginEventMessage_PLUGIN_EXECUTION_FAILED,
+			wantErr:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &oneShotFakeRunner{res: tc.runRes, err: tc.runErr}
+			origClient := run.Client
+			run.Client = runner
+			t.Cleanup(func() { run.Client = origClient })
+
+			facs := &fakeACS{}
+			ctx := context.WithValue(context.Background(), client.OverrideConnection, facs)
+
+			step := oneShotLaunchStep{entryPath: "/bin/fake", extraArgs: []string{"arg1"}}
+			plugin := &Plugin{
+				Name:        "test_plugin",
+				Revision:    "1",
+				RuntimeInfo: &RuntimeInfo{statusMu: sync.RWMutex{}},
+				Manifest:    &Manifest{PluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION},
+			}
+
+			err := step.Run(ctx, plugin)
+
+			if (err != nil) != tc.wantErr {
+				t.Errorf("oneShotLaunchStep.Run() error = %v, wantErr %t", err, tc.wantErr)
+			}
+			if plugin.State() != tc.wantStatus {
+				t.Errorf("plugin.State() = %v, want %v", plugin.State(), tc.wantStatus)
+			}
+
+			var gotEvent *acmpb.PluginEventMessage
+			retryPolicy := retry.Policy{MaxAttempts: 5, Jitter: time.Millisecond * 50, BackoffFactor: 1}
+			retry.Run(ctx, retryPolicy, func() error {
+				facs.mu.Lock()
+				gotEvent = facs.seenEvent
+				facs.mu.Unlock()
+				if gotEvent == nil {
+					return errors.New("event not sent yet")
+				}
+				return nil
+			})
+
+			if gotEvent == nil {
+				t.Fatalf("Expected event to be sent, but got nil")
+			}
+
+			if gotEvent.GetEventType() != tc.wantEvent {
+				t.Errorf("Event type = %v, want %v", gotEvent.GetEventType(), tc.wantEvent)
+			}
+
+			health := plugin.RuntimeInfo.health
+			if health == nil {
+				t.Fatalf("Expected health info to be set, but got nil")
+			}
+			if health.responseCode != tc.wantCode {
+				t.Errorf("Health responseCode = %d, want %d", health.responseCode, tc.wantCode)
+			}
+
+			if runner.seenOpts.Name != step.entryPath {
+				t.Errorf("Runner Name = %q, want %q", runner.seenOpts.Name, step.entryPath)
+			}
+		})
 	}
 }

@@ -341,9 +341,10 @@ func (m *PluginManager) RemoveAllDynamicPlugins(ctx context.Context) error {
 // information.
 func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPluginStates) *acpb.CurrentPluginStates {
 	galog.Debugf("Handling list plugin state request: %+v", req)
-	var states []*acpb.CurrentPluginStates_DaemonPluginState
-	plugins := m.list()
+	var daemonStates []*acpb.CurrentPluginStates_DaemonPluginState
+	var oneShotStates []*acpb.CurrentPluginStates_OneShotPluginState
 
+	plugins := m.list()
 	for _, p := range plugins {
 		status := &acpb.CurrentPluginStates_Status{Status: p.State()}
 		h := p.healthInfo()
@@ -364,17 +365,36 @@ func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPlug
 			pluginMetrics = append(pluginMetrics, monitorMetric)
 		}
 
-		state := &acpb.CurrentPluginStates_DaemonPluginState{
-			Name:                 p.Name,
-			CurrentRevisionId:    p.Revision,
-			CurrentPluginStatus:  status,
-			CurrentPluginMetrics: pluginMetrics,
-			ConfigHash:           p.configHash(),
-		}
-
+		var pendingRevisionID string
 		pendingStatus := p.pendingStatus()
 		if pendingStatus != nil {
-			state.PendingRevisionId = pendingStatus.revision
+			pendingRevisionID = pendingStatus.revision
+		}
+
+		pluginType := p.Manifest.PluginType
+		switch pluginType {
+		case acpb.PluginType_DAEMON:
+			state := &acpb.CurrentPluginStates_DaemonPluginState{
+				Name:                 p.Name,
+				CurrentRevisionId:    p.Revision,
+				CurrentPluginStatus:  status,
+				CurrentPluginMetrics: pluginMetrics,
+				ConfigHash:           p.configHash(),
+				PendingRevisionId:    pendingRevisionID,
+			}
+			daemonStates = append(daemonStates, state)
+		case acpb.PluginType_ONE_SHOT:
+			state := &acpb.CurrentPluginStates_OneShotPluginState{
+				Name:                 p.Name,
+				CurrentRevisionId:    p.Revision,
+				CurrentPluginStatus:  status,
+				CurrentPluginMetrics: pluginMetrics,
+				ConfigHash:           p.configHash(),
+				PendingRevisionId:    pendingRevisionID,
+			}
+			oneShotStates = append(oneShotStates, state)
+		default:
+			galog.Errorf("Fetching plugin states: unknown plugin type %q for plugin %q", p.Manifest.PluginType, p.Name)
 		}
 
 		// Flush the metrics array.
@@ -382,12 +402,12 @@ func (m *PluginManager) ListPluginStates(ctx context.Context, req *acpb.ListPlug
 
 		// Release the metrics lock.
 		p.RuntimeInfo.metricsMu.Unlock()
-
-		// Append the state to the list.
-		states = append(states, state)
 	}
 
-	return &acpb.CurrentPluginStates{DaemonPluginStates: states}
+	return &acpb.CurrentPluginStates{
+		DaemonPluginStates:  daemonStates,
+		OneShotPluginStates: oneShotStates,
+	}
 }
 
 // filterPendingPluginRevisions filters out plugin requests that already have a
@@ -693,7 +713,9 @@ func (m *PluginManager) runlaunchPluginSteps(ctx context.Context, plugin *Plugin
 		return fmt.Errorf("install plugin %q: %w", plugin.FullName(), err)
 	}
 
-	m.startPluginSchedulers(ctx, plugin)
+	if !plugin.IsOneShot() {
+		m.startPluginSchedulers(ctx, plugin)
+	}
 	sendEvent(ctx, plugin, acpb.PluginEventMessage_PLUGIN_INSTALLED, "Successfully installed the plugin.")
 
 	galog.Infof("Successfully installed plugin %q", plugin.FullName())
@@ -746,7 +768,7 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 		return fmt.Errorf("failed to remove plugin: %w", err)
 	}
 
-	return m.runlaunchPluginSteps(ctx, plugin, []Step{m.newLaunchStep(req)})
+	return m.runlaunchPluginSteps(ctx, plugin, []Step{m.newDaemonLaunchStep(req)})
 }
 
 // stopAndRemovePlugin stops the given plugin, all of its schedulers and removes
@@ -1182,7 +1204,8 @@ func (m *PluginManager) VerifyPluginRunning(ctx context.Context, plugin *acpb.Co
 	var found bool
 	for _, currPlugin := range currPlugins {
 		if currPlugin.Name == plugin.GetPlugin().GetName() {
-			if currPlugin.State() != acpb.CurrentPluginStates_RUNNING || currPlugin.Revision != plugin.GetPlugin().GetRevisionId() {
+			stateIsIntended := currPlugin.State() == acpb.CurrentPluginStates_RUNNING || currPlugin.State() == acpb.CurrentPluginStates_EXECUTION_COMPLETED
+			if !stateIsIntended || currPlugin.Revision != plugin.GetPlugin().GetRevisionId() {
 				return fmt.Errorf("plugin %q with revision %q is not running, current status: %+v", plugin.GetPlugin().GetName(), plugin.GetPlugin().GetRevisionId(), currPlugin.State())
 			}
 			found = true

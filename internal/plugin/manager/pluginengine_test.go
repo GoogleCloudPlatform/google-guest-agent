@@ -324,22 +324,41 @@ func TestGenerateInstallWorkflow(t *testing.T) {
 	tests := []struct {
 		name             string
 		installationType acmpb.PluginInstallationType
+		pluginType       acmpb.PluginType
 		wantSteps        []Step
 	}{
 		{
 			name:             "dynamic-plugin",
 			installationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+			pluginType:       acmpb.PluginType_DAEMON,
 			wantSteps: []Step{
 				&downloadStep{url: "https://test.com", targetPath: archivePath, checksum: "testPluginChecksum", attempts: 1, timeout: 60 * time.Second},
 				&unpackStep{archivePath: archivePath, targetDir: p},
-				&launchStep{entryPath: filepath.Join(p, "testPluginEntryPoint"), maxMemoryUsage: 100, startAttempts: 3, protocol: pm.protocol},
+				&daemonLaunchStep{entryPath: filepath.Join(p, "testPluginEntryPoint"), maxMemoryUsage: 100, startAttempts: 3, protocol: pm.protocol},
+			},
+		},
+		{
+			name: "unspecified plugin and installation types treated as dynamic daemon",
+			wantSteps: []Step{
+				&downloadStep{url: "https://test.com", targetPath: archivePath, checksum: "testPluginChecksum", attempts: 1, timeout: 60 * time.Second},
+				&unpackStep{archivePath: archivePath, targetDir: p},
+				&daemonLaunchStep{entryPath: filepath.Join(p, "testPluginEntryPoint"), maxMemoryUsage: 100, startAttempts: 3, protocol: pm.protocol},
 			},
 		},
 		{
 			name:             "local-plugin",
 			installationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+			pluginType:       acmpb.PluginType_DAEMON,
 			wantSteps: []Step{
-				&launchStep{entryPath: "testPluginEntryPoint", maxMemoryUsage: 100, startAttempts: 3, protocol: pm.protocol},
+				&daemonLaunchStep{entryPath: "testPluginEntryPoint", maxMemoryUsage: 100, startAttempts: 3, protocol: pm.protocol},
+			},
+		},
+		{
+			name:             "one shot local plugin",
+			installationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+			pluginType:       acmpb.PluginType_ONE_SHOT,
+			wantSteps: []Step{
+				&oneShotLaunchStep{entryPath: "testPluginEntryPoint"},
 			},
 		},
 	}
@@ -347,10 +366,11 @@ func TestGenerateInstallWorkflow(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req.Manifest.PluginInstallationType = tc.installationType
+			req.Manifest.PluginType = tc.pluginType
 
 			gotSteps := pm.generateInstallWorkflow(ctx, req)
 
-			allow := []any{downloadStep{}, unpackStep{}, launchStep{}}
+			allow := []any{downloadStep{}, unpackStep{}, daemonLaunchStep{}, oneShotLaunchStep{}}
 			if diff := cmp.Diff(tc.wantSteps, gotSteps, cmp.AllowUnexported(allow...)); diff != "" {
 				t.Errorf("generateInstallWorkflow(ctx, %+v) returned diff (-want +got):\n%s", req, diff)
 			}
@@ -471,13 +491,58 @@ func TestRelaunchWorkflow(t *testing.T) {
 	}
 	want := []Step{
 		&stopStep{cleanup: false},
-		&launchStep{entryPath: p.EntryPath, maxMemoryUsage: p.Manifest.MaxMemoryUsage, startAttempts: p.Manifest.StartAttempts, protocol: p.Protocol},
+		&daemonLaunchStep{entryPath: p.EntryPath, maxMemoryUsage: p.Manifest.MaxMemoryUsage, startAttempts: p.Manifest.StartAttempts, protocol: p.Protocol},
 	}
 
 	got := relaunchWorkflow(ctx, p)
 
-	allow := []any{stopStep{}, launchStep{}}
+	allow := []any{stopStep{}, daemonLaunchStep{}}
 	if diff := cmp.Diff(want, got, cmp.AllowUnexported(allow...)); diff != "" {
 		t.Errorf("relaunchWorkflow(ctx, %+v) returned diff (-want +got):\n%s", p, diff)
+	}
+}
+
+func TestPluginEntryPath(t *testing.T) {
+	statePath := "testStatePath"
+
+	tests := []struct {
+		name string
+		req  *acmpb.ConfigurePluginStates_ConfigurePlugin
+		want string
+	}{
+		{
+			name: "dynamic plugin",
+			req: &acmpb.ConfigurePluginStates_ConfigurePlugin{
+				Plugin: &acmpb.ConfigurePluginStates_Plugin{
+					EntryPoint: "testPluginEntryPoint",
+				},
+				Manifest: &acmpb.ConfigurePluginStates_Manifest{
+					PluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+				},
+			},
+			want: filepath.Join("testStatePath", "testPluginEntryPoint"),
+		},
+		{
+			name: "local plugin",
+			req: &acmpb.ConfigurePluginStates_ConfigurePlugin{
+				Plugin: &acmpb.ConfigurePluginStates_Plugin{
+					EntryPoint: "testPluginEntryPoint",
+				},
+				Manifest: &acmpb.ConfigurePluginStates_Manifest{
+					PluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+				},
+			},
+			want: "testPluginEntryPoint",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pluginEntryPath(statePath, tc.req)
+
+			if got != tc.want {
+				t.Errorf("pluginEntryPath(%q, %v): got %q, want %q", statePath, tc.req, got, tc.want)
+			}
+		})
 	}
 }
