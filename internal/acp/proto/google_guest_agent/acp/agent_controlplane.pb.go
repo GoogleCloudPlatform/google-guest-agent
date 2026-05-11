@@ -235,8 +235,10 @@ const (
 	CurrentPluginStates_STOPPED  CurrentPluginStates_StatusValue = 4
 	CurrentPluginStates_CRASHED  CurrentPluginStates_StatusValue = 5
 	// Installing or failed to install.
-	CurrentPluginStates_INSTALLING     CurrentPluginStates_StatusValue = 6
-	CurrentPluginStates_INSTALL_FAILED CurrentPluginStates_StatusValue = 7
+	CurrentPluginStates_INSTALLING          CurrentPluginStates_StatusValue = 6
+	CurrentPluginStates_INSTALL_FAILED      CurrentPluginStates_StatusValue = 7
+	CurrentPluginStates_EXECUTION_COMPLETED CurrentPluginStates_StatusValue = 8
+	CurrentPluginStates_EXECUTION_FAILED    CurrentPluginStates_StatusValue = 9
 )
 
 // Enum value maps for CurrentPluginStates_StatusValue.
@@ -250,6 +252,8 @@ var (
 		5: "CRASHED",
 		6: "INSTALLING",
 		7: "INSTALL_FAILED",
+		8: "EXECUTION_COMPLETED",
+		9: "EXECUTION_FAILED",
 	}
 	CurrentPluginStates_StatusValue_value = map[string]int32{
 		"STATE_VALUE_UNSPECIFIED": 0,
@@ -260,6 +264,8 @@ var (
 		"CRASHED":                 5,
 		"INSTALLING":              6,
 		"INSTALL_FAILED":          7,
+		"EXECUTION_COMPLETED":     8,
+		"EXECUTION_FAILED":        9,
 	}
 )
 
@@ -609,6 +615,12 @@ const (
 	// agent will run restart workflow on the plugin with new config and
 	// will not trigger this event.
 	PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED PluginEventMessage_PluginEventType = 13
+	// Indicates that the plugin finished execution gracefully and is no longer
+	// running.
+	PluginEventMessage_PLUGIN_EXECUTION_COMPLETED PluginEventMessage_PluginEventType = 14
+	// Indicates that the plugin finished execution in a failure state and is no
+	// longer running.
+	PluginEventMessage_PLUGIN_EXECUTION_FAILED PluginEventMessage_PluginEventType = 15
 )
 
 // Enum value maps for PluginEventMessage_PluginEventType.
@@ -628,6 +640,8 @@ var (
 		11: "PLUGIN_CONFIG_APPLY",
 		12: "PLUGIN_CONFIG_APPLIED",
 		13: "PLUGIN_CONFIG_APPLY_FAILED",
+		14: "PLUGIN_EXECUTION_COMPLETED",
+		15: "PLUGIN_EXECUTION_FAILED",
 	}
 	PluginEventMessage_PluginEventType_value = map[string]int32{
 		"PLUGIN_EVENT_TYPE_UNSPECIFIED": 0,
@@ -644,6 +658,8 @@ var (
 		"PLUGIN_CONFIG_APPLY":           11,
 		"PLUGIN_CONFIG_APPLIED":         12,
 		"PLUGIN_CONFIG_APPLY_FAILED":    13,
+		"PLUGIN_EXECUTION_COMPLETED":    14,
+		"PLUGIN_EXECUTION_FAILED":       15,
 	}
 )
 
@@ -2614,7 +2630,7 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\farchitecture\x18\x06 \x01(\tR\farchitecture\x12%\n" +
 	"\x0ekernel_release\x18\a \x01(\tR\rkernelRelease\x12%\n" +
 	"\x0ekernel_version\x18\b \x01(\tR\rkernelVersion\"\x12\n" +
-	"\x10ListPluginStates\"\x93\r\n" +
+	"\x10ListPluginStates\"\xc2\r\n" +
 	"\x13CurrentPluginStates\x12k\n" +
 	"\x14daemon_plugin_states\x18\x01 \x03(\v29.agent_controlplane.CurrentPluginStates.DaemonPluginStateR\x12daemonPluginStates\x12o\n" +
 	"\x16one_shot_plugin_states\x18\x02 \x03(\v2:.agent_controlplane.CurrentPluginStates.OneShotPluginStateR\x13oneShotPluginStates\x1a\xd6\x03\n" +
@@ -2645,7 +2661,7 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\x06Metric\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x1b\n" +
 	"\tcpu_usage\x18\x06 \x01(\x02R\bcpuUsage\x12!\n" +
-	"\fmemory_usage\x18\a \x01(\x03R\vmemoryUsage\"\x91\x01\n" +
+	"\fmemory_usage\x18\a \x01(\x03R\vmemoryUsage\"\xc0\x01\n" +
 	"\vStatusValue\x12\x1b\n" +
 	"\x17STATE_VALUE_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bSTARTING\x10\x01\x12\v\n" +
@@ -2655,7 +2671,9 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\aCRASHED\x10\x05\x12\x0e\n" +
 	"\n" +
 	"INSTALLING\x10\x06\x12\x12\n" +
-	"\x0eINSTALL_FAILED\x10\a\"\xbb\f\n" +
+	"\x0eINSTALL_FAILED\x10\a\x12\x17\n" +
+	"\x13EXECUTION_COMPLETED\x10\b\x12\x14\n" +
+	"\x10EXECUTION_FAILED\x10\t\"\xbb\f\n" +
 	"\x15ConfigurePluginStates\x12f\n" +
 	"\x11configure_plugins\x18\x01 \x03(\v29.agent_controlplane.ConfigurePluginStates.ConfigurePluginR\x10configurePlugins\x1a\xf5\x01\n" +
 	"\x0fConfigurePlugin\x12H\n" +
@@ -2736,7 +2754,7 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\x15NAMESPACE_UNSPECIFIED\x10\x00\x12\x06\n" +
 	"\x02OS\x10\x01\x12\f\n" +
 	"\bINSTANCE\x10\x02\x12\f\n" +
-	"\bMETADATA\x10\x03\"\xa2\x05\n" +
+	"\bMETADATA\x10\x03\"\xdf\x05\n" +
 	"\x12PluginEventMessage\x12\x1f\n" +
 	"\vrevision_id\x18\x01 \x01(\tR\n" +
 	"revisionId\x12\x1f\n" +
@@ -2745,7 +2763,7 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\n" +
 	"event_type\x18\x03 \x01(\x0e26.agent_controlplane.PluginEventMessage.PluginEventTypeR\teventType\x12C\n" +
 	"\x0fevent_timestamp\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x0eeventTimestamp\x12(\n" +
-	"\revent_details\x18\x05 \x01(\fH\x00R\feventDetails\x88\x01\x01\"\xf1\x02\n" +
+	"\revent_details\x18\x05 \x01(\fH\x00R\feventDetails\x88\x01\x01\"\xae\x03\n" +
 	"\x0fPluginEventType\x12!\n" +
 	"\x1dPLUGIN_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15PLUGIN_CONFIG_INSTALL\x10\x01\x12\x18\n" +
@@ -2761,7 +2779,9 @@ const file_agent_controlplane_proto_rawDesc = "" +
 	"\x12\x17\n" +
 	"\x13PLUGIN_CONFIG_APPLY\x10\v\x12\x19\n" +
 	"\x15PLUGIN_CONFIG_APPLIED\x10\f\x12\x1e\n" +
-	"\x1aPLUGIN_CONFIG_APPLY_FAILED\x10\rB\x10\n" +
+	"\x1aPLUGIN_CONFIG_APPLY_FAILED\x10\r\x12\x1e\n" +
+	"\x1aPLUGIN_EXECUTION_COMPLETED\x10\x0e\x12\x1b\n" +
+	"\x17PLUGIN_EXECUTION_FAILED\x10\x0fB\x10\n" +
 	"\x0e_event_details\"_\n" +
 	"\x17GuestAgentModuleMetrics\x12D\n" +
 	"\ametrics\x18\x01 \x03(\v2*.agent_controlplane.GuestAgentModuleMetricR\ametrics\"\xcd\b\n" +
