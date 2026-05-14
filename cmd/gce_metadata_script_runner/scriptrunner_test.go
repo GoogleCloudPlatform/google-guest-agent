@@ -131,6 +131,13 @@ func TestMdsScriptKeysError(t *testing.T) {
 			arg: "startup",
 			os:  "windows",
 		},
+		{
+			desc: "windows_specialize_disabled",
+			cfg: `[MetadataScripts]
+			sysprep-specialize = false`,
+			arg: "specialize",
+			os:  "windows",
+		},
 	}
 
 	for _, test := range tests {
