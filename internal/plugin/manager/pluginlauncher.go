@@ -40,6 +40,9 @@ const (
 	udsProtocol = "unix"
 	// tcpProtocol is TCP protocol name to use for gRPC communication.
 	tcpProtocol = "tcp"
+
+	// outputLimit is the maximum number of characters to print for plugin output when startup fails.
+	outputLimit = 1000
 )
 
 // launchStep implements the plugin launch.
@@ -206,12 +209,21 @@ func launchPlugin(ctx context.Context, p *Plugin, protocol string, policy retry.
 
 	launchFunc := func() error {
 		opts := run.Options{
-			Name:     p.EntryPath,
-			Args:     args,
-			ExecMode: pluginExecMode,
+			Name:       p.EntryPath,
+			Args:       args,
+			ExecMode:   pluginExecMode,
+			OutputType: run.OutputCombined,
 		}
 		res, err := run.WithContext(ctx, opts)
 		if err != nil {
+			shortOutput := res.Output
+			if len(shortOutput) > outputLimit {
+				shortOutput = shortOutput[:outputLimit] + "..."
+			}
+			// Common command line argument parsing libraries will fail fast and print the usage help text
+			// when encountering an unknown or malformed argument. Adding this out will help plugin
+			// authors to identify the issue because the error file will not be written to.
+			galog.Warnf("Failed to launch plugin from %q, output: %s", p.EntryPath, shortOutput)
 			return fmt.Errorf("failed to launch plugin from %q: %w", p.EntryPath, err)
 		}
 
