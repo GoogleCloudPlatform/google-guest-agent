@@ -47,6 +47,9 @@ const (
 	// enableWorkloadCertsKey is set to true as custom metadata to enable
 	// automatic provisioning of credentials.
 	enableWorkloadCertsKey = "instance/attributes/enable-workload-certificate"
+	// identityUUIDKey is set to the UUID of the identity for the instance. When
+	// this key is changed, the credentials will be refreshed.
+	identityUUIDKey = "instance/identity-configuration/identity-uuid"
 	// defaultGRPCTimeout is the default timeout for grpc calls.
 	defaultGRPCTimeout = 10 * time.Second
 )

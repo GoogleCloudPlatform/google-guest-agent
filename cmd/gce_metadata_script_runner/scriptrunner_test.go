@@ -43,6 +43,10 @@ func TestMain(m *testing.M) {
 }
 
 func TestMdsScriptKeys(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
 	getWantedTests := []struct {
 		event string
 		os    string
@@ -120,15 +124,22 @@ func TestMdsScriptKeysError(t *testing.T) {
 		{
 			desc: "windows_shutdown_disabled",
 			cfg: `[MetadataScripts]
-			shutdown-windows = false`,
+			shutdown_windows = false`,
 			arg: "shutdown",
 			os:  "windows",
 		},
 		{
 			desc: "windows_startup_disabled",
 			cfg: `[MetadataScripts]
-			startup-windows = false`,
+			startup_windows = false`,
 			arg: "startup",
+			os:  "windows",
+		},
+		{
+			desc: "windows_specialize_disabled",
+			cfg: `[MetadataScripts]
+			sysprep_specialize = false`,
+			arg: "specialize",
 			os:  "windows",
 		},
 	}
