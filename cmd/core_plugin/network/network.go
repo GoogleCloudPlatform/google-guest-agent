@@ -73,11 +73,18 @@ func (mod *module) setup(ctx context.Context, data any) error {
 		return nil
 	}
 
-	galog.Debugf("Initializing %s module", networkModuleID)
-	var err error
+	// If the address manager is disabled, we skip the network module setup and
+	// the metadata longpoll event handler is not registered. This is because
+	// changing the configuration flag will require a restart of the guest agent
+	// anyway, so there's no need to dynamically react to changes to the flag.
+	if config.AddressManager != nil && config.AddressManager.Disable {
+		galog.Infof("Address manager is disabled, skipping network module setup.")
+		return nil
+	}
 
 	// In normal use cases, the data is not a metadata descriptor. This is just
 	// used for testing so we can avoid doing an actual metadata fetch.
+	var err error
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		// This error case should only ever be hit in tests.
@@ -90,15 +97,22 @@ func (mod *module) setup(ctx context.Context, data any) error {
 		}
 	}
 
-	// Perform early network platform-specific initialization.
-	if err := platformEarlyInit(ctx); err != nil {
-		return fmt.Errorf("failed to perform early network initialization: %v", err)
-	}
+	galog.Debugf("Initializing %s module", networkModuleID)
 
-	// Do the initial setup of the network interfaces. It will be handled by the
-	// metadata longpoll event handler/subscriber after the first setup.
-	if _, err := mod.networkSetup(ctx, config, desc); err != nil {
-		galog.Errorf("Failed to handle first network setup: %v", err)
+	// Avoid setting up network interfaces if address manager is disabled.
+	if desc.Instance().Attributes().DisableAddressManager() != nil && *desc.Instance().Attributes().DisableAddressManager() {
+		galog.Infof("Instance metadata attribute disable-address-manager is set to true, skipping network module setup.")
+	} else {
+		// Perform early network platform-specific initialization.
+		if err := platformEarlyInit(ctx); err != nil {
+			return fmt.Errorf("failed to perform early network initialization: %v", err)
+		}
+
+		// Do the initial setup of the network interfaces. It will be handled by the
+		// metadata longpoll event handler/subscriber after the first setup.
+		if _, err := mod.networkSetup(ctx, config, desc); err != nil {
+			galog.Errorf("Failed to handle first network setup: %v", err)
+		}
 	}
 
 	eManager := events.FetchManager()
@@ -123,6 +137,19 @@ func (mod *module) metadataSubscriber(ctx context.Context, evType string, data a
 	// renewing the handler.
 	if evData.Error != nil {
 		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
+	}
+
+	// If the address manager is disabled, we skip the network module setup.
+	if desc.AddressManagerDisabled() {
+		var prevDisable bool
+		if mod.prevMetadata != nil {
+			prevDisable = mod.prevMetadata.AddressManagerDisabled()
+		}
+		// Only log the first time the address manager is disabled.
+		if !prevDisable {
+			galog.Infof("Instance metadata attribute disable-address-manager is set to true, skipping network module setup.")
+		}
+		return true, true, nil
 	}
 
 	noop, err := mod.networkSetup(ctx, cfg.Retrieve(), desc)

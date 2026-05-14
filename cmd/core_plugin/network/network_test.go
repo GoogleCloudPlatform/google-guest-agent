@@ -82,6 +82,63 @@ func TestNetworkDaemonDisabled(t *testing.T) {
 	})
 }
 
+func TestAddressManagerDisabled(t *testing.T) {
+	events.FetchManager().Unsubscribe(metadata.LongpollEvent, networkModuleID)
+
+	t.Logf("Testing for configuration with address manager disabled.")
+	emptyMDS, err := metadata.UnmarshalDescriptor(`{}`)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor() returned unexpected error: %v", err)
+	}
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() returned unexpected error: %v", err)
+	}
+	cfg.Retrieve().AddressManager = &cfg.AddressManager{
+		Disable: true,
+	}
+
+	mod := &module{}
+	if err := mod.setup(context.Background(), emptyMDS); err != nil {
+		t.Errorf("module.setup() returned unexpected error: %v", err)
+	}
+
+	if events.FetchManager().IsSubscribed(metadata.LongpollEvent, networkModuleID) {
+		t.Errorf("%s subscribed to metadata.LongpollEvent, want not subscribed", networkModuleID)
+	}
+
+	t.Logf("Testing for instance metadata attribute disable-address-manager set to true.")
+	mds, err := metadata.UnmarshalDescriptor(`{
+		"instance":  {
+			"attributes": {
+				"disable-address-manager": "true"
+			}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor() returned unexpected error: %v", err)
+	}
+	cfg.Retrieve().AddressManager = nil
+
+	if err := mod.setup(context.Background(), mds); err != nil {
+		t.Errorf("module.setup() returned unexpected error: %v", err)
+	}
+
+	// prevMetadata is only set when network setup runs. This should serve as
+	// confirmation that network setup was skipped.
+	if mod.prevMetadata != nil {
+		t.Errorf("module.prevMetadata = %v, want nil", mod.prevMetadata)
+	}
+
+	if !events.FetchManager().IsSubscribed(metadata.LongpollEvent, networkModuleID) {
+		t.Errorf("%s not subscribed to metadata.LongpollEvent, want subscribed", networkModuleID)
+	}
+
+	t.Cleanup(func() {
+		events.FetchManager().Unsubscribe(metadata.LongpollEvent, networkModuleID)
+	})
+}
+
 func TestInitFailure(t *testing.T) {
 	mds, err := metadata.UnmarshalDescriptor(mdsJSON)
 	if err != nil {
