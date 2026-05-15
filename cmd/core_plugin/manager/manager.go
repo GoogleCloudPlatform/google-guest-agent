@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 // ModuleStage is the stage in which a module should be grouped in.
@@ -138,6 +139,9 @@ type Module struct {
 	ID string
 	// Description is a string representation of a module description.
 	Description string
+	// NeedsNetwork indicates if the module requires network to be configured.
+	// If not set, it's assumed that the module needs network.
+	NeedsNetwork *bool
 	// Setup is the function to initialize the module. Modules implementing this
 	// function will have its execution ran in parallel with other modules - every
 	// module Setup will be executed in a different goroutine.
@@ -230,6 +234,13 @@ func RunBlocking(ctx context.Context, stage ModuleStage, data any) error {
 			continue
 		}
 
+		// Avoid running modules that need network when it's disabled.
+		if (mod.NeedsNetwork == nil || *mod.NeedsNetwork) && !cfg.Retrieve().InstanceSetup.NetworkEnabled {
+			galog.V(2).Debugf("Module %q needs network but network is disabled, skipping.", mod.ID)
+			metric.finish(StatusSkipped, nil)
+			continue
+		}
+
 		if err := mod.BlockSetup(ctx, data); err != nil {
 			metric.finish(StatusFailed, err)
 			return fmt.Errorf("failed to initialize module(%s): %w", mod.ID, err)
@@ -306,6 +317,13 @@ func RunConcurrent(ctx context.Context, stage ModuleStage, data any) *Errors {
 
 		if mod.Setup == nil {
 			galog.V(2).Debugf("Module %q has no Setup function, skipping.", mod.ID)
+			metrics.finish(StatusSkipped, nil)
+			continue
+		}
+
+		// Avoid running modules that need network when it's disabled.
+		if (mod.NeedsNetwork == nil || *mod.NeedsNetwork) && !cfg.Retrieve().InstanceSetup.NetworkEnabled {
+			galog.V(2).Debugf("Module %q needs network but network is disabled, skipping.", mod.ID)
 			metrics.finish(StatusSkipped, nil)
 			continue
 		}
