@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"testing"
 )
 
@@ -36,6 +37,10 @@ func (ss *bypassService) register(ctx context.Context) error {
 func (ss *bypassService) setState(ctx context.Context, state State) error {
 	ss.state = state
 	return nil
+}
+
+func (ss *bypassService) shouldHandleSignal(sig os.Signal) bool {
+	return true
 }
 
 func TestContextCancel(t *testing.T) {
