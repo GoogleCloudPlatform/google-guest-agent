@@ -428,3 +428,82 @@ func TestUpdateSymlink(t *testing.T) {
 		})
 	}
 }
+
+func TestUnpackTARGZFile_PathTraversal(t *testing.T) {
+	tests := []struct {
+		name      string
+		header    *tar.Header
+		wantError bool
+	}{
+		{
+			name: "Valid entry path and relative symlink",
+			header: &tar.Header{
+				Name:     "link1",
+				Typeflag: tar.TypeSymlink,
+				Linkname: "target1",
+			},
+			wantError: false,
+		},
+		{
+			name: "Traversal entry path",
+			header: &tar.Header{
+				Name:     "../traversal",
+				Typeflag: tar.TypeReg,
+				Size:     int64(len("malicious content")),
+			},
+			wantError: true,
+		},
+		{
+			name: "Traversal symlink target relative",
+			header: &tar.Header{
+				Name:     "link2",
+				Typeflag: tar.TypeSymlink,
+				Linkname: "../../traversal_target",
+			},
+			wantError: true,
+		},
+		{
+			name: "Traversal symlink target absolute",
+			header: &tar.Header{
+				Name:     "link3",
+				Typeflag: tar.TypeSymlink,
+				Linkname: "/etc/passwd",
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			archiveFile := filepath.Join(tempDir, "malicious.tar.gz")
+			f, err := os.Create(archiveFile)
+			if err != nil {
+				t.Fatalf("failed to create test archive: %v", err)
+			}
+
+			gw := gzip.NewWriter(f)
+			tw := tar.NewWriter(gw)
+
+			if err := tw.WriteHeader(tc.header); err != nil {
+				t.Fatalf("failed to write header: %v", err)
+			}
+
+			if tc.header.Typeflag == tar.TypeReg {
+				if _, err := tw.Write([]byte("malicious content")); err != nil {
+					t.Fatalf("failed to write body: %v", err)
+				}
+			}
+
+			tw.Close()
+			gw.Close()
+			f.Close()
+
+			destDir := t.TempDir()
+			err = UnpackTargzFile(archiveFile, destDir)
+			if (err != nil) != tc.wantError {
+				t.Errorf("UnpackTargzFile() error = %v, wantError %v", err, tc.wantError)
+			}
+		})
+	}
+}
