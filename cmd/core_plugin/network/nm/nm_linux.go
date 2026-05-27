@@ -376,7 +376,7 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 	var primaryOp removeOp
 	for _, op := range deleteMe {
 		galog.Debugf("Removing NetworkManager configuration: %q", op.configFile)
-		err := os.RemoveAll(op.configFile)
+		err := os.Remove(op.configFile)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("error deleting NetworkManager %s config file(%q): %v", op.configType, op.configFile, err)
 		}
