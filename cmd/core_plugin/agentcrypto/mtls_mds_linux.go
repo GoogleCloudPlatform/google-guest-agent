@@ -73,7 +73,7 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFi
 	galog.Debugf("Writing root CA cert to %q", outputFile)
 
 	// Write the root CA cert to the output file.
-	if err := j.writeCredentials(ctx, content, outputFile); err != nil {
+	if err := j.writeCredentials(ctx, content, outputFile, 0644); err != nil {
 		return err
 	}
 	galog.Debugf("Successfully wrote root CA cert to %q", outputFile)
@@ -95,16 +95,16 @@ func (j *CredsJob) writeRootCACert(ctx context.Context, content []byte, outputFi
 // key).
 func (j *CredsJob) writeClientCredentials(ctx context.Context, plaintext []byte, outputFile string) error {
 	galog.Debugf("Writing client credentials to %q", outputFile)
-	return j.writeCredentials(ctx, plaintext, outputFile)
+	return j.writeCredentials(ctx, plaintext, outputFile, 0600)
 }
 
 // writeCredentials stores the provided credentials to the output file.
-func (j *CredsJob) writeCredentials(ctx context.Context, certContent []byte, outputFile string) error {
+func (j *CredsJob) writeCredentials(ctx context.Context, certContent []byte, outputFile string, perm os.FileMode) error {
 	// The directory should be executable, but the file does not need to be.
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0655); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
 		return err
 	}
-	return file.SaferWriteFile(ctx, certContent, outputFile, file.Options{Perm: 0644})
+	return file.SaferWriteFile(ctx, certContent, outputFile, file.Options{Perm: perm})
 }
 
 // getCAStoreUpdater iterates over known system trust store updaters and returns

@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -192,5 +193,47 @@ func TestCertificateDirFromUpdaterError(t *testing.T) {
 	_, err = certificateDirFromUpdater("updater1")
 	if err == nil {
 		t.Errorf("certificateDirFromUpdater(unknown) succeeded for missing cert dir, want error")
+	}
+}
+
+func TestWriteClientCredentials(t *testing.T) {
+	ctx := context.Background()
+	j := &CredsJob{}
+	tempDir := t.TempDir()
+	outputFile := filepath.Join(tempDir, "test_dir", "client.key")
+
+	oldUmask := syscall.Umask(0)
+	defer syscall.Umask(oldUmask)
+
+	content := []byte("test_credentials_content")
+	if err := j.writeClientCredentials(ctx, content, outputFile); err != nil {
+		t.Fatalf("writeClientCredentials failed unexpectedly: %v", err)
+	}
+
+	// Verify file content
+	got, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("Failed to read written file: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("Written file content = %q, want %q", string(got), string(content))
+	}
+
+	// Verify file permissions
+	fInfo, err := os.Stat(outputFile)
+	if err != nil {
+		t.Fatalf("Failed to stat file: %v", err)
+	}
+	if fInfo.Mode().Perm() != 0600 {
+		t.Errorf("File permissions = %o, want 0600", fInfo.Mode().Perm())
+	}
+
+	// Verify directory permissions
+	dInfo, err := os.Stat(filepath.Dir(outputFile))
+	if err != nil {
+		t.Fatalf("Failed to stat directory: %v", err)
+	}
+	if dInfo.Mode().Perm() != 0755 {
+		t.Errorf("Directory permissions = %o, want 0755", dInfo.Mode().Perm())
 	}
 }
