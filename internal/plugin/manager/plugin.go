@@ -552,14 +552,32 @@ func (p *Plugin) Store() error {
 		return fmt.Errorf("unable to encode plugin: %w", err)
 	}
 
-	fh, err := os.OpenFile(fname, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	tmpName := fname + ".tmp"
+	fh, err := os.OpenFile(tmpName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf("open file %q: %w", fname, err)
+		return fmt.Errorf("open file %q: %w", tmpName, err)
 	}
-	defer fh.Close()
 
 	if _, err := fh.Write(b.Bytes()); err != nil {
-		return fmt.Errorf("write plugin info to %q: %w", fname, err)
+		fh.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write plugin info to %q: %w", tmpName, err)
+	}
+
+	if err := fh.Sync(); err != nil {
+		fh.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("sync file %q: %w", tmpName, err)
+	}
+
+	if err := fh.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close file %q: %w", tmpName, err)
+	}
+
+	if err := os.Rename(tmpName, fname); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("rename %q to %q: %w", tmpName, fname, err)
 	}
 
 	galog.V(2).Debugf("Sucessfully wrote plugin info to %q", fname)

@@ -266,6 +266,50 @@ func TestStore(t *testing.T) {
 	}
 }
 
+func TestLoadCorruptedStateFile(t *testing.T) {
+	stateDir := t.TempDir()
+	setBaseStateDir(t, stateDir)
+	infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+	if err := os.MkdirAll(infoDir, 0755); err != nil {
+		t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+	}
+
+	// 1. Create a valid plugin state file.
+	p := &Plugin{
+		Name:     "goodPlugin",
+		Revision: "1",
+		Address:  "test-address",
+	}
+	if err := p.Store(); err != nil {
+		t.Fatalf("p.Store() failed unexpectedly: %v", err)
+	}
+
+	// 2. Create a corrupted (0-byte) plugin state file.
+	corruptedFile := filepath.Join(infoDir, "corruptedPlugin.gob")
+	if err := os.WriteFile(corruptedFile, []byte{}, 0644); err != nil {
+		t.Fatalf("failed to create corrupted file %s: %v", corruptedFile, err)
+	}
+
+	// 3. Load. It should successfully load "goodPlugin" and delete "corruptedPlugin.gob" without error.
+	got, err := load(infoDir)
+	if err != nil {
+		t.Fatalf("load(%s) failed unexpectedly: %v", infoDir, err)
+	}
+
+	if _, ok := got["goodPlugin"]; !ok {
+		t.Errorf("load(%s) did not load goodPlugin", infoDir)
+	}
+
+	if _, ok := got["corruptedPlugin"]; ok {
+		t.Errorf("load(%s) unexpectedly loaded corruptedPlugin", infoDir)
+	}
+
+	// 4. Verify that the corrupted file has been deleted.
+	if _, err := os.Stat(corruptedFile); !os.IsNotExist(err) {
+		t.Errorf("expected corrupted file %s to be deleted, but os.Stat returned: %v", corruptedFile, err)
+	}
+}
+
 func TestConnectOrReLaunch(t *testing.T) {
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	setConnectionsDir(t, "")

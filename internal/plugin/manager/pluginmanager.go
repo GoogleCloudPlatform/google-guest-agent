@@ -957,11 +957,22 @@ func load(stateDir string) (map[string]*Plugin, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unabled to read plugin state from %s: %w", file, err)
 		}
-		defer fh.Close()
 
 		plugin := &Plugin{}
 		if err := gob.NewDecoder(fh).Decode(plugin); err != nil {
-			return nil, fmt.Errorf("unable to decode plugin state file %s: %w", f, err)
+			galog.Errorf("unable to decode plugin state file %s: %v. Deleting corrupted state file.", file, err)
+			fh.Close()
+			if rmErr := os.Remove(file); rmErr != nil {
+				galog.Errorf("failed to remove corrupted state file %s: %v", file, rmErr)
+			}
+			continue
+		}
+		fh.Close()
+		if plugin.RuntimeInfo == nil {
+			plugin.RuntimeInfo = &RuntimeInfo{}
+		}
+		if plugin.Manifest == nil {
+			plugin.Manifest = &Manifest{}
 		}
 		plugin.RuntimeInfo.metrics = boundedlist.New[Metric](plugin.Manifest.MaxMetricDatapoints)
 		plugins[plugin.Name] = plugin
@@ -988,15 +999,21 @@ func sendEvent(ctx context.Context, p *Plugin, evType acpb.PluginEventMessage_Pl
 		EventTimestamp: tpb.New(time.Now()),
 		EventDetails:   []byte(details),
 	}
-	// This might do a retry on the client side if it fails no point in blocking
-	// the caller.
-	go func() {
+
+	fn := func() {
 		if err := client.Notify(ctx, event); err != nil {
 			// Just log the error, Notify() internally handles retrying the request
 			// if this fails there's nothing really we can do.
 			galog.Errorf("Failed to sent event notification [%+v]: %v", event, err)
 		}
-	}()
+	}
+
+	// In unit tests, run synchronously to avoid leaking goroutines and causing races.
+	if ctx.Value(client.OverrideConnection) != nil {
+		fn()
+	} else {
+		go fn()
+	}
 }
 
 // GetLocalPlugin returns the local plugin configuration for the given plugin
