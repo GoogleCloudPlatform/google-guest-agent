@@ -120,7 +120,7 @@ func Init(ctx context.Context, opts Options) error {
 
 	if opts.LogToStderr {
 		galog.V(2).Debugf("Initializing stderr logger")
-		enabledLoggers = append(enabledLoggers, galog.NewStderrBackend(os.Stderr))
+		enabledLoggers = append(enabledLoggers, galog.NewStderrBackend())
 	}
 
 	for _, logger := range enabledLoggers {
