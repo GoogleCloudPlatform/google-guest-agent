@@ -234,10 +234,20 @@ var sendAgentMessage = func(ctx context.Context, channelID string, acsClient *ag
 	return client.SendAgentMessage(ctx, channelID, acsClient, msg)
 }
 
-// sendStream sends a message and wait for response from ACS.
+// sendMessage sends a message and wait for response from ACS.
 func (acs *acsHelper) sendMessage(ctx context.Context, labels map[string]string, msg *anypb.Any) (*acpb.SendAgentMessageResponse, error) {
 	if err := acs.connect(ctx); err != nil {
 		return nil, fmt.Errorf("unable to connect for sending msg, err: %w", err)
+	}
+
+	if ctx.Value(OverrideConnection) != nil {
+		msgBody := &acpb.MessageBody{Labels: labels, Body: msg}
+		if err := acs.connection.SendMessage(msgBody); err != nil {
+			return nil, err
+		}
+		return &acpb.SendAgentMessageResponse{
+			MessageBody: msgBody,
+		}, nil
 	}
 
 	resp, err := sendAgentMessage(ctx, acs.channelID, acs.client, &acpb.MessageBody{Labels: labels, Body: msg})
@@ -260,7 +270,8 @@ func (acs *acsHelper) receiveStream(ctx context.Context) (*acpb.MessageBody, err
 }
 
 // SendMessage sends a message to ACS and waits for response. This is normally
-// used for sending metrics to ACS.
+// used for sending metrics and plugin events to ACS. Unlike [Send], this
+// method uses ACS unary RPC and waits for response from ACS.
 func SendMessage(ctx context.Context, labels map[string]string, msg proto.Message) (*acpb.SendAgentMessageResponse, error) {
 	if !acs.isACSEnabled(ctx) {
 		galog.V(2).Debugf("ACS client is disabled, skipping send message request %v", msg)
@@ -286,7 +297,8 @@ func SendMessage(ctx context.Context, labels map[string]string, msg proto.Messag
 
 // Notify sends an event notification on ACS.
 func Notify(ctx context.Context, event *acmpb.PluginEventMessage) error {
-	return Send(ctx, map[string]string{messageType: pluginEventMessageMsg}, event)
+	_, err := SendMessage(ctx, map[string]string{messageType: pluginEventMessageMsg}, event)
+	return err
 }
 
 // Send sends a message on ACS.

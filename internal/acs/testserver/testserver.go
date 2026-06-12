@@ -49,9 +49,9 @@ type acsImplementation struct {
 	addr string
 	// mu protects [agentSentMsgs] concurrent read/writes.
 	mu sync.Mutex
-	// agentSentMsgs are the messages sent by agent using [agentcomm.Send()].
+	// agentSentMsgs are the messages sent by agent.
 	// Essentially this represents the messages for the server.
-	agentSentMsgs []*acpb.StreamAgentMessagesRequest
+	agentSentMsgs []*acpb.MessageBody
 	// toSend is the channel holding messages temporarily that are sent down to
 	// to an agent. Messages are received by agent on [agentcomm.Watch()].
 	toSend chan *acpb.StreamAgentMessagesResponse
@@ -79,14 +79,17 @@ func NewTestServer(addr string) *Server {
 	}
 }
 
-func (s *acsImplementation) add(msg *acpb.StreamAgentMessagesRequest) {
+func (s *acsImplementation) add(msg *acpb.MessageBody) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentSentMsgs = append(s.agentSentMsgs, msg)
 }
 
-func (s *acsImplementation) SendAgentMessage(context.Context, *acpb.SendAgentMessageRequest) (*acpb.SendAgentMessageResponse, error) {
-	return nil, nil
+func (s *acsImplementation) SendAgentMessage(ctx context.Context, req *acpb.SendAgentMessageRequest) (*acpb.SendAgentMessageResponse, error) {
+	s.add(req.GetMessageBody())
+	return &acpb.SendAgentMessageResponse{
+		MessageBody: req.GetMessageBody(),
+	}, nil
 }
 
 // StreamAgentMessages implements the test ACS communication RPC.
@@ -119,7 +122,7 @@ func (s *acsImplementation) StreamAgentMessages(stream acpb.AgentCommunication_S
 				continue
 			case *acpb.StreamAgentMessagesRequest_MessageBody:
 				// Collect all messages sent by agent.
-				s.add(rec)
+				s.add(rec.GetMessageBody())
 			}
 
 			// Acks as if service will ack on receiving msg from agent Send().
@@ -243,7 +246,7 @@ func (s *Server) AgentSentMessages() []*apb.Any {
 	defer s.acshandler.mu.Unlock()
 	var msgs []*apb.Any
 	for _, msg := range s.acshandler.agentSentMsgs {
-		msgs = append(msgs, msg.GetMessageBody().GetBody())
+		msgs = append(msgs, msg.GetBody())
 	}
 	return msgs
 }
