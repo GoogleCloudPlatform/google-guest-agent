@@ -65,6 +65,8 @@ message AgentInfo {
     CONFIGURE_PLUGIN_STATES = 4;
     // The agent supports applying the config to the installed plugin.
     APPLY_PLUGIN_CONFIG = 5;
+    // The agent supports sending telemetry over unary RPC.
+    SEND_UNARY_TELEMETRY = 6;
   }
 }
 

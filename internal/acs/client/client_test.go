@@ -196,6 +196,11 @@ func TestNotify(t *testing.T) {
 	defaultRetrypolicy.BackoffFactor = 1
 	defaultRetrypolicy.Jitter = time.Millisecond
 
+	orig := sendAgentMessage
+	t.Cleanup(func() {
+		sendAgentMessage = orig
+	})
+
 	event := &acmpb.PluginEventMessage{
 		PluginName: "test_plugin",
 		RevisionId: "test_revision",
