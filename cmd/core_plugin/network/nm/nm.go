@@ -116,6 +116,8 @@ type serviceNetworkManager struct {
 	networkScriptsDir string
 	// configDir is the directory containing the NetworkManager config files.
 	configDir string
+	// reconnectPrimaryNIC is whether to reconnect the primary NIC to NetworkManager.
+	reconnectPrimaryNIC bool
 }
 
 // defaultModule returns the default NetworkManager service implementation.
