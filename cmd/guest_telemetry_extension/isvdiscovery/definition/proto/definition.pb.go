@@ -37,6 +37,8 @@ const (
 
 // These will match to a bundled executable within the extension to run to
 // gather version information
+// DO NOT ADD NEW COMMANDS TO THIS ENUM.  USE EXTENDED_VERSION_COMMAND INSTEAD
+// TO AVOID INDEX OUT OF BOUNDS PANICS ON OLDER VERSIONS OF THE EXTENSION.
 type VersionCommand int32
 
 const (
@@ -174,6 +176,80 @@ func (x VersionCommand) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
+// Extended version commands to be used to gather version information.
+// Any new version commands should be added to this enum.
+// This avoids index out of bounds panics on older versions of the extension.
+type ExtendedVersionCommand int32
+
+const (
+	ExtendedVersionCommand_EXTENDED_VERSION_COMMAND_UNSPECIFIED ExtendedVersionCommand = 0
+	ExtendedVersionCommand_HDB                                  ExtendedVersionCommand = 1
+	ExtendedVersionCommand_DISP_WORK                            ExtendedVersionCommand = 2
+	ExtendedVersionCommand_MSG_SERVER                           ExtendedVersionCommand = 3
+	ExtendedVersionCommand_EN_SERVER                            ExtendedVersionCommand = 4
+	ExtendedVersionCommand_AWK                                  ExtendedVersionCommand = 5
+	ExtendedVersionCommand_SAPWEBDISP                           ExtendedVersionCommand = 6
+	ExtendedVersionCommand_START_IQ                             ExtendedVersionCommand = 7
+	ExtendedVersionCommand_ENREP                                ExtendedVersionCommand = 8
+	ExtendedVersionCommand_SPARK_SUBMIT                         ExtendedVersionCommand = 9
+	ExtendedVersionCommand_SPARK_SUBMIT_PATH                    ExtendedVersionCommand = 10
+	ExtendedVersionCommand_CRICTL                               ExtendedVersionCommand = 11
+)
+
+// Enum value maps for ExtendedVersionCommand.
+var (
+	ExtendedVersionCommand_name = map[int32]string{
+		0:  "EXTENDED_VERSION_COMMAND_UNSPECIFIED",
+		1:  "HDB",
+		2:  "DISP_WORK",
+		3:  "MSG_SERVER",
+		4:  "EN_SERVER",
+		5:  "AWK",
+		6:  "SAPWEBDISP",
+		7:  "START_IQ",
+		8:  "ENREP",
+		9:  "SPARK_SUBMIT",
+		10: "SPARK_SUBMIT_PATH",
+		11: "CRICTL",
+	}
+	ExtendedVersionCommand_value = map[string]int32{
+		"EXTENDED_VERSION_COMMAND_UNSPECIFIED": 0,
+		"HDB":                                  1,
+		"DISP_WORK":                            2,
+		"MSG_SERVER":                           3,
+		"EN_SERVER":                            4,
+		"AWK":                                  5,
+		"SAPWEBDISP":                           6,
+		"START_IQ":                             7,
+		"ENREP":                                8,
+		"SPARK_SUBMIT":                         9,
+		"SPARK_SUBMIT_PATH":                    10,
+		"CRICTL":                               11,
+	}
+)
+
+func (x ExtendedVersionCommand) Enum() *ExtendedVersionCommand {
+	p := new(ExtendedVersionCommand)
+	*p = x
+	return p
+}
+
+func (x ExtendedVersionCommand) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ExtendedVersionCommand) Descriptor() protoreflect.EnumDescriptor {
+	return file_isvdiscovery_definition_definition_proto_enumTypes[1].Descriptor()
+}
+
+func (ExtendedVersionCommand) Type() protoreflect.EnumType {
+	return &file_isvdiscovery_definition_definition_proto_enumTypes[1]
+}
+
+func (x ExtendedVersionCommand) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
 // Which of the fields should be matched.
 type StringMatchCondition_VmField int32
 
@@ -217,11 +293,11 @@ func (x StringMatchCondition_VmField) String() string {
 }
 
 func (StringMatchCondition_VmField) Descriptor() protoreflect.EnumDescriptor {
-	return file_isvdiscovery_definition_definition_proto_enumTypes[1].Descriptor()
+	return file_isvdiscovery_definition_definition_proto_enumTypes[2].Descriptor()
 }
 
 func (StringMatchCondition_VmField) Type() protoreflect.EnumType {
-	return &file_isvdiscovery_definition_definition_proto_enumTypes[1]
+	return &file_isvdiscovery_definition_definition_proto_enumTypes[2]
 }
 
 func (x StringMatchCondition_VmField) Number() protoreflect.EnumNumber {
@@ -1074,21 +1150,153 @@ type stringMatchCondition_VmField_ struct {
 
 func (*stringMatchCondition_VmField_) isStringMatchCondition_Fields() {}
 
+// Defines a single step in a sequential version command pipeline.
+type VersionCommandStep struct {
+	state                                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Command                    VersionCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=guesttelemetryextension.isvdiscovery.VersionCommand"`
+	xxx_hidden_CommandArgs                []string               `protobuf:"bytes,2,rep,name=command_args,json=commandArgs,proto3"`
+	xxx_hidden_RegexMatch                 string                 `protobuf:"bytes,3,opt,name=regex_match,json=regexMatch,proto3"`
+	xxx_hidden_RunAsDiscoveredProcessUser bool                   `protobuf:"varint,4,opt,name=run_as_discovered_process_user,json=runAsDiscoveredProcessUser,proto3"`
+	xxx_hidden_ExtendedCommand            ExtendedVersionCommand `protobuf:"varint,5,opt,name=extended_command,json=extendedCommand,proto3,enum=guesttelemetryextension.isvdiscovery.ExtendedVersionCommand"`
+	xxx_hidden_UsePreviousOutputAsStdin   bool                   `protobuf:"varint,6,opt,name=use_previous_output_as_stdin,json=usePreviousOutputAsStdin,proto3"`
+	unknownFields                         protoimpl.UnknownFields
+	sizeCache                             protoimpl.SizeCache
+}
+
+func (x *VersionCommandStep) Reset() {
+	*x = VersionCommandStep{}
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VersionCommandStep) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VersionCommandStep) ProtoMessage() {}
+
+func (x *VersionCommandStep) ProtoReflect() protoreflect.Message {
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+func (x *VersionCommandStep) GetCommand() VersionCommand {
+	if x != nil {
+		return x.xxx_hidden_Command
+	}
+	return VersionCommand_VERSION_COMMAND_UNSPECIFIED
+}
+
+func (x *VersionCommandStep) GetCommandArgs() []string {
+	if x != nil {
+		return x.xxx_hidden_CommandArgs
+	}
+	return nil
+}
+
+func (x *VersionCommandStep) GetRegexMatch() string {
+	if x != nil {
+		return x.xxx_hidden_RegexMatch
+	}
+	return ""
+}
+
+func (x *VersionCommandStep) GetRunAsDiscoveredProcessUser() bool {
+	if x != nil {
+		return x.xxx_hidden_RunAsDiscoveredProcessUser
+	}
+	return false
+}
+
+func (x *VersionCommandStep) GetExtendedCommand() ExtendedVersionCommand {
+	if x != nil {
+		return x.xxx_hidden_ExtendedCommand
+	}
+	return ExtendedVersionCommand_EXTENDED_VERSION_COMMAND_UNSPECIFIED
+}
+
+func (x *VersionCommandStep) GetUsePreviousOutputAsStdin() bool {
+	if x != nil {
+		return x.xxx_hidden_UsePreviousOutputAsStdin
+	}
+	return false
+}
+
+func (x *VersionCommandStep) SetCommand(v VersionCommand) {
+	x.xxx_hidden_Command = v
+}
+
+func (x *VersionCommandStep) SetCommandArgs(v []string) {
+	x.xxx_hidden_CommandArgs = v
+}
+
+func (x *VersionCommandStep) SetRegexMatch(v string) {
+	x.xxx_hidden_RegexMatch = v
+}
+
+func (x *VersionCommandStep) SetRunAsDiscoveredProcessUser(v bool) {
+	x.xxx_hidden_RunAsDiscoveredProcessUser = v
+}
+
+func (x *VersionCommandStep) SetExtendedCommand(v ExtendedVersionCommand) {
+	x.xxx_hidden_ExtendedCommand = v
+}
+
+func (x *VersionCommandStep) SetUsePreviousOutputAsStdin(v bool) {
+	x.xxx_hidden_UsePreviousOutputAsStdin = v
+}
+
+type VersionCommandStep_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Command                    VersionCommand
+	CommandArgs                []string
+	RegexMatch                 string
+	RunAsDiscoveredProcessUser bool
+	ExtendedCommand            ExtendedVersionCommand
+	UsePreviousOutputAsStdin   bool
+}
+
+func (b0 VersionCommandStep_builder) Build() *VersionCommandStep {
+	m0 := &VersionCommandStep{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Command = b.Command
+	x.xxx_hidden_CommandArgs = b.CommandArgs
+	x.xxx_hidden_RegexMatch = b.RegexMatch
+	x.xxx_hidden_RunAsDiscoveredProcessUser = b.RunAsDiscoveredProcessUser
+	x.xxx_hidden_ExtendedCommand = b.ExtendedCommand
+	x.xxx_hidden_UsePreviousOutputAsStdin = b.UsePreviousOutputAsStdin
+	return m0
+}
+
 // Defines the commands that will be used to gather the version information.
 // Each version rule command will be run in order until one of them gives back a
 // string that contains a regex match defined by the rule.
 type DiscoveryVersionRule struct {
-	state                  protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Command     VersionCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=guesttelemetryextension.isvdiscovery.VersionCommand"`
-	xxx_hidden_CommandArgs []string               `protobuf:"bytes,2,rep,name=command_args,json=commandArgs,proto3"`
-	xxx_hidden_RegexMatch  string                 `protobuf:"bytes,3,opt,name=regex_match,json=regexMatch,proto3"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	state                                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Command                    VersionCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=guesttelemetryextension.isvdiscovery.VersionCommand"`
+	xxx_hidden_CommandArgs                []string               `protobuf:"bytes,2,rep,name=command_args,json=commandArgs,proto3"`
+	xxx_hidden_RegexMatch                 string                 `protobuf:"bytes,3,opt,name=regex_match,json=regexMatch,proto3"`
+	xxx_hidden_RunAsDiscoveredProcessUser bool                   `protobuf:"varint,4,opt,name=run_as_discovered_process_user,json=runAsDiscoveredProcessUser,proto3"`
+	xxx_hidden_ExtendedCommand            ExtendedVersionCommand `protobuf:"varint,5,opt,name=extended_command,json=extendedCommand,proto3,enum=guesttelemetryextension.isvdiscovery.ExtendedVersionCommand"`
+	xxx_hidden_Steps                      *[]*VersionCommandStep `protobuf:"bytes,6,rep,name=steps,proto3"`
+	xxx_hidden_VersionExtractPattern      string                 `protobuf:"bytes,7,opt,name=version_extract_pattern,json=versionExtractPattern,proto3"`
+	unknownFields                         protoimpl.UnknownFields
+	sizeCache                             protoimpl.SizeCache
 }
 
 func (x *DiscoveryVersionRule) Reset() {
 	*x = DiscoveryVersionRule{}
-	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[7]
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1100,7 +1308,7 @@ func (x *DiscoveryVersionRule) String() string {
 func (*DiscoveryVersionRule) ProtoMessage() {}
 
 func (x *DiscoveryVersionRule) ProtoReflect() protoreflect.Message {
-	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[7]
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1132,6 +1340,36 @@ func (x *DiscoveryVersionRule) GetRegexMatch() string {
 	return ""
 }
 
+func (x *DiscoveryVersionRule) GetRunAsDiscoveredProcessUser() bool {
+	if x != nil {
+		return x.xxx_hidden_RunAsDiscoveredProcessUser
+	}
+	return false
+}
+
+func (x *DiscoveryVersionRule) GetExtendedCommand() ExtendedVersionCommand {
+	if x != nil {
+		return x.xxx_hidden_ExtendedCommand
+	}
+	return ExtendedVersionCommand_EXTENDED_VERSION_COMMAND_UNSPECIFIED
+}
+
+func (x *DiscoveryVersionRule) GetSteps() []*VersionCommandStep {
+	if x != nil {
+		if x.xxx_hidden_Steps != nil {
+			return *x.xxx_hidden_Steps
+		}
+	}
+	return nil
+}
+
+func (x *DiscoveryVersionRule) GetVersionExtractPattern() string {
+	if x != nil {
+		return x.xxx_hidden_VersionExtractPattern
+	}
+	return ""
+}
+
 func (x *DiscoveryVersionRule) SetCommand(v VersionCommand) {
 	x.xxx_hidden_Command = v
 }
@@ -1142,6 +1380,22 @@ func (x *DiscoveryVersionRule) SetCommandArgs(v []string) {
 
 func (x *DiscoveryVersionRule) SetRegexMatch(v string) {
 	x.xxx_hidden_RegexMatch = v
+}
+
+func (x *DiscoveryVersionRule) SetRunAsDiscoveredProcessUser(v bool) {
+	x.xxx_hidden_RunAsDiscoveredProcessUser = v
+}
+
+func (x *DiscoveryVersionRule) SetExtendedCommand(v ExtendedVersionCommand) {
+	x.xxx_hidden_ExtendedCommand = v
+}
+
+func (x *DiscoveryVersionRule) SetSteps(v []*VersionCommandStep) {
+	x.xxx_hidden_Steps = &v
+}
+
+func (x *DiscoveryVersionRule) SetVersionExtractPattern(v string) {
+	x.xxx_hidden_VersionExtractPattern = v
 }
 
 type DiscoveryVersionRule_builder struct {
@@ -1155,6 +1409,18 @@ type DiscoveryVersionRule_builder struct {
 	// the string that contains the version.  This will be further parsed to only
 	// get numerical values.
 	RegexMatch string
+	// If true, use su to run the command as the discovered process user.
+	RunAsDiscoveredProcessUser bool
+	// Extended version command to execute if command is unspecified.
+	ExtendedCommand ExtendedVersionCommand
+	// A sequence of commands where the output of one command can be passed as an
+	// argument to the next.
+	// Takes precedence over command and extended_command, which will not be
+	// executed if steps are present.
+	Steps []*VersionCommandStep
+	// A regular expression with exactly one capturing group used to extract the
+	// version. If provided, this overrides the default extracting logic.
+	VersionExtractPattern string
 }
 
 func (b0 DiscoveryVersionRule_builder) Build() *DiscoveryVersionRule {
@@ -1164,6 +1430,10 @@ func (b0 DiscoveryVersionRule_builder) Build() *DiscoveryVersionRule {
 	x.xxx_hidden_Command = b.Command
 	x.xxx_hidden_CommandArgs = b.CommandArgs
 	x.xxx_hidden_RegexMatch = b.RegexMatch
+	x.xxx_hidden_RunAsDiscoveredProcessUser = b.RunAsDiscoveredProcessUser
+	x.xxx_hidden_ExtendedCommand = b.ExtendedCommand
+	x.xxx_hidden_Steps = &b.Steps
+	x.xxx_hidden_VersionExtractPattern = b.VersionExtractPattern
 	return m0
 }
 
@@ -1177,7 +1447,7 @@ type DiscoveryResult struct {
 
 func (x *DiscoveryResult) Reset() {
 	*x = DiscoveryResult{}
-	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[8]
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1189,7 +1459,7 @@ func (x *DiscoveryResult) String() string {
 func (*DiscoveryResult) ProtoMessage() {}
 
 func (x *DiscoveryResult) ProtoReflect() protoreflect.Message {
-	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[8]
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1237,7 +1507,7 @@ type DetectedData struct {
 
 func (x *DetectedData) Reset() {
 	*x = DetectedData{}
-	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[9]
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1249,7 +1519,7 @@ func (x *DetectedData) String() string {
 func (*DetectedData) ProtoMessage() {}
 
 func (x *DetectedData) ProtoReflect() protoreflect.Message {
-	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[9]
+	mi := &file_isvdiscovery_definition_definition_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1344,12 +1614,24 @@ const file_isvdiscovery_definition_definition_proto_rawDesc = "" +
 	"VM_OS_NAME\x10\x03\x12\x0f\n" +
 	"\vVM_CLI_ARGS\x10\x04\x12\x0f\n" +
 	"\vVM_ENV_VARS\x10\x05B\b\n" +
-	"\x06fields\"\xaa\x01\n" +
+	"\x06fields\"\x95\x03\n" +
+	"\x12VersionCommandStep\x12N\n" +
+	"\acommand\x18\x01 \x01(\x0e24.guesttelemetryextension.isvdiscovery.VersionCommandR\acommand\x12!\n" +
+	"\fcommand_args\x18\x02 \x03(\tR\vcommandArgs\x12\x1f\n" +
+	"\vregex_match\x18\x03 \x01(\tR\n" +
+	"regexMatch\x12B\n" +
+	"\x1erun_as_discovered_process_user\x18\x04 \x01(\bR\x1arunAsDiscoveredProcessUser\x12g\n" +
+	"\x10extended_command\x18\x05 \x01(\x0e2<.guesttelemetryextension.isvdiscovery.ExtendedVersionCommandR\x0fextendedCommand\x12>\n" +
+	"\x1cuse_previous_output_as_stdin\x18\x06 \x01(\bR\x18usePreviousOutputAsStdin\"\xdf\x03\n" +
 	"\x14DiscoveryVersionRule\x12N\n" +
 	"\acommand\x18\x01 \x01(\x0e24.guesttelemetryextension.isvdiscovery.VersionCommandR\acommand\x12!\n" +
 	"\fcommand_args\x18\x02 \x03(\tR\vcommandArgs\x12\x1f\n" +
 	"\vregex_match\x18\x03 \x01(\tR\n" +
-	"regexMatch\"j\n" +
+	"regexMatch\x12B\n" +
+	"\x1erun_as_discovered_process_user\x18\x04 \x01(\bR\x1arunAsDiscoveredProcessUser\x12g\n" +
+	"\x10extended_command\x18\x05 \x01(\x0e2<.guesttelemetryextension.isvdiscovery.ExtendedVersionCommandR\x0fextendedCommand\x12N\n" +
+	"\x05steps\x18\x06 \x03(\v28.guesttelemetryextension.isvdiscovery.VersionCommandStepR\x05steps\x126\n" +
+	"\x17version_extract_pattern\x18\a \x01(\tR\x15versionExtractPattern\"j\n" +
 	"\x0fDiscoveryResult\x12W\n" +
 	"\rdetected_data\x18\x01 \x03(\v22.guesttelemetryextension.isvdiscovery.DetectedDataR\fdetectedData\"<\n" +
 	"\fDetectedData\x12\x12\n" +
@@ -1397,43 +1679,66 @@ const file_isvdiscovery_definition_definition_proto_rawDesc = "" +
 	"\x12CASSANDRA_NODETOOL\x10\x1e\x12\x11\n" +
 	"\rSBIN_NODETOOL\x10\x1f\x12\x11\n" +
 	"\rSQLSERVR_PATH\x10 \x12\x1f\n" +
-	"\x1bUSE_DISCOVERED_PROCESS_PATH\x10!B\x18B\fISVDiscoveryP\x01Z\x06/protob\x06proto3"
+	"\x1bUSE_DISCOVERED_PROCESS_PATH\x10!*\xe0\x01\n" +
+	"\x16ExtendedVersionCommand\x12(\n" +
+	"$EXTENDED_VERSION_COMMAND_UNSPECIFIED\x10\x00\x12\a\n" +
+	"\x03HDB\x10\x01\x12\r\n" +
+	"\tDISP_WORK\x10\x02\x12\x0e\n" +
+	"\n" +
+	"MSG_SERVER\x10\x03\x12\r\n" +
+	"\tEN_SERVER\x10\x04\x12\a\n" +
+	"\x03AWK\x10\x05\x12\x0e\n" +
+	"\n" +
+	"SAPWEBDISP\x10\x06\x12\f\n" +
+	"\bSTART_IQ\x10\a\x12\t\n" +
+	"\x05ENREP\x10\b\x12\x10\n" +
+	"\fSPARK_SUBMIT\x10\t\x12\x15\n" +
+	"\x11SPARK_SUBMIT_PATH\x10\n" +
+	"\x12\n" +
+	"\n" +
+	"\x06CRICTL\x10\vB\x18B\fISVDiscoveryP\x01Z\x06/protob\x06proto3"
 
-var file_isvdiscovery_definition_definition_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_isvdiscovery_definition_definition_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_isvdiscovery_definition_definition_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_isvdiscovery_definition_definition_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_isvdiscovery_definition_definition_proto_goTypes = []any{
 	(VersionCommand)(0),               // 0: guesttelemetryextension.isvdiscovery.VersionCommand
-	(StringMatchCondition_VmField)(0), // 1: guesttelemetryextension.isvdiscovery.StringMatchCondition.VmField
-	(*GetDiscoveryRulesRequest)(nil),  // 2: guesttelemetryextension.isvdiscovery.GetDiscoveryRulesRequest
-	(*DiscoveryRules)(nil),            // 3: guesttelemetryextension.isvdiscovery.DiscoveryRules
-	(*DiscoveryRule)(nil),             // 4: guesttelemetryextension.isvdiscovery.DiscoveryRule
-	(*AllCondition)(nil),              // 5: guesttelemetryextension.isvdiscovery.AllCondition
-	(*AnyCondition)(nil),              // 6: guesttelemetryextension.isvdiscovery.AnyCondition
-	(*Condition)(nil),                 // 7: guesttelemetryextension.isvdiscovery.Condition
-	(*StringMatchCondition)(nil),      // 8: guesttelemetryextension.isvdiscovery.StringMatchCondition
-	(*DiscoveryVersionRule)(nil),      // 9: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule
-	(*DiscoveryResult)(nil),           // 10: guesttelemetryextension.isvdiscovery.DiscoveryResult
-	(*DetectedData)(nil),              // 11: guesttelemetryextension.isvdiscovery.DetectedData
+	(ExtendedVersionCommand)(0),       // 1: guesttelemetryextension.isvdiscovery.ExtendedVersionCommand
+	(StringMatchCondition_VmField)(0), // 2: guesttelemetryextension.isvdiscovery.StringMatchCondition.VmField
+	(*GetDiscoveryRulesRequest)(nil),  // 3: guesttelemetryextension.isvdiscovery.GetDiscoveryRulesRequest
+	(*DiscoveryRules)(nil),            // 4: guesttelemetryextension.isvdiscovery.DiscoveryRules
+	(*DiscoveryRule)(nil),             // 5: guesttelemetryextension.isvdiscovery.DiscoveryRule
+	(*AllCondition)(nil),              // 6: guesttelemetryextension.isvdiscovery.AllCondition
+	(*AnyCondition)(nil),              // 7: guesttelemetryextension.isvdiscovery.AnyCondition
+	(*Condition)(nil),                 // 8: guesttelemetryextension.isvdiscovery.Condition
+	(*StringMatchCondition)(nil),      // 9: guesttelemetryextension.isvdiscovery.StringMatchCondition
+	(*VersionCommandStep)(nil),        // 10: guesttelemetryextension.isvdiscovery.VersionCommandStep
+	(*DiscoveryVersionRule)(nil),      // 11: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule
+	(*DiscoveryResult)(nil),           // 12: guesttelemetryextension.isvdiscovery.DiscoveryResult
+	(*DetectedData)(nil),              // 13: guesttelemetryextension.isvdiscovery.DetectedData
 }
 var file_isvdiscovery_definition_definition_proto_depIdxs = []int32{
-	4,  // 0: guesttelemetryextension.isvdiscovery.DiscoveryRules.rules:type_name -> guesttelemetryextension.isvdiscovery.DiscoveryRule
-	7,  // 1: guesttelemetryextension.isvdiscovery.DiscoveryRule.condition:type_name -> guesttelemetryextension.isvdiscovery.Condition
-	5,  // 2: guesttelemetryextension.isvdiscovery.DiscoveryRule.all:type_name -> guesttelemetryextension.isvdiscovery.AllCondition
-	6,  // 3: guesttelemetryextension.isvdiscovery.DiscoveryRule.any:type_name -> guesttelemetryextension.isvdiscovery.AnyCondition
-	9,  // 4: guesttelemetryextension.isvdiscovery.DiscoveryRule.version_rules:type_name -> guesttelemetryextension.isvdiscovery.DiscoveryVersionRule
-	6,  // 5: guesttelemetryextension.isvdiscovery.AllCondition.any:type_name -> guesttelemetryextension.isvdiscovery.AnyCondition
-	7,  // 6: guesttelemetryextension.isvdiscovery.AllCondition.conditions:type_name -> guesttelemetryextension.isvdiscovery.Condition
-	5,  // 7: guesttelemetryextension.isvdiscovery.AnyCondition.all:type_name -> guesttelemetryextension.isvdiscovery.AllCondition
-	7,  // 8: guesttelemetryextension.isvdiscovery.AnyCondition.conditions:type_name -> guesttelemetryextension.isvdiscovery.Condition
-	8,  // 9: guesttelemetryextension.isvdiscovery.Condition.string_match:type_name -> guesttelemetryextension.isvdiscovery.StringMatchCondition
-	1,  // 10: guesttelemetryextension.isvdiscovery.StringMatchCondition.vm_field:type_name -> guesttelemetryextension.isvdiscovery.StringMatchCondition.VmField
-	0,  // 11: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.command:type_name -> guesttelemetryextension.isvdiscovery.VersionCommand
-	11, // 12: guesttelemetryextension.isvdiscovery.DiscoveryResult.detected_data:type_name -> guesttelemetryextension.isvdiscovery.DetectedData
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	5,  // 0: guesttelemetryextension.isvdiscovery.DiscoveryRules.rules:type_name -> guesttelemetryextension.isvdiscovery.DiscoveryRule
+	8,  // 1: guesttelemetryextension.isvdiscovery.DiscoveryRule.condition:type_name -> guesttelemetryextension.isvdiscovery.Condition
+	6,  // 2: guesttelemetryextension.isvdiscovery.DiscoveryRule.all:type_name -> guesttelemetryextension.isvdiscovery.AllCondition
+	7,  // 3: guesttelemetryextension.isvdiscovery.DiscoveryRule.any:type_name -> guesttelemetryextension.isvdiscovery.AnyCondition
+	11, // 4: guesttelemetryextension.isvdiscovery.DiscoveryRule.version_rules:type_name -> guesttelemetryextension.isvdiscovery.DiscoveryVersionRule
+	7,  // 5: guesttelemetryextension.isvdiscovery.AllCondition.any:type_name -> guesttelemetryextension.isvdiscovery.AnyCondition
+	8,  // 6: guesttelemetryextension.isvdiscovery.AllCondition.conditions:type_name -> guesttelemetryextension.isvdiscovery.Condition
+	6,  // 7: guesttelemetryextension.isvdiscovery.AnyCondition.all:type_name -> guesttelemetryextension.isvdiscovery.AllCondition
+	8,  // 8: guesttelemetryextension.isvdiscovery.AnyCondition.conditions:type_name -> guesttelemetryextension.isvdiscovery.Condition
+	9,  // 9: guesttelemetryextension.isvdiscovery.Condition.string_match:type_name -> guesttelemetryextension.isvdiscovery.StringMatchCondition
+	2,  // 10: guesttelemetryextension.isvdiscovery.StringMatchCondition.vm_field:type_name -> guesttelemetryextension.isvdiscovery.StringMatchCondition.VmField
+	0,  // 11: guesttelemetryextension.isvdiscovery.VersionCommandStep.command:type_name -> guesttelemetryextension.isvdiscovery.VersionCommand
+	1,  // 12: guesttelemetryextension.isvdiscovery.VersionCommandStep.extended_command:type_name -> guesttelemetryextension.isvdiscovery.ExtendedVersionCommand
+	0,  // 13: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.command:type_name -> guesttelemetryextension.isvdiscovery.VersionCommand
+	1,  // 14: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.extended_command:type_name -> guesttelemetryextension.isvdiscovery.ExtendedVersionCommand
+	10, // 15: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.steps:type_name -> guesttelemetryextension.isvdiscovery.VersionCommandStep
+	13, // 16: guesttelemetryextension.isvdiscovery.DiscoveryResult.detected_data:type_name -> guesttelemetryextension.isvdiscovery.DetectedData
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_isvdiscovery_definition_definition_proto_init() }
@@ -1459,8 +1764,8 @@ func file_isvdiscovery_definition_definition_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_isvdiscovery_definition_definition_proto_rawDesc), len(file_isvdiscovery_definition_definition_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   10,
+			NumEnums:      3,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

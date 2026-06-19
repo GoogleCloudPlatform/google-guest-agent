@@ -5,7 +5,7 @@
 plugin: {
   name: "GuestTelemetryExtension"
   entry_point: "C:\\Program Files\\Google\\Compute Engine\\agent\\GuestTelemetryExtension\\GuestTelemetry.exe"
-  revision_id: "1.0"
+  revision_id: "1.1"
 }
 manifest: {
   start_attempt_count: 5
