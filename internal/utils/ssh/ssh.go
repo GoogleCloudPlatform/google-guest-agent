@@ -18,10 +18,9 @@ package ssh
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"golang.org/x/crypto/ssh"
@@ -98,13 +97,10 @@ func ValidateUser(user string) error {
 		return errors.New("invalid username - it is empty")
 	}
 
-	whiteSpaceRegexp, err := regexp.Compile(`\s`)
-	if err != nil {
-		return fmt.Errorf("whitespace regex failed to compile, err: %w", err)
-	}
-
-	if whiteSpaceRegexp.MatchString(user) {
-		return errors.New("invalid username - whitespace detected")
+	for _, r := range user {
+		if unicode.IsSpace(r) {
+			return errors.New("invalid username - whitespace detected")
+		}
 	}
 	return nil
 }
