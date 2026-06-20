@@ -229,22 +229,40 @@ func countLastNLinesBytes(f *os.File, size int64, n int) (int64, error) {
 	var result int64
 	seenLines := n
 
-	for i := size - 1; i >= 0; i-- {
-		result++
-		tmp := make([]byte, 1)
+	const chunkSize = 4096
+	buf := make([]byte, chunkSize)
 
-		_, err := f.ReadAt(tmp, i)
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return -1, err
+	for offset := size; offset > 0; {
+		start := offset - chunkSize
+		if start < 0 {
+			start = 0
 		}
 
-		if tmp[0] == '\n' {
-			seenLines--
+		readSize := int(offset - start)
+		nBytes, err := f.ReadAt(buf[:readSize], start)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return -1, err
+		}
+		if nBytes == 0 {
+			break
+		}
+
+		// Iterate backwards over the read bytes
+		for j := nBytes - 1; j >= 0; j-- {
+			result++
+			if buf[j] == '\n' {
+				seenLines--
+			}
+			if seenLines == 0 {
+				break
+			}
 		}
 
 		if seenLines == 0 {
 			break
 		}
+
+		offset = start
 	}
 
 	// If we didn't read enough lines, return an error.
