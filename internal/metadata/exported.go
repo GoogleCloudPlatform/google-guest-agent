@@ -104,6 +104,18 @@ func (desc *Descriptor) AccountManagerDisabled() bool {
 	return false
 }
 
+// AddressManagerDisabled reports whether instance and project metadata
+// indicates that address manager should be disabled.
+func (desc *Descriptor) AddressManagerDisabled() bool {
+	if desc.Instance().Attributes().DisableAddressManager() != nil {
+		return *desc.Instance().Attributes().DisableAddressManager()
+	}
+	if desc.Project().Attributes().DisableAddressManager() != nil {
+		return *desc.Project().Attributes().DisableAddressManager()
+	}
+	return false
+}
+
 // OSLoginEnabled reports whether instance and project metadata attributes
 // indicate that OSLogin should be enabled.
 func (desc *Descriptor) OSLoginEnabled() bool {
