@@ -316,6 +316,11 @@ func TestReadLastNLines(t *testing.T) {
 		t.Fatalf("Failed to close test file: %v", err)
 	}
 
+	file3 := filepath.Join(tmp, "file3")
+	if err := os.WriteFile(file3, []byte("single line without newline"), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
 	tests := []struct {
 		name  string
 		file  string
@@ -361,6 +366,18 @@ func TestReadLastNLines(t *testing.T) {
 			name:  "empty_file_0_lines",
 			file:  file2,
 			lines: 0,
+		},
+		{
+			name:  "single_line_no_newline",
+			file:  file3,
+			lines: 1,
+			want:  []string{"single line without newline"},
+		},
+		{
+			name:  "single_line_no_newline_request_more",
+			file:  file3,
+			lines: 5,
+			want:  []string{"single line without newline"},
 		},
 	}
 

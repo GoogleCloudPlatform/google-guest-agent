@@ -246,12 +246,6 @@ func countLastNLinesBytes(f *os.File, size int64, n int) (int64, error) {
 			break
 		}
 	}
-
-	// If we didn't read enough lines, return an error.
-	if n > 0 && seenLines == n {
-		return -1, fmt.Errorf("failed to read %d lines from file", n)
-	}
-
 	return result, nil
 }
 
