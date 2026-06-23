@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -174,6 +175,16 @@ func TestWriteWorkloadIdentities(t *testing.T) {
 	}
 	if string(gotPvtPem) != pvtPem {
 		t.Errorf("writeWorkloadIdentities(%s,%s) wrote %q, expected to write %q", dir, resp, string(gotPvtPem), pvtPem)
+	}
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(dir, "private_key.pem"))
+		if err != nil {
+			t.Errorf("failed to stat private_key.pem: %v", err)
+		}
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("private_key.pem has permissions %o, want 0600", info.Mode().Perm())
+		}
 	}
 }
 
@@ -353,6 +364,20 @@ func TestRefreshCreds(t *testing.T) {
 				}
 				if string(got) != test.content {
 					t.Errorf("refreshCreds(ctx, %+v) wrote %q, want content %q", out, string(got), test.content)
+				}
+
+				if runtime.GOOS != "windows" {
+					info, err := os.Stat(test.path)
+					if err != nil {
+						t.Errorf("failed to stat file %q: %v", test.path, err)
+					}
+					expectedPerm := os.FileMode(0644)
+					if filepath.Base(test.path) == "private_key.pem" {
+						expectedPerm = 0600
+					}
+					if info.Mode().Perm() != expectedPerm {
+						t.Errorf("file %q has permissions %o, want %o", test.path, info.Mode().Perm(), expectedPerm)
+					}
 				}
 			})
 		}
