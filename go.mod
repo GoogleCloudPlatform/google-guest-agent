@@ -15,6 +15,9 @@ require (
 	github.com/google/go-tpm v0.9.8
 	github.com/google/go-tpm-tools v0.4.9
 	github.com/google/tink/go v1.7.0
+	github.com/miekg/dns v1.1.72
+	github.com/prometheus/procfs v0.14.0
+	github.com/safchain/ethtool v0.4.1
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/spf13/cobra v1.10.2
 	go.bug.st/serial v1.7.1
