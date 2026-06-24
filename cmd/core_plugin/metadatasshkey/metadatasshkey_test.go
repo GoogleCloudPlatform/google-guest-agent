@@ -83,6 +83,60 @@ func descriptorFromJSON(t *testing.T, j string) *metadata.Descriptor {
 	return desc
 }
 
+func TestDisableAccountManager(t *testing.T) {
+	// Make sure the environment is clean before we start.
+	lastUserKeyMap := userKeyMap{}
+	events.FetchManager().Unsubscribe(metadata.LongpollEvent, "metadatasshkey")
+
+	t.Logf("Testing for configuration with account manager disabled.")
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
+	cfg.Retrieve().AccountManager = &cfg.AccountManager{
+		Disable: true,
+	}
+
+	if err := moduleSetup(context.Background(), descriptorFromJSON(t, "{}")); err != nil {
+		t.Fatalf("moduleSetup(ctx, {}) = %v, want nil", err)
+	}
+
+	if events.FetchManager().IsSubscribed(metadata.LongpollEvent, "metadatasshkey") {
+		t.Errorf("moduleSetup(ctx, {}) = subscribed to metadata.LongpollEvent, want not subscribed")
+	}
+
+	t.Cleanup(func() {
+		events.FetchManager().Unsubscribe(metadata.LongpollEvent, "metadatasshkey")
+	})
+
+	t.Logf("Testing for instance metadata attribute disable-account-manager set to true.")
+	cfg.Retrieve().AccountManager = nil
+
+	if err := moduleSetup(context.Background(), descriptorFromJSON(t, `{
+		"instance":  {
+			"attributes": {
+				"disable-account-manager": "true",
+				"ssh-keys": "testuser:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILFYqqo4wCPyk9GZX1spzptpTEOnhouAP276pHr1Sv7z testuser@fakehost"
+			}
+		}
+	}`)); err != nil {
+		t.Errorf("moduleSetup(ctx, {}) = %v, want nil", err)
+	}
+
+	if !events.FetchManager().IsSubscribed(metadata.LongpollEvent, "metadatasshkey") {
+		t.Errorf("moduleSetup(ctx, {}) = not subscribed to metadata.LongpollEvent, want subscribed")
+	}
+
+	// lastUserKeyMap should be empty since we didn't call any setup functions.
+	if len(lastUserKeyMap) != 0 {
+		t.Errorf("lastUserKeyMap = %v, want empty", lastUserKeyMap)
+	}
+
+	t.Cleanup(func() {
+		events.FetchManager().Unsubscribe(metadata.LongpollEvent, "metadatasshkey")
+		lastUserKeyMap = make(userKeyMap)
+	})
+}
+
 func TestDiff(t *testing.T) {
 	tests := []struct {
 		name          string

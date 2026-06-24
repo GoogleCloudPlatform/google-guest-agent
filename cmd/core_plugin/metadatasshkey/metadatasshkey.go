@@ -91,15 +91,27 @@ func moduleSetup(ctx context.Context, data any) error {
 		return nil
 	}
 
+	// If the account manager is disabled, we skip the rest of the initialization -
+	// first setup is not done and no metadata longpoll event handler is
+	// registered.
+	if cfg.Retrieve().AccountManager != nil && cfg.Retrieve().AccountManager.Disable {
+		galog.Infof("Account manager is disabled, skipping metadata ssh key setup.")
+		return nil
+	}
+
 	galog.Debug("Initializing Metadata SSH Key module.")
 	desc, ok := data.(*metadata.Descriptor)
 	if !ok {
 		return fmt.Errorf("expected metadata descriptor data in moduleSetup call")
 	}
 
-	_, errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
-	for _, err := range errs {
-		galog.Errorf("error setting initial metadatasshkey configuration: %v", err)
+	if desc.AccountManagerDisabled() {
+		galog.Infof("Account manager is disabled, skipping metadata ssh key setup.")
+	} else {
+		_, errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
+		for _, err := range errs {
+			galog.Errorf("error setting initial metadatasshkey configuration: %v", err)
+		}
 	}
 
 	sub := events.EventSubscriber{Name: "metadatasshkey", Callback: handleMetadataChange, MetricName: acmpb.GuestAgentModuleMetric_METADATA_SSH_KEY_INITIALIZATION}
@@ -117,6 +129,16 @@ func handleMetadataChange(ctx context.Context, evType string, data any, evData *
 
 	if evData.Error != nil {
 		return true, true, fmt.Errorf("metadata event watcher reported error: %v, skiping ssh key setup", evData.Error)
+	}
+
+	// Avoid running metadataSSHKeySetup if account manager is disabled.
+	if desc.AccountManagerDisabled() {
+		// Only log this the first time it happens after the module is enabled.
+		if lastEnabled {
+			galog.Infof("Account manager is disabled, disabling metadata ssh key.")
+		}
+		lastEnabled = false
+		return true, true, nil
 	}
 
 	noop, errs := metadataSSHKeySetup(ctx, cfg.Retrieve(), desc)
