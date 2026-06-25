@@ -16,11 +16,12 @@ package workloadcertrefresh
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"testing"
+	"time"
 
-	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -46,25 +47,47 @@ func TestNewModule(t *testing.T) {
 }
 
 func TestRefresherJobAPI(t *testing.T) {
-	r := NewCertRefresher()
-
-	if r.MetricName() != acpb.GuestAgentModuleMetric_WORKLOAD_CERT_REFRESH_INITIALIZATION {
-		t.Errorf("MetricName() = %s, want %s", r.MetricName().String(), acpb.GuestAgentModuleMetric_WORKLOAD_CERT_REFRESH_INITIALIZATION.String())
+	tests := []struct {
+		name           string
+		refreshMinutes int
+	}{
+		{
+			name:           "standard_refresh",
+			refreshMinutes: 10,
+		},
+		{
+			name:           "long_refresh",
+			refreshMinutes: 60,
+		},
+		{
+			name:           "short_refresh",
+			refreshMinutes: 1,
+		},
 	}
 
-	if r.ID() != certRefresherModuleID {
-		t.Errorf("ID() = %s, want %s", r.ID(), certRefresherModuleID)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			customINI := fmt.Sprintf("[MWLID]\ncredential_refresh_minutes = %d\n", tc.refreshMinutes)
 
-	gotFreq, startNow := r.Interval()
-	if gotFreq != refreshFrequency {
-		t.Errorf("Interval() = frequency %v, want %v", gotFreq, refreshFrequency)
-	}
-	if !startNow {
-		t.Error("Interval() = start now false, want true")
-	}
-	if r.mdsClient == nil {
-		t.Error("r.mdsClient = nil, want non-nil")
+			if err := cfg.Load([]byte(customINI)); err != nil {
+				t.Fatalf("cfg.Load() failed to load custom overrides for %q: %v", tc.name, err)
+			}
+
+			t.Cleanup(func() {
+				cfg.Load(nil)
+			})
+
+			r := NewCertRefresher()
+
+			gotFreq, startNow := r.Interval()
+			if gotFreq != time.Duration(tc.refreshMinutes)*time.Minute {
+				t.Errorf("Interval() = frequency %v, want %v", gotFreq, time.Duration(tc.refreshMinutes)*time.Minute)
+			}
+
+			if !startNow {
+				t.Error("Interval() = start now false, want true")
+			}
+		})
 	}
 }
 

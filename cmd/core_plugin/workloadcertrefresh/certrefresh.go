@@ -24,6 +24,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/scheduler"
 	"google.golang.org/grpc"
@@ -32,8 +33,6 @@ import (
 const (
 	// certRefresherModuleID is the ID of the cert refresher module.
 	certRefresherModuleID = "gce-workload-cert-refresher"
-	// refreshFrequency  is the frequency at which this job is executed.
-	refreshFrequency = time.Minute * 10
 )
 
 // NewModule returns the first boot module for late stage registration.
@@ -115,7 +114,7 @@ func (j *RefresherJob) MetricName() acmpb.GuestAgentModuleMetric_Metric {
 // Interval returns the interval at which job should be rescheduled and [true]
 // stating if the job should be scheduled starting now.
 func (j *RefresherJob) Interval() (time.Duration, bool) {
-	return refreshFrequency, true
+	return time.Duration(cfg.Retrieve().MWLID.CredentialRefreshMinutes) * time.Minute, true
 }
 
 // ShouldEnable specifies if the job should be enabled for scheduling.
