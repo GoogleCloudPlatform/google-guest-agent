@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -78,7 +79,7 @@ func (m *testPluginManager) VerifyPluginRunning(ctx context.Context, req *acpb.C
 }
 
 func TestInstall(t *testing.T) {
-	c := Config{Version: "123", CorePluginPath: "test_path"}
+	c := Config{Version: "123", CorePluginPath: filepath.Join(t.TempDir(), "core_plugin")}
 	wantReq := &acpb.ConfigurePluginStates{
 		ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
 			&acpb.ConfigurePluginStates_ConfigurePlugin{
@@ -104,26 +105,36 @@ func TestInstall(t *testing.T) {
 	tests := []struct {
 		desc       string
 		name       string
+		writeFile  bool
 		shouldSkip bool
 		wantErr    bool
 		runError   []bool
 		wantReq    *acpb.ConfigurePluginStates
 	}{
 		{
-			desc:     "install_success",
-			wantReq:  wantReq,
-			runError: []bool{true, false},
+			desc:      "install_success",
+			writeFile: true,
+			wantReq:   wantReq,
+			runError:  []bool{true, false},
 		},
 		{
 			desc:       "install_skipped",
+			writeFile:  true,
 			runError:   []bool{false},
 			shouldSkip: true,
 		},
 		{
-			desc:     "install_failure",
+			desc:      "install_failure",
+			writeFile: true,
+			wantErr:   true,
+			runError:  []bool{true, true},
+			wantReq:   wantReq,
+		},
+		{
+			desc:     "install_failure_doesn't_exist",
 			wantErr:  true,
 			runError: []bool{true, true},
-			wantReq:  wantReq,
+			wantReq:  nil,
 		},
 	}
 
@@ -136,6 +147,17 @@ func TestInstall(t *testing.T) {
 			testManager := &testPluginManager{setOnInstall: plugins, runError: tc.runError}
 			if tc.shouldSkip {
 				testManager.plugins = plugins
+			}
+			if tc.writeFile {
+				if err := os.WriteFile(c.CorePluginPath, []byte("test"), 0644); err != nil {
+					t.Fatalf("os.WriteFile(%q, %q) failed unexpectedly with error: %v", c.CorePluginPath, "test", err)
+				}
+
+				t.Cleanup(func() {
+					if err := os.Remove(c.CorePluginPath); err != nil {
+						t.Fatalf("os.Remove(%q) failed unexpectedly with error: %v", c.CorePluginPath, err)
+					}
+				})
 			}
 
 			gotErr := install(ctx, testManager, c)
