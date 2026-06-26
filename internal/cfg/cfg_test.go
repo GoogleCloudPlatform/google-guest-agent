@@ -215,3 +215,72 @@ func TestToString(t *testing.T) {
 		t.Errorf("ToString() got diff (-want +got):\n%s", diff)
 	}
 }
+
+func TestMWLIDCredentialRefreshMinutesValidation(t *testing.T) {
+	tests := []struct {
+		name           string
+		customINI      string
+		wantedInterval int
+	}{
+		{
+			name:           "standard_refresh",
+			customINI:      "[MWLID]\nenabled = true\ncredential_refresh_minutes = 10\n",
+			wantedInterval: 10,
+		},
+		{
+			name:           "minimum_valid_refresh",
+			customINI:      "[MWLID]\nenabled = true\ncredential_refresh_minutes = 1\n",
+			wantedInterval: 1,
+		},
+		{
+			name:           "zero_refresh",
+			customINI:      "[MWLID]\nenabled = true\ncredential_refresh_minutes = 0\n",
+			wantedInterval: 10, // Defaults to 10
+		},
+		{
+			name:           "no_refresh_interval",
+			customINI:      "[MWLID]\nenabled = false\n",
+			wantedInterval: 10, // Defaults to 10
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+
+			if err := Load([]byte(tc.customINI)); err != nil {
+				t.Fatalf("Load() failed to load custom overrides for %q: %v", tc.name, err)
+			}
+
+			cfg := Retrieve()
+			if cfg.MWLID == nil {
+				t.Fatal("Retrieve().MWLID is nil, expected configuration section")
+			}
+
+			if got := cfg.MWLID.CredentialRefreshMinutes; got != tc.wantedInterval {
+				t.Errorf("CredentialRefreshMinutes = %d, want %d", got, tc.wantedInterval)
+			}
+		})
+	}
+}
+
+func TestMWLIDCredentialRefreshMinutesValidation_Errors(t *testing.T) {
+	tests := []struct {
+		name           string
+		refreshMinutes int
+	}{
+		{
+			name:           "negative_refresh",
+			refreshMinutes: -1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			customINI := fmt.Sprintf("[MWLID]\nenabled = true\ncredential_refresh_minutes = %d\n", tc.refreshMinutes)
+
+			if err := Load([]byte(customINI)); err == nil {
+				t.Errorf("Load() succeeded for %d, want error", tc.refreshMinutes)
+			}
+		})
+	}
+}
