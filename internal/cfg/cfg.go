@@ -537,6 +537,10 @@ func Load(extraDefaults []byte) error {
 		return fmt.Errorf("failed to map configuration to object: %w", err)
 	}
 
+	if err := validateSections(sections); err != nil {
+		return err
+	}
+
 	instance = sections
 	return nil
 }
