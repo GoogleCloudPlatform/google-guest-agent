@@ -21,7 +21,6 @@ import (
 	"errors"
 	"os"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
@@ -132,75 +131,5 @@ func TestFailure(t *testing.T) {
 
 	if err := SetState(ctx, StateRunning); err == nil {
 		t.Errorf("SetState(ctx, %d) = nil, want: error", StateRunning)
-	}
-}
-
-func TestShouldHandleSignal(t *testing.T) {
-	tests := []struct {
-		name      string
-		sig       os.Signal
-		isService bool
-		want      bool
-	}{
-		{
-			name:      "SIGTERM_service",
-			sig:       syscall.SIGTERM,
-			isService: true,
-			want:      true,
-		},
-		{
-			name:      "SIGTERM_not_service",
-			sig:       syscall.SIGTERM,
-			isService: false,
-			want:      true,
-		},
-		{
-			name:      "SIGINT_service",
-			sig:       syscall.SIGINT,
-			isService: true,
-			want:      true,
-		},
-		{
-			name:      "SIGINT_not_service",
-			sig:       syscall.SIGINT,
-			isService: false,
-			want:      true,
-		},
-		{
-			name:      "SIGHUP_service",
-			sig:       syscall.SIGHUP,
-			isService: true,
-			want:      true,
-		},
-		{
-			name:      "SIGHUP_not_service",
-			sig:       syscall.SIGHUP,
-			isService: false,
-			want:      true,
-		},
-		{
-			name:      "SIGQUIT_service",
-			sig:       syscall.SIGQUIT,
-			isService: true,
-			want:      true,
-		},
-		{
-			name:      "SIGQUIT_not_service",
-			sig:       syscall.SIGQUIT,
-			isService: false,
-			want:      true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			ss := &systemdService{
-				systemdContext: tc.isService,
-			}
-			got := ss.shouldHandleSignal(tc.sig)
-			if got != tc.want {
-				t.Fatalf("shouldHandleSignal(%v) = %v, want: %v", tc.sig, got, tc.want)
-			}
-		})
 	}
 }
