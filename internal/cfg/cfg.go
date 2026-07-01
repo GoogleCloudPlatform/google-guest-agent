@@ -108,10 +108,10 @@ set_multiqueue = true
 default_shell = /bin/bash
 run_dir =
 shutdown = true
-shutdown-windows = true
+shutdown_windows = true
 startup = true
-startup-windows = true
-sysprep-specialize = true
+startup_windows = true
+sysprep_specialize = true
 
 [NetworkInterfaces]
 dhcp_command =
@@ -391,9 +391,9 @@ type MetadataScripts struct {
 	DefaultShell      string `ini:"default_shell,omitempty"`
 	RunDir            string `ini:"run_dir,omitempty"`
 	Shutdown          bool   `ini:"shutdown,omitempty"`
-	ShutdownWindows   bool   `ini:"shutdown-windows,omitempty"`
+	ShutdownWindows   bool   `ini:"shutdown_windows,omitempty"`
 	Startup           bool   `ini:"startup,omitempty"`
-	StartupWindows    bool   `ini:"startup-windows,omitempty"`
+	StartupWindows    bool   `ini:"startup_windows,omitempty"`
 	SysprepSpecialize bool   `ini:"sysprep_specialize,omitempty"`
 }
 
