@@ -56,6 +56,13 @@ const (
 	configurePluginStatesMsg = "agent_controlplane.ConfigurePluginStates"
 )
 
+var (
+	// prevReq is the previous ConfigurePluginStates request received from ACS.
+	// This is used in testing to see the updated request after filtering out
+	// the requests that don't need to be processed.
+	prevReq *acppb.ConfigurePluginStates
+)
+
 // Init initializes the ACS handler that starts listening to ACS messages.
 func Init(ver string) {
 	if !cfg.Retrieve().Core.ACSClient {
@@ -181,7 +188,9 @@ func (f *dataFetchers) configurePluginStates(ctx context.Context, msg *acpb.Mess
 	// DYNAMIC_INSTALLATION, without checking the request.
 	// We may be able to remove this check entirely if configuration of
 	// non-dynamic plugins via ACS is desired in the future.
+	pluginsToConfigure := make([]*acppb.ConfigurePluginStates_ConfigurePlugin, 0, len(req.GetConfigurePlugins()))
 	for _, c := range req.GetConfigurePlugins() {
+		// Ignore all requests that don't specify a dynamic installation type.
 		if manifest := c.GetManifest(); manifest != nil {
 			installationType := manifest.GetPluginInstallationType()
 			if installationType != acppb.PluginInstallationType_DYNAMIC_INSTALLATION {
@@ -192,7 +201,28 @@ func (f *dataFetchers) configurePluginStates(ctx context.Context, msg *acpb.Mess
 		} else {
 			galog.Warnf("Manifest not specified in ConfigurePluginStates request")
 		}
+
+		// Ignore all requests to configure core plugin.
+		if c.GetPlugin().GetName() == manager.CorePluginName {
+			galog.Infof("ConfigurePluginStates request contains core plugin %q, ignoring", c.GetPlugin().GetName())
+			continue
+		}
+
+		// Ignore requests to uninstall local plugins. Only ignore if the revision
+		// matches, otherwise we want to allow downgrades or upgrades of the plugin.
+		p, err := f.pluginManager.Fetch(c.GetPlugin().GetName())
+		if err == nil && p.IsLocal() && c.GetPlugin().GetRevisionId() == p.Revision {
+			galog.Infof("ConfigurePluginStates request for local plugin %q with matching revision %q, ignoring", c.GetPlugin().GetName(), p.Revision)
+			continue
+		}
+
+		// Add the request to the list of requests to be processed.
+		pluginsToConfigure = append(pluginsToConfigure, c)
 	}
+
+	// Update the request to only contain plugins that need to be configured.
+	req.ConfigurePlugins = pluginsToConfigure
+	prevReq = req
 
 	// Don't process the request from ACS if the plugin manager is not initialized
 	// yet. This is to avoid trying to configure the plugins that may already
