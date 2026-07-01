@@ -242,7 +242,7 @@ func (j *CredsJob) writeClientCredentials(ctx context.Context, creds []byte, out
 		galog.Warnf("Could not get previous serial number, will skip cleanup: %v", err)
 	}
 
-	if err := file.SaferWriteFile(ctx, creds, outputFile, file.Options{Perm: 0644}); err != nil {
+	if err := file.SaferWriteFile(ctx, creds, outputFile, file.Options{Perm: 0600}); err != nil {
 		return fmt.Errorf("failed to write client key: %w", err)
 	}
 	galog.Debugf("Successfully wrote client credentials to %q", outputFile)
@@ -256,7 +256,7 @@ func (j *CredsJob) writeClientCredentials(ctx context.Context, creds []byte, out
 
 	galog.V(1).Debugf("Writing PFX file to %q", pfxFile)
 	p := filepath.Join(filepath.Dir(outputFile), pfxFile)
-	if err := file.SaferWriteFile(ctx, pfx, p, file.Options{Perm: 0644}); err != nil {
+	if err := file.SaferWriteFile(ctx, pfx, p, file.Options{Perm: 0600}); err != nil {
 		return fmt.Errorf("failed to write PFX file: %w", err)
 	}
 	galog.V(1).Debugf("Successfully wrote PFX file to %q", p)

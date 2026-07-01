@@ -192,7 +192,7 @@ func writeWorkloadIdentities(destDir string, wisMd []byte) (string, error) {
 		return "", fmt.Errorf("error writing certificates.pem: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(destDir, "private_key.pem"), []byte(wis.WorkloadCredentials[spiffeID].PrivateKeyPem), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(destDir, "private_key.pem"), []byte(wis.WorkloadCredentials[spiffeID].PrivateKeyPem), 0600); err != nil {
 		return "", fmt.Errorf("error writing private_key.pem: %w", err)
 	}
 	return spiffeID, nil
@@ -449,7 +449,7 @@ func (j *RefresherJob) refreshCredsWithGRPC(ctx context.Context, contentDir stri
 	}
 
 	galog.Debugf("Writing workload certificates private key to %s", contentDir)
-	if err := os.WriteFile(filepath.Join(contentDir, "private_key.pem"), certs.GetPrivateKeyPem(), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(contentDir, "private_key.pem"), certs.GetPrivateKeyPem(), 0600); err != nil {
 		return fmt.Errorf("error writing private_key.pem: %w", err)
 	}
 	galog.Debugf("Writing workload certificates certificate chain to %s", contentDir)
