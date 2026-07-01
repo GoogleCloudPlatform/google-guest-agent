@@ -151,6 +151,7 @@ func (f *dataFetchers) agentInfo() *acppb.AgentInfo {
 			acppb.AgentInfo_LIST_PLUGIN_STATES,
 			acppb.AgentInfo_CONFIGURE_PLUGIN_STATES,
 			acppb.AgentInfo_APPLY_PLUGIN_CONFIG,
+			acppb.AgentInfo_SEND_UNARY_TELEMETRY,
 		},
 		Version: f.clientVersion,
 	}

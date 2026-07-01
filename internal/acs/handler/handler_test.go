@@ -97,6 +97,7 @@ func TestHandleMessage(t *testing.T) {
 			acmpb.AgentInfo_LIST_PLUGIN_STATES,
 			acmpb.AgentInfo_CONFIGURE_PLUGIN_STATES,
 			acmpb.AgentInfo_APPLY_PLUGIN_CONFIG,
+			acmpb.AgentInfo_SEND_UNARY_TELEMETRY,
 		},
 		Version: v,
 	}
