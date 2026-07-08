@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
@@ -34,11 +35,13 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metricregistry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/osinfo"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/textconfig"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	tpb "google.golang.org/protobuf/types/known/timestamppb"
 
 	acmpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
 )
@@ -199,6 +202,10 @@ type osloginModule struct {
 	// permanentFailure indicates if the module has failed to configure due to a
 	// permanent error and should not be retried.
 	permanentFailure atomic.Bool
+	// setupInProgress is true if the setup is currently running in background.
+	setupInProgress atomic.Bool
+	// metrics is the metric registry for this module.
+	metrics *metricregistry.MetricRegistry
 	// sshdConfigPath is the path to the openssh daemon configuration file.
 	sshdConfigPath string
 	// nsswitchConfigPath is the path to the NSSwitch configuration file.
@@ -249,7 +256,7 @@ type serviceRestartConfig struct {
 }
 
 // NewModule returns a new oslogin module for late registration.
-func NewModule(context.Context) *manager.Module {
+func NewModule(ctx context.Context) *manager.Module {
 	module := &osloginModule{
 		sshdConfigPath:               defaultSSHDConfigPath,
 		nsswitchConfigPath:           defaultNSSwitchConfigPath,
@@ -261,6 +268,7 @@ func NewModule(context.Context) *manager.Module {
 		osloginDirs:                  defaultOSLoginDirs,
 		sudoers:                      defaultSudoersPath,
 		deprecatedEntries:            defaultDeprecatedEntries,
+		metrics:                      metricregistry.New(ctx, time.Minute, 10, "oslogin"),
 	}
 
 	return &manager.Module{
@@ -284,10 +292,39 @@ func (mod *osloginModule) moduleSetup(ctx context.Context, data any) error {
 	// Do the initial first setup execution in the module initialization, it will
 	// be handled by the metadata longpoll event handler/subscriber after the
 	// first setup.
-	_, _, err := mod.osloginSetup(ctx, desc)
-	if err != nil {
-		galog.Errorf("Failed to handle first oslogin setup: %v", err)
-	}
+	go func() {
+		if mod.setupInProgress.Swap(true) {
+			galog.Debug("OSLogin setup already in progress, skipping")
+			return
+		}
+		defer mod.setupInProgress.Store(false)
+
+		startProtoTime := tpb.Now()
+		_, _, err := mod.osloginSetup(ctx, desc)
+
+		status := acmpb.GuestAgentModuleMetric_STATUS_SUCCEEDED
+		var errStr string
+		if err != nil {
+			status = acmpb.GuestAgentModuleMetric_STATUS_FAILED
+			errStr = err.Error()
+		}
+
+		metric := &acmpb.GuestAgentModuleMetric{
+			MetricName:   acmpb.GuestAgentModuleMetric_OS_LOGIN_INITIALIZATION,
+			StartTime:    startProtoTime,
+			EndTime:      tpb.Now(),
+			ModuleStatus: status,
+			Error:        errStr,
+			Enabled:      true,
+		}
+		if mod.metrics != nil {
+			mod.metrics.Record(ctx, metric)
+		}
+
+		if err != nil {
+			galog.Errorf("Failed to handle first oslogin setup: %v", err)
+		}
+	}()
 
 	// Subscribe to the metadata longpoll event.
 	sub := events.EventSubscriber{Name: osloginModuleID, Callback: mod.metadataSubscriber, MetricName: acmpb.GuestAgentModuleMetric_OS_LOGIN_INITIALIZATION}
@@ -314,7 +351,41 @@ func (mod *osloginModule) metadataSubscriber(ctx context.Context, evType string,
 		return true, true, fmt.Errorf("metadata event watcher reported error: %v, will retry setup", evData.Error)
 	}
 
-	return mod.osloginSetup(ctx, desc)
+	go func() {
+		if mod.setupInProgress.Swap(true) {
+			galog.Debug("OSLogin setup already in progress, skipping")
+			return
+		}
+		defer mod.setupInProgress.Store(false)
+
+		startProtoTime := tpb.Now()
+		_, _, err := mod.osloginSetup(ctx, desc)
+
+		status := acmpb.GuestAgentModuleMetric_STATUS_SUCCEEDED
+		var errStr string
+		if err != nil {
+			status = acmpb.GuestAgentModuleMetric_STATUS_FAILED
+			errStr = err.Error()
+		}
+
+		metric := &acmpb.GuestAgentModuleMetric{
+			MetricName:   acmpb.GuestAgentModuleMetric_OS_LOGIN_INITIALIZATION,
+			StartTime:    startProtoTime,
+			EndTime:      tpb.Now(),
+			ModuleStatus: status,
+			Error:        errStr,
+			Enabled:      true,
+		}
+		if mod.metrics != nil {
+			mod.metrics.Record(ctx, metric)
+		}
+
+		if err != nil {
+			galog.Errorf("Failed to handle oslogin setup: %v", err)
+		}
+	}()
+
+	return true, true, nil
 }
 
 // setupSles16OSLoginDirs copies files from /usr to /etc for SLES 16. This is

@@ -40,6 +40,9 @@ import (
 )
 
 func TestNewModule(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
 	mod := NewModule(context.Background())
 	if mod == nil {
 		t.Fatalf("NewModule() = nil, want non-nil")
