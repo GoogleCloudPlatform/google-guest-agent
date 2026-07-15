@@ -58,7 +58,7 @@ func (ss *systemdService) serviceID() string {
 func (ss *systemdService) register(ctx context.Context) error {
 	// Don't do anything if we are not running in a systemd context.
 	if !ss.systemdContext {
-		return nil
+		return &notRunningAsServiceError{}
 	}
 
 	galog.Debug("Registering service with systemd service manager.")
@@ -93,4 +93,10 @@ func (ss *systemdService) setState(ctx context.Context, state State) error {
 
 	_, err := run.WithContext(ctx, opts)
 	return err
+}
+
+// shouldHandleSignal handles the SIGTERM (and other signals like SIGINT, SIGQUIT,
+// SIGHUP) signal from the OS. On Linux, we always handle the signal.
+func (ss *systemdService) shouldHandleSignal(os.Signal) bool {
+	return true
 }
