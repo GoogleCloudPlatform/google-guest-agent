@@ -250,3 +250,73 @@ func TestHandleMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleMessageFilter(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
+	cfg.Retrieve().Core.ACSClient = true
+
+	removeLocalPluginNewRevision := &acmpb.ConfigurePluginStates_ConfigurePlugin{
+		Action: acmpb.ConfigurePluginStates_REMOVE,
+		Plugin: &acmpb.ConfigurePluginStates_Plugin{
+			Name:       "remove_local_plugin",
+			RevisionId: "2",
+		},
+	}
+	installCorePlugin := &acmpb.ConfigurePluginStates_ConfigurePlugin{
+		Action: acmpb.ConfigurePluginStates_INSTALL,
+		Plugin: &acmpb.ConfigurePluginStates_Plugin{
+			Name:       manager.CorePluginName,
+			RevisionId: "1",
+		},
+	}
+	removeCorePlugin := &acmpb.ConfigurePluginStates_ConfigurePlugin{
+		Action: acmpb.ConfigurePluginStates_REMOVE,
+		Plugin: &acmpb.ConfigurePluginStates_Plugin{
+			Name:       manager.CorePluginName,
+			RevisionId: "1",
+		},
+	}
+	installDynamicPlugin := &acmpb.ConfigurePluginStates_ConfigurePlugin{
+		Action: acmpb.ConfigurePluginStates_INSTALL,
+		Plugin: &acmpb.ConfigurePluginStates_Plugin{
+			Name:       "dynamic_plugin",
+			RevisionId: "1",
+		},
+	}
+	removeDynamicPlugin := &acmpb.ConfigurePluginStates_ConfigurePlugin{
+		Action: acmpb.ConfigurePluginStates_REMOVE,
+		Plugin: &acmpb.ConfigurePluginStates_Plugin{
+			Name:       "dynamic_plugin",
+			RevisionId: "1",
+		},
+	}
+
+	req := &acmpb.ConfigurePluginStates{
+		ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{
+			removeLocalPluginNewRevision,
+			installCorePlugin,
+			removeCorePlugin,
+			installDynamicPlugin,
+			removeDynamicPlugin,
+		},
+	}
+
+	wantReq := &acmpb.ConfigurePluginStates{
+		ConfigurePlugins: []*acmpb.ConfigurePluginStates_ConfigurePlugin{
+			removeLocalPluginNewRevision,
+			installDynamicPlugin,
+			removeDynamicPlugin,
+		},
+	}
+
+	f := dataFetchers{pluginManager: &manager.PluginManager{}}
+	ctx := context.Background()
+
+	f.configurePluginStates(ctx, makeEventData(t, req))
+
+	if diff := cmp.Diff(wantReq, prevReq, protocmp.Transform()); diff != "" {
+		t.Errorf("Unexpected ConfigurePluginStates diff (-want +got):\n%s", diff)
+	}
+}
