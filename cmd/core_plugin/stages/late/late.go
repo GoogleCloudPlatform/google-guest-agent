@@ -37,7 +37,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/telemetry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/winpassreset"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/workloadcertrefresh"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/wsfchealthcheck"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
@@ -68,7 +67,6 @@ var (
 		snapshot.NewModule,
 		telemetry.NewModule,
 		winpassreset.NewModule,
-		workloadcertrefresh.NewModule,
 		wsfchealthcheck.NewModule,
 	}
 

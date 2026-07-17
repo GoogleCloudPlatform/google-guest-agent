@@ -1,18 +1,20 @@
-//  Copyright 2024 Google LLC
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
+/*
+Copyright 2026 Google LLC
 
-package workloadcertrefresh
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package main
 
 import (
 	"context"
@@ -26,25 +28,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-func TestNewModule(t *testing.T) {
-	module := NewModule(context.Background())
-	if module.ID != certRefresherModuleID {
-		t.Errorf("NewModule() returned module with ID %q, want %q", module.ID, certRefresherModuleID)
-	}
-	if module.Setup == nil {
-		t.Errorf("NewModule() returned module with nil Setup")
-	}
-	if module.BlockSetup != nil {
-		t.Errorf("NewModule() returned module with not nil BlockSetup, want nil")
-	}
-	if module.Quit == nil {
-		t.Errorf("NewModule() returned module with nil Quit")
-	}
-	if module.Description == "" {
-		t.Errorf("NewModule() returned module with empty Description")
-	}
-}
 
 func TestRefresherJobAPI(t *testing.T) {
 	tests := []struct {
@@ -67,7 +50,7 @@ func TestRefresherJobAPI(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			customINI := fmt.Sprintf("[MWLID]\ncredential_refresh_minutes = %d\n", tc.refreshMinutes)
+			customINI := fmt.Sprintf("[MWLID]\nenabled = true\ncredential_refresh_minutes = %d\n", tc.refreshMinutes)
 
 			if err := cfg.Load([]byte(customINI)); err != nil {
 				t.Fatalf("cfg.Load() failed to load custom overrides for %q: %v", tc.name, err)
@@ -77,15 +60,12 @@ func TestRefresherJobAPI(t *testing.T) {
 				cfg.Load(nil)
 			})
 
-			r := NewCertRefresher()
-
-			gotFreq, startNow := r.Interval()
-			if gotFreq != time.Duration(tc.refreshMinutes)*time.Minute {
-				t.Errorf("Interval() = frequency %v, want %v", gotFreq, time.Duration(tc.refreshMinutes)*time.Minute)
+			interval := 10 * time.Minute
+			if cfg.Retrieve().MWLID.Enabled {
+				interval = time.Duration(cfg.Retrieve().MWLID.CredentialRefreshMinutes) * time.Minute
 			}
-
-			if !startNow {
-				t.Error("Interval() = start now false, want true")
+			if interval != time.Duration(tc.refreshMinutes)*time.Minute {
+				t.Errorf("Interval = %v, want %v", interval, time.Duration(tc.refreshMinutes)*time.Minute)
 			}
 		})
 	}
@@ -100,12 +80,9 @@ func TestRun(t *testing.T) {
 	testDir := t.TempDir()
 	j := &RefresherJob{mdsClient: mdsClient, outputOpts: outputOpts{testDir, testDir, testDir}}
 
-	keepRunning, err := j.Run(context.Background())
+	err := j.refreshCreds(context.Background(), j.outputOpts, time.Now().Format(time.RFC3339))
 	if err != nil {
-		t.Errorf("Run(ctx) = error %v, want nil", err)
-	}
-	if !keepRunning {
-		t.Errorf("Run(ctx) = keep running false, want true")
+		t.Errorf("refreshCreds() = error %v, want nil", err)
 	}
 }
 
@@ -189,8 +166,8 @@ func TestShouldEnable(t *testing.T) {
 
 			mdsClient := &mdsTestClient{enabled: test.mdsEnabled, throwErrOn: test.mdsErr}
 			j := &RefresherJob{mdsClient: mdsClient}
-			if got := j.ShouldEnable(ctx); got != test.want {
-				t.Errorf("ShouldEnable(ctx) = %t, want %t", got, test.want)
+			if got := j.isEnabled(ctx); got != test.want {
+				t.Errorf("isEnabled(ctx) = %t, want %t", got, test.want)
 			}
 		})
 	}

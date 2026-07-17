@@ -1,18 +1,20 @@
-//  Copyright 2024 Google LLC
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
+/*
+Copyright 2026 Google LLC
 
-package workloadcertrefresh
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package main
 
 import (
 	"context"
@@ -25,7 +27,6 @@ import (
 	"testing"
 	"time"
 
-	wipb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/workloadcertrefresh/proto/mwlid"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
@@ -33,6 +34,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	wipb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/mwlid_extension/proto/mwlid"
 )
 
 const (
@@ -62,7 +65,7 @@ const (
 	`
 	testConfigStatusResp = `
 	{
-		"status": "Ok",
+		"status": "Ok"
 	}
 	`
 )
@@ -185,7 +188,7 @@ func TestFindDomainError(t *testing.T) {
 	spiffeID := "spiffe://12345.global.67890.workload.id.goog/ns/NAMESPACE_ID/sa/MANAGED_IDENTITY_ID"
 
 	if _, err := findDomain(anchors, spiffeID); err == nil {
-		t.Errorf("findDomain(%+v, %s) succeded for unknown anchors, want error", anchors, spiffeID)
+		t.Errorf("findDomain(%+v, %s) succeeded for unknown anchors, want error", anchors, spiffeID)
 	}
 }
 
@@ -793,7 +796,7 @@ func TestRefreshCredsSkip(t *testing.T) {
 	}
 
 	if err := j.refreshCreds(ctx, opts, "test"); err != nil {
-		t.Errorf("refreshCreds(ctx, outputOpts{}, %s) = error %v, want nil", "test", err)
+		t.Errorf("refreshCreds(ctx, opts, %s) = error %v, want nil", "test", err)
 	}
 
 	for _, f := range []string{opts.symlink, opts.tempSymlinkPrefix, opts.contentDirPrefix} {

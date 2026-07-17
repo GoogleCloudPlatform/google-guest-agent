@@ -2,7 +2,7 @@ PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
 	internal/acp/proto/agent_controlplane.pb.go \
-	cmd/core_plugin/workloadcertrefresh/proto/workload_identity.pb.go \
+	cmd/mwlid_extension/proto/mwlid/workload_identity.pb.go \
 	pkg/proto/plugin_comm.pb.go
 
 GO_BINARIES = \
@@ -14,16 +14,19 @@ GO_BINARIES = \
 	cmd/gce_metadata_script_runner/gce_metadata_script_runner \
 	cmd/metadata_script_runner_compat/gce_compat_metadata_script_runner \
 	cmd/google_authorized_keys_compat/google_authorized_keys_compat \
-	cmd/guest_telemetry_extension/guest_telemetry
+	cmd/guest_telemetry_extension/guest_telemetry \
+	cmd/mwlid_extension/mwlid_extension
 
 LINUX_BINPB_FILES = \
   build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb \
-	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb
+	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb \
+	build/configs/usr/lib/google/guest_agent/ManagedWorkloadIdentityExtension/manifest.binpb
 
 
 WINDOWS_BINPB_FILES = \
   build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.windows.binpb \
-	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.windows.binpb
+	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.windows.binpb \
+	build/configs/usr/lib/google/guest_agent/ManagedWorkloadIdentityExtension/manifest.windows.binpb
 
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
 MWLID_PROTO_URL = https://github.com/GoogleCloudPlatform/managed-workload-identity
@@ -51,8 +54,8 @@ fetch-mwlid-proto:
 	$(Q)echo "Cloning/updating mwlid-proto..."
 	$(Q)git -C proto_deps/mwlid pull 2> /dev/null || \
 		git clone $(MWLID_PROTO_URL) proto_deps/mwlid
-	$(Q)mkdir -p cmd/core_plugin/workloadcertrefresh/proto
-	$(Q)cp proto_deps/mwlid/proto/v1/workload-identity.proto cmd/core_plugin/workloadcertrefresh/proto/workload_identity.proto
+	$(Q)mkdir -p cmd/mwlid_extension/proto/mwlid
+	$(Q)cp proto_deps/mwlid/proto/v1/workload-identity.proto cmd/mwlid_extension/proto/mwlid/workload_identity.proto
 
 SOURCE = $(subst .pb.go,.proto,$(@))
 FILENAME = $(notdir $(SOURCE))

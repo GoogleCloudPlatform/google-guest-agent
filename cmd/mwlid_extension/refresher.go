@@ -1,18 +1,20 @@
-//  Copyright 2024 Google LLC
-//
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
+/*
+Copyright 2026 Google LLC
 
-package workloadcertrefresh
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package main
 
 import (
 	"bytes"
@@ -22,15 +24,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
-	wipb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/workloadcertrefresh/proto/mwlid"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	wipb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/mwlid_extension/proto/mwlid"
 )
 
 const (
@@ -51,18 +56,68 @@ const (
 	defaultGRPCTimeout = 10 * time.Second
 )
 
+// Status represents the state of gRPC service.
+type Status int
+
+const (
+	// ServiceUnknown means the gRPC service availability is unknown. This is
+	// used when we've attempted to connect to the service but it failed with a
+	// non-permanent error.
+	ServiceUnknown Status = iota
+	// ServiceUnavailable means the gRPC service is unavailable. This is set when
+	// we successfully connect to the service but it responds with a non-OK
+	// FAILED_PRECONDITION error.
+	ServiceUnavailable
+	// ServiceAvailable means the gRPC service is available.
+	ServiceAvailable
+)
+
+type grpcServerStatus struct {
+	mutex sync.Mutex
+	// status is the status of the gRPC service.
+	status Status
+}
+
+func (gs *grpcServerStatus) setStatus(s Status) {
+	gs.mutex.Lock()
+	defer gs.mutex.Unlock()
+	gs.status = s
+}
+
+func (gs *grpcServerStatus) serverStatus() Status {
+	gs.mutex.Lock()
+	defer gs.mutex.Unlock()
+	return gs.status
+}
+
+// RefresherJob implements scheduler interface for cert refresher.
+type RefresherJob struct {
+	// outputOpts is the output directory name and symlink templates.
+	outputOpts outputOpts
+	mdsClient  metadata.MDSClientInterface
+	// grpcServerStatus is used to track if the grpc server is available. This
+	// server is not an instance startup dependency and can become available
+	// later. It is used to track if we've already detected server existence
+	// successfully and if not, retry.
+	grpcServerStatus
+	// clientMutex is used to synchronize access to the grpcClient.
+	clientMutex sync.Mutex
+	// grpcClient is the client connection to the grpc server. This is used to
+	// cache the connection so it doesn't need to be recreated every time.
+	grpcClient *grpc.ClientConn
+}
+
+// outputOpts is a struct for output directory name and symlink templates.
+type outputOpts struct {
+	contentDirPrefix, tempSymlinkPrefix, symlink string
+}
+
 // isEnabled returns true only if enable-workload-certificate metadata attribute
 // is present and set to true.
 func (j *RefresherJob) isEnabled(ctx context.Context) bool {
-	if j.isGRPCServiceEnabled(ctx) {
-		// If GRPC service is enabled, we should use that instead of MDS for cert
-		// refresh.
-		return true
-	}
-
-	// If GRPC service is not enabled, we should fallback to use MDS for cert
-	// refresh. This is the default behavior.
-	return j.isMDSServiceEnabled(ctx)
+	// Check if GRPC service is enabled first.
+	// If it's not, check if the fallback MDS service is enabled.
+	return j.isGRPCServiceEnabled(ctx) || j.isMDSServiceEnabled(ctx)
 }
 
 // readMetadata reads metadata value for [key] from MDS.
@@ -78,19 +133,18 @@ func (j *RefresherJob) readMetadata(ctx context.Context, key string) ([]byte, er
 }
 
 /*
-metadata key instance/gce-workload-certificates/workload-identities
-MANAGED_WORKLOAD_IDENTITY_SPIFFE is of the format:
-spiffe://POOL_ID.global.PROJECT_NUMBER.workload.id.goog/ns/NAMESPACE_ID/sa/MANAGED_IDENTITY_ID
-
-{
-	"status": "OK", // Status of the response,
-	"workloadCredentials": { // Credentials for the VM's trust domains
-		"MANAGED_WORKLOAD_IDENTITY_SPIFFE": {
-			"certificatePem": "-----BEGIN CERTIFICATE-----datahere-----END CERTIFICATE-----",
-			"privateKeyPem": "-----BEGIN PRIVATE KEY-----datahere-----END PRIVATE KEY-----"
+	metadata key instance/gce-workload-certificates/workload-identities
+	MANAGED_WORKLOAD_IDENTITY_SPIFFE is of the format:
+	spiffe://POOL_ID.global.PROJECT_NUMBER.workload.id.goog/ns/NAMESPACE_ID/sa/MANAGED_IDENTITY_ID
+	{
+		"status": "OK", // Status of the response,
+		"workloadCredentials": { // Credentials for the VM's trust domains
+			"MANAGED_WORKLOAD_IDENTITY_SPIFFE": {
+				"certificatePem": "-----BEGIN CERTIFICATE-----datahere-----END CERTIFICATE-----",
+				"privateKeyPem": "-----BEGIN PRIVATE KEY-----datahere-----END PRIVATE KEY-----"
+			}
 		}
 	}
-}
 */
 
 // workloadCredential represents Workload Credentials in metadata.
@@ -106,9 +160,8 @@ type workloadIdentities struct {
 }
 
 /*
-metadata key instance/gce-workload-certificates/trust-anchors
-
-{
+	metadata key instance/gce-workload-certificates/trust-anchors
+	{
     "status":  "<status string>" // Status of the response,
     "trustAnchors": {  // Trust bundle for the VM's trust domains
         "PEER_SPIFFE_TRUST_DOMAIN_1": {
@@ -118,11 +171,10 @@ metadata key instance/gce-workload-certificates/trust-anchors
             "trustAnchorsPem" : "<Trust bundle containing the X.509 roots certificates>",
         }
     }
-}
+	}
 */
 
-// trustAnchor represents one or more certificates in an arbitrary order in the
-// metadata.
+// trustAnchor represents one or more certificates in an arbitrary order in the metadata.
 type trustAnchor struct {
 	TrustAnchorsPem string `json:"trustAnchorsPem"`
 }
