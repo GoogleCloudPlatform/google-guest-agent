@@ -41,10 +41,12 @@ var (
 
 // NewModule returns a new iosched module.
 func NewModule(_ context.Context) *manager.Module {
+	needsNetwork := false
 	return &manager.Module{
-		ID:          ioschedModuleID,
-		BlockSetup:  moduleSetup,
-		Description: "Setup io scheduler acordingly to the platform expectations",
+		ID:           ioschedModuleID,
+		BlockSetup:   moduleSetup,
+		NeedsNetwork: &needsNetwork,
+		Description:  "Setup io scheduler acordingly to the platform expectations",
 	}
 }
 

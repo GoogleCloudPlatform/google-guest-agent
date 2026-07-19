@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 func TestRegister(t *testing.T) {
@@ -53,6 +55,68 @@ func TestRegister(t *testing.T) {
 	}
 }
 
+func TestRunBlockingNetworkDisabled(t *testing.T) {
+	t.Cleanup(func() {
+		Shutdown()
+	})
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
+	cfg.Retrieve().InstanceSetup.NetworkEnabled = false
+
+	var falseValue bool
+	var modulesRun []string
+	var mu sync.Mutex
+	mods := []*Module{
+		&Module{
+			ID: "test-1",
+		},
+		&Module{
+			ID: "test-2",
+			BlockSetup: func(context.Context, any) error {
+				mu.Lock()
+				defer mu.Unlock()
+				modulesRun = append(modulesRun, "test-2")
+				return nil
+			},
+		},
+		&Module{
+			ID: "test-3",
+			BlockSetup: func(context.Context, any) error {
+				mu.Lock()
+				defer mu.Unlock()
+				modulesRun = append(modulesRun, "test-3")
+				return nil
+			},
+			NeedsNetwork: &falseValue,
+		},
+	}
+
+	Register(mods, EarlyStage)
+	if err := RunBlocking(context.Background(), EarlyStage, nil); err != nil {
+		t.Errorf("RunBlocking(%d) = %d, want nil", EarlyStage, err)
+	}
+
+	if len(modulesRun) != 1 {
+		t.Errorf("len(modulesRun) = %d, want 1", len(modulesRun))
+	}
+
+	// The only module that should have been run is test-3, because it's the only
+	// one that doesn't need network.
+	if modulesRun[0] != "test-3" {
+		t.Errorf("modulesRun[0] = %q, want %q", modulesRun[0], "test-3")
+	}
+
+	metrics := Metrics()
+	for _, mod := range mods {
+		if _, found := metrics[mod.ID]; !found {
+			t.Errorf("metrics[%v] = false, want true", mod.ID)
+		}
+	}
+
+}
+
 func TestRunBlockingSuccess(t *testing.T) {
 	t.Cleanup(func() {
 		Shutdown()
@@ -61,6 +125,10 @@ func TestRunBlockingSuccess(t *testing.T) {
 	execMap := make(map[string]bool)
 	setExec := func(id string) {
 		execMap[id] = true
+	}
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
 	}
 
 	mods := []*Module{
@@ -107,6 +175,10 @@ func TestRunBlockingFailure(t *testing.T) {
 		Shutdown()
 	})
 
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
+
 	mods := []*Module{
 		&Module{
 			ID: "test-1",
@@ -135,6 +207,10 @@ func TestRunConcurrentSuccess(t *testing.T) {
 	t.Cleanup(func() {
 		Shutdown()
 	})
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
 
 	execMap := make(map[string]bool)
 	var mu sync.Mutex
@@ -184,10 +260,75 @@ func TestRunConcurrentSuccess(t *testing.T) {
 	}
 }
 
+func TestRunConcurrentNetworkDisabled(t *testing.T) {
+	t.Cleanup(func() {
+		Shutdown()
+	})
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
+	cfg.Retrieve().InstanceSetup.NetworkEnabled = false
+
+	var falseValue bool
+	var modulesRun []string
+	var mu sync.Mutex
+	mods := []*Module{
+		&Module{
+			ID: "test-1",
+		},
+		&Module{
+			ID: "test-2",
+			Setup: func(context.Context, any) error {
+				mu.Lock()
+				defer mu.Unlock()
+				modulesRun = append(modulesRun, "test-2")
+				return nil
+			},
+		},
+		&Module{
+			ID: "test-3",
+			Setup: func(context.Context, any) error {
+				mu.Lock()
+				defer mu.Unlock()
+				modulesRun = append(modulesRun, "test-3")
+				return nil
+			},
+			NeedsNetwork: &falseValue,
+		},
+	}
+
+	Register(mods, LateStage)
+	if err := RunConcurrent(context.Background(), LateStage, nil); err != nil {
+		t.Errorf("RunConcurrent(%d) = %v, want nil", LateStage, err.join())
+	}
+
+	if len(modulesRun) != 1 {
+		t.Errorf("len(modulesRun) = %d, want 1", len(modulesRun))
+	}
+
+	// The only module that should have been run is test-3, because it's the only
+	// one that doesn't need network.
+	if modulesRun[0] != "test-3" {
+		t.Errorf("modulesRun[0] = %q, want %q", modulesRun[0], "test-3")
+	}
+
+	metrics := Metrics()
+	for _, mod := range mods {
+		if _, found := metrics[mod.ID]; !found {
+			t.Errorf("metrics[%v] = false, want true", mod.ID)
+		}
+	}
+}
+
 func TestRunConcurrentFailure(t *testing.T) {
 	t.Cleanup(func() {
 		Shutdown()
 	})
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
 
 	execMap := make(map[string]bool)
 	var mu sync.Mutex
@@ -330,6 +471,10 @@ func TestRunBlockingChain(t *testing.T) {
 			t.Cleanup(func() {
 				Shutdown()
 			})
+
+			if err := cfg.Load(nil); err != nil {
+				t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+			}
 			Register(tc.mods, EarlyStage)
 			err := RunConcurrent(context.Background(), EarlyStage, nil)
 			if err == nil && tc.shouldFail {
