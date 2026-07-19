@@ -135,6 +135,7 @@ func vmInfo() (*engine.VMInfo, error) {
 		ProcessPaths:   make([]string, len(processes)),
 		ProcessArgs:    make([]string, len(processes)),
 		ProcessEnvVars: make([]string, len(processes)),
+		Usernames:      make([]string, len(processes)),
 		OSName:         runtime.GOOS,
 	}
 	slog.Info(fmt.Sprintf("Found %d processes", len(processes)))
@@ -152,6 +153,8 @@ func vmInfo() (*engine.VMInfo, error) {
 		vmInfo.ProcessArgs[i] = args
 		env, _ := p.Environ()
 		vmInfo.ProcessEnvVars[i] = strings.Join(env, "\n")
+		user, _ := p.Username()
+		vmInfo.Usernames[i] = user
 	}
 	return vmInfo, nil
 }
