@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
 )
@@ -104,6 +105,12 @@ func UnpackTargzFile(src, dest string) error {
 
 		name := filepath.Clean(hdr.Name)
 		entryPath := filepath.Join(dest, name)
+
+		// Prevent ZipSlip path traversal.
+		rel, err := filepath.Rel(dest, entryPath)
+		if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+			return fmt.Errorf("illegal file path %q in archive: escapes destination directory", hdr.Name)
+		}
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
