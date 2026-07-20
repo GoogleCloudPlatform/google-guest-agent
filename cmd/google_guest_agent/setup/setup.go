@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -172,10 +173,14 @@ func Run(ctx context.Context, c Config) error {
 		}
 	}()
 
-	// If core plugin initialization is skipped just assume instance is ready
-	// and run as if core-plugin has already sent ready event.
-	if c.SkipCorePlugin {
-		galog.Debug("Skipping core plugin initialization")
+	// Check if the core plugin is disabled or not present. If either is true, we
+	// can skip the watcher as the core plugin will not be installed.
+	skipWatcher := c.SkipCorePlugin || !file.Exists(c.CorePluginPath, file.TypeFile)
+	if skipWatcher {
+		// Watcher is skipped only if core plugin is disabled or not present.
+		// In this case, we skip checking for the core plugin, so we just mark the
+		// plugin manager service as ready as if the core-plugin has already sent
+		// the ready event.
 		coreReady(ctx, c)
 	}
 
@@ -191,7 +196,10 @@ func Run(ctx context.Context, c Config) error {
 		}
 	} else {
 		galog.Debugf("Skipped dynamic local launch of core plugin, attempting to install core plugin with hardcoded config...")
-		if err := install(ctx, pm, c); err != nil {
+		err := install(ctx, pm, c)
+
+		// This will only fail if the core plugin is present, but failed to install.
+		if err != nil {
 			return fmt.Errorf("core plugin installation: %w", err)
 		}
 	}
@@ -199,9 +207,11 @@ func Run(ctx context.Context, c Config) error {
 	events.FetchManager().Subscribe(manager.EventID, events.EventSubscriber{Name: "GuestAgent", Data: c, Callback: handlePluginEvent, MetricName: acpb.GuestAgentModuleMetric_CORE_PLUGIN_INITIALIZATION})
 
 	// Ignore returned [watcher] as it takes care of deregistering itself.
-	_, err = manager.InitWatcher(ctx, manager.CorePluginName, successStatusCode, pluginStatusRequest)
-	if err != nil {
-		return fmt.Errorf("init %s watcher: %w", manager.CorePluginName, err)
+	if !skipWatcher {
+		_, err = manager.InitWatcher(ctx, manager.CorePluginName, successStatusCode, pluginStatusRequest)
+		if err != nil {
+			return fmt.Errorf("init %s watcher: %w", manager.CorePluginName, err)
+		}
 	}
 
 	return nil
@@ -211,6 +221,12 @@ func Run(ctx context.Context, c Config) error {
 func install(ctx context.Context, pm PluginManagerInterface, c Config) error {
 	if c.SkipCorePlugin {
 		galog.Debug("Core plugin installation is skipped, skipping core plugin installation")
+		return nil
+	}
+
+	// Skip installation if the core plugin binary is not present.
+	if !file.Exists(c.CorePluginPath, file.TypeFile) {
+		galog.Debugf("Core plugin binary not found at %q, skipping core plugin installation", c.CorePluginPath)
 		return nil
 	}
 
