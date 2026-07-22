@@ -123,18 +123,30 @@ func (e *Extension) coreLoop(ctx context.Context) int32 {
 		},
 	}
 
+	// Watch the metadata server for changes to the identity.
+	mdsChan := refresher.watchIdentity(ctx)
+
+	// Run the refresher once on start.
 	e.runRefresher(ctx, refresher)
 
-	ticker := time.NewTicker(time.Duration(cfg.Retrieve().MWLID.CredentialRefreshMinutes) * time.Minute)
+	// Set up a ticker to refresh the credentials at the configured interval.
+	interval := time.Duration(cfg.Retrieve().MWLID.CredentialRefreshMinutes) * time.Minute
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
-			msg := "MWLID credential refresh core loop exiting due to context cancellation"
-			galog.Error(msg)
+			galog.Error("MWLID credential refresh core loop exiting due to context cancellation")
 			return healthy
 		case <-ticker.C:
+			galog.V(1).Debugf("Ticker fired, refreshing workload credentials...")
 			e.runRefresher(ctx, refresher)
+		case <-mdsChan:
+			galog.V(1).Debugf("MDS channel fired, refreshing workload credentials...")
+			e.runRefresher(ctx, refresher)
+			// Reset the ticker to prevent a useless refresh.
+			ticker.Reset(interval)
 		}
 	}
 }

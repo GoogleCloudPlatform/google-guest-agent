@@ -34,11 +34,12 @@ type Descriptor struct {
 // Instance describes the metadata's instance attributes/keys. This is a
 // read-only wrapper of the internal representation.
 type Instance struct {
-	internal          *instance
-	attributes        *Attributes
-	networkInterfaces []*NetworkInterface
-	vlanInterfaces    []map[int]*VlanInterface
-	virtualClock      *VirtualClock
+	internal              *instance
+	attributes            *Attributes
+	networkInterfaces     []*NetworkInterface
+	vlanInterfaces        []map[int]*VlanInterface
+	virtualClock          *VirtualClock
+	identityConfiguration *IdentityConfiguration
 }
 
 // Universe describes the metadata's universe attributes/keys. This is a
@@ -69,6 +70,12 @@ type VlanInterface struct {
 type Project struct {
 	internal   *project
 	attributes *Attributes
+}
+
+// IdentityConfiguration describes the instances identity configuration.
+// This is a read-only wrapper of the internal representation.
+type IdentityConfiguration struct {
+	internal *identityConfiguration
 }
 
 // Attributes describes the project's attributes keys. This is a read-only
@@ -229,7 +236,13 @@ func newInstance(instance instance) *Instance {
 	}
 	res.attributes = newAttributes(instance.Attributes)
 	res.virtualClock = newVirtualClock(instance.VirtualClock)
+	res.identityConfiguration = newIdentityConfiguration(instance.IdentityConfiguration)
 	return res
+}
+
+// IdentityConfiguration returns the instance identity configuration.
+func (in *Instance) IdentityConfiguration() *IdentityConfiguration {
+	return in.identityConfiguration
 }
 
 // ID returns the instance ID.
@@ -398,6 +411,15 @@ func (vic *VlanInterface) Gateway() string {
 // GatewayIPv6 returns the instance vlan interfaces gateway IPv6.
 func (vic *VlanInterface) GatewayIPv6() string {
 	return vic.internal.GatewayIPv6
+}
+
+func newIdentityConfiguration(ic identityConfiguration) *IdentityConfiguration {
+	return &IdentityConfiguration{internal: &ic}
+}
+
+// IdentityUUID returns the instance identity UUID.
+func (i *IdentityConfiguration) IdentityUUID() string {
+	return i.internal.IdentityUUID
 }
 
 func newAttributes(attributes attributes) *Attributes {

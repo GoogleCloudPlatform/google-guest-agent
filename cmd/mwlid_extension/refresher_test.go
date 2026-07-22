@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -822,4 +823,163 @@ func TestCloseClient(t *testing.T) {
 	}
 	// Verify that subsequent calls to closeClient don't panic when client is nil.
 	job.closeClient()
+}
+
+type fakeMDSClient struct {
+	counter              int
+	get                  func(context.Context) (*metadata.Descriptor, error)
+	getKey               func(context.Context, string, map[string]string) (string, error)
+	getKeyRecursive      func(context.Context, string) (string, error)
+	watch                func(context.Context) (*metadata.Descriptor, error)
+	writeGuestAttributes func(context.Context, string, string) error
+}
+
+func (f *fakeMDSClient) Get(ctx context.Context) (*metadata.Descriptor, error) {
+	if f.get == nil {
+		return &metadata.Descriptor{}, nil
+	}
+	return f.get(ctx)
+}
+
+func (f *fakeMDSClient) GetKey(ctx context.Context, key string, headers map[string]string) (string, error) {
+	if f.getKey == nil {
+		return "", nil
+	}
+	return f.getKey(ctx, key, headers)
+}
+
+func (f *fakeMDSClient) GetKeyRecursive(ctx context.Context, key string) (string, error) {
+	if f.getKeyRecursive == nil {
+		return "", nil
+	}
+	return f.getKeyRecursive(ctx, key)
+}
+
+func (f *fakeMDSClient) Watch(ctx context.Context) (*metadata.Descriptor, error) {
+	if f.watch == nil {
+		return &metadata.Descriptor{}, nil
+	}
+	return f.watch(ctx)
+}
+
+func (f *fakeMDSClient) WriteGuestAttributes(ctx context.Context, key, value string) error {
+	if f.writeGuestAttributes == nil {
+		return nil
+	}
+	return f.writeGuestAttributes(ctx, key, value)
+}
+
+func TestWatchIdentity(t *testing.T) {
+	mdsIdentity1 := `{
+	"instance": {
+		"identity-configuration": {
+			"identity-uuid": "identity-1"
+		}
+	}
+}`
+
+	mdsIdentity2 := `{
+	"instance": {
+		"identity-configuration": {
+			"identity-uuid": "identity-2"
+		}
+	}
+}`
+
+	emptyMds := `{}`
+
+	tests := []struct {
+		name        string
+		prevMdsJSON string
+		currMdsJSON string
+		// watchError is the error that will be returned by the mock MDS client.
+		watchError error
+		// expectChannel is true if the channel should send something; false otherwise.
+		expectChannel bool
+	}{
+		{
+			name:          "identity_changed",
+			prevMdsJSON:   mdsIdentity1,
+			currMdsJSON:   mdsIdentity2,
+			watchError:    nil,
+			expectChannel: true,
+		},
+		{
+			name:          "identity_same",
+			prevMdsJSON:   mdsIdentity1,
+			currMdsJSON:   mdsIdentity1,
+			watchError:    nil,
+			expectChannel: false,
+		},
+		{
+			name:          "no_identity",
+			prevMdsJSON:   emptyMds,
+			currMdsJSON:   emptyMds,
+			watchError:    nil,
+			expectChannel: false,
+		},
+		{
+			name:          "watch_error",
+			watchError:    errors.New("test error"),
+			expectChannel: false,
+		},
+		{
+			name:          "empty_mds_after_identity_changed",
+			prevMdsJSON:   mdsIdentity1,
+			currMdsJSON:   emptyMds,
+			watchError:    nil,
+			expectChannel: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			// Setup the mock MDS client.
+			mdsClient := &fakeMDSClient{}
+			mdsClient.watch = func(context.Context) (*metadata.Descriptor, error) {
+				if mdsClient.counter == 0 {
+					if tc.watchError != nil {
+						return nil, tc.watchError
+					}
+					mdsClient.counter++
+					return metadata.UnmarshalDescriptor(tc.prevMdsJSON)
+				}
+				return metadata.UnmarshalDescriptor(tc.currMdsJSON)
+			}
+
+			// Setup the refresher job.
+			job := &RefresherJob{
+				mdsClient: mdsClient,
+			}
+
+			// Get the mds channel from watching identity.
+			mdsChan := job.watchIdentity(ctx)
+
+			// Sleep for a short time to ensure the refresher has time to run.
+			time.Sleep(200 * time.Millisecond)
+
+			// Try receiving from the channel.
+			select {
+			case <-mdsChan:
+				if !tc.expectChannel {
+					t.Errorf("watchIdentity(ctx) sent something on the channel, want nothing")
+
+				}
+			default:
+				if tc.expectChannel {
+					t.Errorf("watchIdentity(ctx) did not send anything on the channel, want something")
+				}
+			}
+
+			// Try receiving again from the channel. This should not receive anything.
+			select {
+			case <-mdsChan:
+				t.Errorf("watchIdentity(ctx) sent something on the channel, want nothing")
+			default:
+				// This is expected.
+			}
+		})
+	}
 }
