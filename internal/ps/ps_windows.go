@@ -18,6 +18,7 @@ package ps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"syscall"
 	"time"
@@ -223,6 +224,9 @@ func (p windowsClient) FindPid(pid int) (Process, error) {
 
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			return process, fmt.Errorf("error opening process info handler: %w", ErrNotFound)
+		}
 		return process, fmt.Errorf("error opening process info handler: %w", err)
 	}
 	defer windows.CloseHandle(h)

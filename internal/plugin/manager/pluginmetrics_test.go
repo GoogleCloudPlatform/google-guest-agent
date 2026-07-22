@@ -55,7 +55,7 @@ func (mockPsClient) FindRegex(_ string) ([]ps.Process, error) {
 
 func (m *mockPsClient) FindPid(int) (ps.Process, error) {
 	if !m.alive {
-		return ps.Process{}, fmt.Errorf("test error")
+		return ps.Process{}, fmt.Errorf("test error: %w", ps.ErrNotFound)
 	}
 	return ps.Process{Exe: m.exe}, nil
 }

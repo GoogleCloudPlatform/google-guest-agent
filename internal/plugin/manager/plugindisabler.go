@@ -74,6 +74,11 @@ func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 	pluginPid := p.pid()
 	proc, err := ps.FindPid(pluginPid)
 	if err != nil {
+		if errors.Is(err, ps.ErrNotFound) {
+			galog.Infof("Plugin %q process (%d) is already stopped", p.FullName(), pluginPid)
+			sendEvent(ctx, p, acmpb.PluginEventMessage_PLUGIN_STOPPED, "Plugin process was already stopped.")
+			return nil
+		}
 		return fmt.Errorf("%q plugin process(%d) not found: %w", p.FullName(), pluginPid, err)
 	}
 

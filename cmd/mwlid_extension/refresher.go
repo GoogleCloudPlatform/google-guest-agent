@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -398,7 +399,12 @@ func (j *RefresherJob) newClient(ctx context.Context) (*grpc.ClientConn, error) 
 func (j *RefresherJob) isMDSServiceEnabled(ctx context.Context) bool {
 	resp, err := j.readMetadata(ctx, enableWorkloadCertsKey)
 	if err != nil {
-		galog.Debugf("Failed to get %q from MDS with error: %v", enableWorkloadCertsKey, err)
+		var mdsErr *metadata.MDSReqError
+		if errors.As(err, &mdsErr) && mdsErr.Status == 404 {
+			galog.Debugf("MWLID is not enabled (metadata key %q not found)", enableWorkloadCertsKey)
+		} else {
+			galog.Errorf("Failed to get %q from MDS: %v", enableWorkloadCertsKey, err)
+		}
 		return false
 	}
 

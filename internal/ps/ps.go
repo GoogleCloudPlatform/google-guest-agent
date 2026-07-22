@@ -18,9 +18,15 @@ package ps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"syscall"
+	"time"
 )
+
+// ErrNotFound is returned when a process is not found.
+var ErrNotFound = errors.New("process not found")
 
 // KillMode is the mode to use when killing a process.
 type KillMode int
@@ -125,8 +131,36 @@ func (c commonClient) KillProcess(pid int, mode KillMode) error {
 		// We don't care about the process state here. We just want to wait for
 		// the process to exit.
 		_, err = p.Wait()
-		return err
+		if err != nil {
+			if errors.Is(err, syscall.ECHILD) {
+				return waitForProcessExit(pid, 5*time.Second)
+			}
+			return err
+		}
 	}
 
 	return nil
+}
+
+func waitForProcessExit(pid int, timeout time.Duration) error {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			alive, err := Client.IsProcessAlive(pid)
+			if err != nil {
+				// If we can't check, assume it is dead.
+				return nil
+			}
+			if !alive {
+				return nil
+			}
+		case <-timer.C:
+			return fmt.Errorf("timeout waiting for process %d to exit", pid)
+		}
+	}
 }

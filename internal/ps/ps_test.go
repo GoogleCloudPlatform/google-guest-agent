@@ -133,3 +133,47 @@ func TestKillProcess(t *testing.T) {
 		})
 	}
 }
+
+func TestKillProcessDetached(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ExecModeDetach might behave differently or we don't hit ECHILD on Windows")
+	}
+
+	pid := runDetachedTestCommand(t)
+
+	if err := KillProcess(pid, KillModeWait); err != nil {
+		t.Errorf("KillProcess(%d, KillModeWait) for detached process failed: %v", pid, err)
+	}
+
+	alive, err := IsProcessAlive(pid)
+	if err != nil {
+		t.Errorf("IsProcessAlive(%d) failed: %v", pid, err)
+	}
+	if alive {
+		t.Errorf("Process %d is still alive after KillProcess", pid)
+	}
+}
+
+func runDetachedTestCommand(t *testing.T) int {
+	t.Helper()
+
+	c := "sleep"
+	args := []string{"10"}
+
+	options := run.Options{
+		Name:       c,
+		Args:       args,
+		ExecMode:   run.ExecModeDetach,
+		OutputType: run.OutputNone,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	res, err := run.WithContext(ctx, options)
+	if err != nil {
+		t.Fatalf("failed to run test program: %v", err)
+	}
+
+	return res.Pid
+}

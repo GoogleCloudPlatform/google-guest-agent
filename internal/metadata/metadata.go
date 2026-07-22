@@ -127,13 +127,13 @@ func (c *Client) updateEtag(resp *http.Response) bool {
 // MDSReqError represents custom error produced by HTTP requests made on MDS. It captures
 // error and status code for inspecting.
 type MDSReqError struct {
-	status int
-	err    error
+	Status int
+	Err    error
 }
 
 // Error implements method defined on error interface to transform custom type into error.
 func (m *MDSReqError) Error() string {
-	return fmt.Sprintf("request failed with status code: [%d], error: [%v]", m.status, m.err)
+	return fmt.Sprintf("request failed with status code: [%d], error: [%v]", m.Status, m.Err)
 }
 
 // shouldRetry method checks if MDSReqError is temporary and retriable or not.
@@ -147,7 +147,7 @@ func shouldRetry(err error) bool {
 	// Known non-retriable status codes.
 	codes := []int{404}
 
-	return !slices.Contains(codes, e.status)
+	return !slices.Contains(codes, e.Status)
 }
 
 func (c *Client) retry(ctx context.Context, cfg requestConfig) (string, error) {
@@ -161,7 +161,7 @@ func (c *Client) retry(ctx context.Context, cfg requestConfig) (string, error) {
 			if resp != nil {
 				statusCode = resp.StatusCode
 			}
-			return "", &MDSReqError{statusCode, err}
+			return "", &MDSReqError{Status: statusCode, Err: err}
 		}
 		defer resp.Body.Close()
 

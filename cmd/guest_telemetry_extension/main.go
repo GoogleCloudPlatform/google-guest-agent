@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -110,6 +111,10 @@ func (e *Extension) Stop(ctx context.Context, msg *pluginpb.StopRequest) (*plugi
 	e.cancel()
 	e.cancel = nil
 	e.ctx = context.Background()
+	if e.grpcServer != nil {
+		slog.Info("Stopping gRPC server")
+		go e.grpcServer.GracefulStop()
+	}
 	slog.Info("Extension stopped")
 	return &pluginpb.StopResponse{}, nil
 }
@@ -190,17 +195,26 @@ func main() {
 		errorLogger.Error(fmt.Sprintf("failed to start listening on %q using %q: %v", *address, *protocol, err))
 		os.Exit(1)
 	}
-	defer listener.Close()
+	defer func() {
+		listener.Close()
+		if *protocol == "unix" {
+			slog.Info(fmt.Sprintf("Removing socket file %q", *address))
+			if err := os.Remove(*address); err != nil {
+				slog.Error(fmt.Sprintf("failed to remove socket file %q: %v", *address, err))
+			}
+		}
+	}()
 
 	// This is used to receive control messages from the Guest Agent.
 	server := grpc.NewServer()
-	defer server.Stop()
+	e.grpcServer = server
+	defer server.GracefulStop()
 
 	// Enable the Guest Agent to handle the starting and stopping of the agent execution logic.
 	pluginpb.RegisterGuestAgentPluginServer(server, e)
 
 	slog.Info("Starting grpc server")
-	if err = server.Serve(listener); err != nil {
+	if err = server.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 		errorLogger.Error(fmt.Sprintf("failed to listen for GRPC messages: %v", err))
 		os.Exit(1)
 	}

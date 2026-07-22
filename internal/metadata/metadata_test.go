@@ -327,13 +327,13 @@ func TestShouldRetry(t *testing.T) {
 			desc:   "404_should_not_retry",
 			status: 404,
 			want:   false,
-			err:    &MDSReqError{404, nil},
+			err:    &MDSReqError{Status: 404, Err: nil},
 		},
 		{
 			desc:   "429_should_retry",
 			status: 429,
 			want:   true,
-			err:    &MDSReqError{429, nil},
+			err:    &MDSReqError{Status: 429, Err: nil},
 		},
 		{
 			desc: "random_err_should_retry",

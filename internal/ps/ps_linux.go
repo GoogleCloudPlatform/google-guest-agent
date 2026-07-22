@@ -145,7 +145,7 @@ func (p linuxClient) readPidDetails(pid int) (Process, error) {
 	processRootDir := filepath.Join(p.procDir, fmt.Sprintf("%d", pid))
 
 	if !file.Exists(processRootDir, file.TypeDir) {
-		return process, fmt.Errorf("process %d does not exist, %q not found", pid, processRootDir)
+		return process, fmt.Errorf("process %d does not exist, %q not found: %w", pid, processRootDir, ErrNotFound)
 	}
 
 	exeLinkPath := filepath.Join(processRootDir, "exe")
@@ -319,5 +319,32 @@ func (p linuxClient) IsProcessAlive(pid int) (bool, error) {
 		galog.Debugf("Process with pid %d not running, signal 0 returned error: %v", pid, err)
 		return false, nil
 	}
+
+	stat, err := p.readStat(pid)
+	if err != nil {
+		// Process might have exited after Signal(0) check.
+		return false, nil
+	}
+
+	i := strings.LastIndex(stat, ")")
+	if i == -1 || len(stat) < i+3 {
+		return true, nil
+	}
+
+	// State is the 3rd field, which is after the last ')' and a space.
+	state := stat[i+2]
+	if state == 'Z' {
+		galog.Debugf("Process with pid %d is zombie", pid)
+		return false, nil
+	}
+
 	return true, nil
+}
+
+func (p linuxClient) readStat(pid int) (string, error) {
+	dat, err := os.ReadFile(filepath.Join(p.procDir, strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return "", err
+	}
+	return string(dat), nil
 }

@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"net"
 	"os"
@@ -62,14 +63,22 @@ func main() {
 		galog.Errorf("Failed to start listening on %q using %q: %v", *address, *protocol, err)
 		os.Exit(1)
 	}
-	defer listener.Close()
+	defer func() {
+		listener.Close()
+		if *protocol == "unix" {
+			galog.Infof("Removing socket file %q", *address)
+			if err := os.Remove(*address); err != nil {
+				galog.Errorf("failed to remove socket file %q: %v", *address, err)
+			}
+		}
+	}()
 
 	server := grpc.NewServer()
 	defer server.GracefulStop()
 	Register(server)
 
 	galog.Info("Starting grpc server")
-	if err = server.Serve(listener); err != nil {
+	if err = server.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 		galog.Errorf("failed to listen for GRPC messages: %v", err)
 		os.Exit(1)
 	}

@@ -46,7 +46,7 @@ type Extension struct {
 
 // Register enables the plugin manager to handle the starting and stopping of the extension.
 func Register(server *grpc.Server) {
-	pluginpb.RegisterGuestAgentPluginServer(server, &Extension{})
+	pluginpb.RegisterGuestAgentPluginServer(server, &Extension{grpcServer: server})
 }
 
 // Start begins the extension execution.
@@ -91,6 +91,9 @@ func (e *Extension) Stop(ctx context.Context, msg *pluginpb.StopRequest) (*plugi
 	e.cancel()
 	e.cancel = nil
 	e.ctx = context.Background()
+	if e.grpcServer != nil {
+		go e.grpcServer.GracefulStop()
+	}
 	galog.Info("Extension stopped")
 
 	return &pluginpb.StopResponse{}, nil
