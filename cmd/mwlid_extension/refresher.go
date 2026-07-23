@@ -244,8 +244,16 @@ func writeWorkloadIdentities(destDir string, wisMd []byte) (string, error) {
 		return "", fmt.Errorf("error writing certificates.pem: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(destDir, "private_key.pem"), []byte(wis.WorkloadCredentials[spiffeID].PrivateKeyPem), 0644); err != nil {
-		return "", fmt.Errorf("error writing private_key.pem: %w", err)
+	// There are cases where customers want to hide the private key from the guest
+	// agent. In that case, we want to avoid writing the file at all, since the
+	// key will be empty.
+	privateKeyPem := wis.WorkloadCredentials[spiffeID].PrivateKeyPem
+	if privateKeyPem != "" {
+		if err := os.WriteFile(filepath.Join(destDir, "private_key.pem"), []byte(privateKeyPem), 0644); err != nil {
+			return "", fmt.Errorf("error writing private_key.pem: %w", err)
+		}
+	} else {
+		galog.Debugf("Not writing private_key.pem because it is empty")
 	}
 	return spiffeID, nil
 }
@@ -500,10 +508,19 @@ func (j *RefresherJob) refreshCredsWithGRPC(ctx context.Context, contentDir stri
 		return fmt.Errorf("error creating contents dir: %w", err)
 	}
 
-	galog.Debugf("Writing workload certificates private key to %s", contentDir)
-	if err := os.WriteFile(filepath.Join(contentDir, "private_key.pem"), certs.GetPrivateKeyPem(), 0644); err != nil {
-		return fmt.Errorf("error writing private_key.pem: %w", err)
+	// There are cases where customers want to hide the private key from the guest
+	// agent. In that case, we want to avoid writing the file at all, since the
+	// key will be empty.
+	privateKeyPem := certs.GetPrivateKeyPem()
+	if len(privateKeyPem) > 0 {
+		galog.Debugf("Writing workload certificates private key to %s", contentDir)
+		if err := os.WriteFile(filepath.Join(contentDir, "private_key.pem"), certs.GetPrivateKeyPem(), 0644); err != nil {
+			return fmt.Errorf("error writing private_key.pem: %w", err)
+		}
+	} else {
+		galog.Debugf("Not writing private_key.pem because it is empty")
 	}
+
 	galog.Debugf("Writing workload certificates certificate chain to %s", contentDir)
 	if err := os.WriteFile(filepath.Join(contentDir, "certificates.pem"), certs.GetCertificateChainPem(), 0644); err != nil {
 		return fmt.Errorf("error writing certificates.pem: %w", err)

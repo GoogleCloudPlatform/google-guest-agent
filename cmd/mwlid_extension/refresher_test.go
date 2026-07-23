@@ -382,6 +382,86 @@ func TestRefreshCreds(t *testing.T) {
 	}
 }
 
+// TestRefreshCredsNoPrivatePem tests that the private_key.pem file is not
+// written if the content from MDS is empty.
+func TestRefreshCredsNoPrivatePem(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	spiffe := "spiffe://12345.global.67890.workload.id.goog.0/ns/NAMESPACE_ID/sa/MANAGED_IDENTITY_ID"
+	domain1 := "12345.global.67890.workload.id.goog.0"
+	pem1 := "-----BEGIN CERTIFICATE-----datahere-----END CERTIFICATE-----"
+	domain2 := "PEER_SPIFFE_TRUST_DOMAIN_2_IGNORE"
+	pem2 := "-----BEGIN CERTIFICATE-----datahere-----END CERTIFICATE-----"
+	certPem := "-----BEGIN CERTIFICATE-----datahere-----END CERTIFICATE-----"
+
+	contentPrefix := filepath.Join(tmp, "workload-spiffe-contents")
+	tmpSymlinkPrefix := filepath.Join(tmp, "workload-spiffe-symlink")
+	link := filepath.Join(tmp, "workload-spiffe-credentials")
+	out := outputOpts{contentPrefix, tmpSymlinkPrefix, link}
+
+	mdsClient := &mdsTestClient{
+		spiffe:  spiffe,
+		certPem: certPem,
+		domain1: domain1,
+		pem1:    pem1,
+		domain2: domain2,
+		pem2:    pem2,
+		enabled: "true",
+	}
+	j := &RefresherJob{mdsClient: mdsClient}
+	if err := j.refreshCreds(ctx, out, time.Now().Format(time.RFC3339)); err != nil {
+		t.Errorf("refreshCreds(ctx, %+v) failed unexpectedly with error: %v", out, err)
+	}
+
+	tests := []struct {
+		path    string
+		exists  bool
+		content string
+	}{
+		{
+			path:    filepath.Join(link, "ca_certificates.pem"),
+			exists:  true,
+			content: pem1,
+		},
+		{
+			path:    filepath.Join(link, "certificates.pem"),
+			exists:  true,
+			content: certPem,
+		},
+		{
+			path:   filepath.Join(link, "private_key.pem"),
+			exists: false,
+		},
+		{
+			path:    filepath.Join(link, "config_status"),
+			exists:  true,
+			content: testConfigStatusResp,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			if test.exists {
+				got, err := os.ReadFile(test.path)
+				if err != nil {
+					t.Errorf("failed to read expected file %q and content %q, error: %v", test.path, test.content, err)
+				}
+				if string(got) != test.content {
+					t.Errorf("refreshCreds(ctx, %+v) wrote %q, want content %q", out, string(got), test.content)
+				}
+			} else {
+				if _, err := os.Stat(test.path); err == nil {
+					t.Errorf("os.Stat(%s) succeeded, want error", test.path)
+				}
+			}
+		})
+	}
+}
+
 func TestRefreshCredsError(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
@@ -625,6 +705,10 @@ func TestRefreshCredsWithGRPC(t *testing.T) {
 		CertificateChainPem: testCertChain, PrivateKeyPem: testPrivateKey,
 	}
 
+	noPrivateKeyResp := &wipb.GetWorkloadCertificatesResponse{
+		CertificateChainPem: testCertChain,
+	}
+
 	trustBundlesResp := &wipb.GetWorkloadTrustBundlesResponse{
 		SpiffeTrustBundlesMapJson: testTrustBundles,
 	}
@@ -667,6 +751,18 @@ func TestRefreshCredsWithGRPC(t *testing.T) {
 				getWorkloadTrustBundlesErr: status.Error(codes.Internal, "internal server error"),
 			},
 			expectErr: true,
+		},
+		{
+			name: "EmptyPrivateKey",
+			mockServer: &mockWorkloadIdentityServer{
+				getWorkloadCertificatesResponse: noPrivateKeyResp,
+				getWorkloadTrustBundlesResponse: trustBundlesResp,
+			},
+			expectErr: false,
+			expectedFiles: map[string][]byte{
+				"certificates.pem":   testCertChain,
+				"trust_bundles.json": testTrustBundles,
+			},
 		},
 	}
 
