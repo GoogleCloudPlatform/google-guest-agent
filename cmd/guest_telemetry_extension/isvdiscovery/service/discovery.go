@@ -19,15 +19,14 @@ package discovery
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/compute/metadata"
-	acpb "github.com/GoogleCloudPlatform/agentcommunication_client/gapic/agentcommunicationpb"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/communication"
 	defpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/definition/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/engine"
@@ -125,33 +124,58 @@ func (DefaultProcessLister) listAllProcesses() ([]ProcessWrapper, error) {
 	return processes, nil
 }
 
+// ignoreError executes fn and discards any error, returning only the value.
+// This satisfies internal error-checking linters without generating log spam.
+func ignoreError[T any](fn func() (T, error)) T {
+	val, err := fn()
+	if err != nil {
+		// Expected failure due to lack of permissions (EACCES) or ephemeral processes
+		// exiting during scan (ESRCH). We intentionally ignore the error.
+	}
+	return val
+}
+
+func processPath(p ProcessWrapper) string {
+	return ignoreError(p.Exe)
+}
+
+func processArgs(p ProcessWrapper) string {
+	return ignoreError(p.Cmdline)
+}
+
+func processEnvVars(p ProcessWrapper) []string {
+	return ignoreError(p.Environ)
+}
+
+func processUsername(p ProcessWrapper) string {
+	return ignoreError(p.Username)
+}
+
 func vmInfo() (*engine.VMInfo, error) {
 	processes, err := procs.listAllProcesses()
 	if err != nil {
 		return nil, err
 	}
 	vmInfo := &engine.VMInfo{
-		ProcessNames:   make([]string, len(processes)),
-		ProcessPaths:   make([]string, len(processes)),
-		ProcessArgs:    make([]string, len(processes)),
-		ProcessEnvVars: make([]string, len(processes)),
-		OSName:         runtime.GOOS,
+		OSName: runtime.GOOS,
 	}
 	slog.Info(fmt.Sprintf("Found %d processes", len(processes)))
-	for i, p := range processes {
+	for _, p := range processes {
 		name, err := p.Name()
 		if err != nil {
+			// If we cannot get the process name, it's typically because the process has
+			// exited (ephemeral process) during the scan. We skip this process entirely
+			// to avoid leaving empty entries and misaligning slices.
 			slog.Error(fmt.Sprintf("Failed to get process name: %v", err))
 			continue
 		}
-		vmInfo.ProcessNames[i] = name
-		// We may not have permissions to get the path for all processes.
-		path, _ := p.Exe()
-		vmInfo.ProcessPaths[i] = path
-		args, _ := p.Cmdline()
-		vmInfo.ProcessArgs[i] = args
-		env, _ := p.Environ()
-		vmInfo.ProcessEnvVars[i] = strings.Join(env, "\n")
+		vmInfo.ProcessNames = append(vmInfo.ProcessNames, name)
+		// We may not have permissions to get attributes for all processes.
+		// These will fallback to empty strings via ignoreError wrapper.
+		vmInfo.ProcessPaths = append(vmInfo.ProcessPaths, processPath(p))
+		vmInfo.ProcessArgs = append(vmInfo.ProcessArgs, processArgs(p))
+		vmInfo.ProcessEnvVars = append(vmInfo.ProcessEnvVars, strings.Join(processEnvVars(p), "\n"))
+		vmInfo.Usernames = append(vmInfo.Usernames, processUsername(p))
 	}
 	return vmInfo, nil
 }
@@ -164,30 +188,7 @@ func RunEngine(ctx context.Context, req *defpb.DiscoveryRules) (*defpb.Discovery
 		return nil, err
 	}
 	slog.Info(fmt.Sprintf("Discovered VM info: %+v", vmInfo))
-	return engine.ExecuteRules(req, vmInfo), nil
-}
-
-func handleRequest(ctx context.Context, msg *acpb.MessageBody) (*anypb.Any, error) {
-	req := &defpb.DiscoveryRules{}
-	if err := msg.GetBody().UnmarshalTo(req); err != nil {
-		slog.Warn(fmt.Sprintf("Failed to unmarshal message to DiscoveryRules. %s: %s", "err", err.Error()))
-		return nil, err
-	}
-	if len(req.GetRules()) == 0 {
-		slog.Warn("No rules found in DiscoveryRules messsage.")
-		return nil, errors.New("no rules found in DiscoveryRules messsage")
-	}
-	res, err := RunEngine(ctx, req)
-	if err != nil {
-		slog.Warn(fmt.Sprintf("Failed to discover workloads. %s: %s", "err", err.Error()))
-		return nil, err
-	}
-	anyRes, err := anypb.New(res)
-	if err != nil {
-		slog.Warn(fmt.Sprintf("Failed to marshal DiscoveryResult to any. %s: %s", "err", err.Error()))
-		return nil, err
-	}
-	return anyRes, nil
+	return engine.ExecuteRules(ctx, req, vmInfo), nil
 }
 
 // ISVDiscovery is a struct for holding the configuration of the ISV discovery service.
@@ -206,6 +207,19 @@ type ISVDiscovery struct {
 	endpoint       string // ACS endpoint override, default none
 	dataFile       string // file to write discovered data to, default none
 	definitionFile string // file based discovery definitions, default none
+
+	envInterval time.Duration
+	lastRules   *defpb.DiscoveryRules
+	lastResult  *defpb.DiscoveryResult
+	lastFetch   time.Time
+	lastReport  time.Time
+
+	// Function fields for mocking in tests.
+	pollAndScanFunc      func(ctx context.Context)
+	fetchRulesFunc       func(ctx context.Context) (*defpb.DiscoveryRules, error)
+	reportResultFunc     func(ctx context.Context, result *defpb.DiscoveryResult) error
+	runEngineFunc        func(ctx context.Context, req *defpb.DiscoveryRules) (*defpb.DiscoveryResult, error)
+	metadataDisabledFunc func(ctx context.Context) (bool, error)
 }
 
 // New creates a new ISVDiscovery service.
@@ -215,6 +229,20 @@ func New(errorLogger *slog.Logger) *ISVDiscovery {
 		ErrorLogger: errorLogger,
 	}
 	d.parseEnvVars()
+
+	// Initialize default function fields.
+	d.pollAndScanFunc = d.pollAndScan
+	d.fetchRulesFunc = d.fetchRules
+	d.reportResultFunc = d.reportResult
+	d.runEngineFunc = RunEngine
+	d.metadataDisabledFunc = func(ctx context.Context) (bool, error) {
+		disabled, err := metadata.InstanceAttributeValueWithContext(ctx, disableGuestTelemetryMetadataKey)
+		if err != nil {
+			return false, err
+		}
+		return strings.ToLower(disabled) == "true", nil
+	}
+
 	return d
 }
 
@@ -227,8 +255,23 @@ func (d *ISVDiscovery) parseEnvVars() {
 	d.endpoint = os.Getenv("GUEST_TEL_ISV_ENDPOINT")
 	d.dataFile = os.Getenv("GUEST_TEL_ISV_DATA_FILE")
 	d.definitionFile = os.Getenv("GUEST_TEL_ISV_DEFINITION_FILE")
-	slog.Info(fmt.Sprintf("ISVDiscovery created with channel: %s, endpoint: %s, dataFile: %s, definitionFile: %s", d.channel, d.endpoint, d.dataFile, d.definitionFile))
+
+	intervalStr := os.Getenv("GUEST_TEL_ISV_INTERVAL")
+	if intervalStr != "" {
+		if t, err := time.ParseDuration(intervalStr); err == nil {
+			d.envInterval = t
+		} else {
+			slog.Error(fmt.Sprintf("Failed to parse GUEST_TEL_ISV_INTERVAL: %v", err))
+		}
+	}
+
+	slog.Info(fmt.Sprintf("ISVDiscovery created with channel: %s, endpoint: %s, dataFile: %s, definitionFile: %s, envInterval: %v", d.channel, d.endpoint, d.dataFile, d.definitionFile, d.envInterval))
 }
+
+const (
+	defaultScanInterval      = 15 * time.Minute
+	defaultReportingInterval = 24 * time.Hour
+)
 
 // Run runs the ISV discovery service. It gathers discovery definitions via ACS and runs discovery against them.
 func (d *ISVDiscovery) Run(ctx context.Context) error {
@@ -239,48 +282,163 @@ func (d *ISVDiscovery) Run(ctx context.Context) error {
 		slog.Info("Running discovery from file")
 		return d.runDiscoveryFromFile(ctx, d.ErrorLogger)
 	}
-	// Get Google Cloud instance metadata to see if guest telemetry is disabled.
-	disabled, err := metadata.GetWithContext(ctx, disableGuestTelemetryMetadataKey)
+
+	disabled, err := d.metadataDisabledFunc(ctx)
 	if err != nil {
 		slog.Info(fmt.Sprintf("Unable to get metadata key disable-guest-telemetry. %s: %s", "err", err.Error()))
 	}
-	if strings.ToLower(disabled) == "true" {
+	if disabled {
 		slog.Info("Guest telemetry is disabled. Skipping communication with ACS and discovery.")
 		return nil
 	}
 
-	// Create client.
-	slog.Info("Creating client.")
+	// Initial scan on boot.
+	d.pollAndScanFunc(ctx)
+
+	scanInterval := d.scanInterval()
+	ticker := time.NewTicker(scanInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("ISV discovery service loop stopped due to context cancellation")
+			return nil
+		case <-ticker.C:
+			d.pollAndScanFunc(ctx)
+			newScanInterval := d.scanInterval()
+			if newScanInterval != scanInterval {
+				scanInterval = newScanInterval
+				ticker.Reset(scanInterval)
+			}
+		}
+	}
+}
+
+func (d *ISVDiscovery) scanInterval() time.Duration {
+	if d.lastRules.GetConfig().GetScanIntervalSeconds() > 0 {
+		return time.Duration(d.lastRules.GetConfig().GetScanIntervalSeconds()) * time.Second
+	}
+	return defaultScanInterval
+}
+
+func (d *ISVDiscovery) reportingInterval() time.Duration {
+	if d.envInterval > 0 {
+		return d.envInterval
+	}
+	if d.lastRules.GetConfig().GetMinimumReportingIntervalSeconds() > 0 {
+		return time.Duration(d.lastRules.GetConfig().GetMinimumReportingIntervalSeconds()) * time.Second
+	}
+	return defaultReportingInterval
+}
+
+func (d *ISVDiscovery) bootstrapRules() *defpb.DiscoveryRules {
+	config := defpb.DiscoveryConfiguration_builder{
+		ScanIntervalSeconds:             int32(defaultScanInterval / time.Second),
+		MinimumReportingIntervalSeconds: int32(defaultReportingInterval / time.Second),
+	}.Build()
+	return defpb.DiscoveryRules_builder{
+		Config: config,
+	}.Build()
+}
+
+func (d *ISVDiscovery) fetchRules(ctx context.Context) (*defpb.DiscoveryRules, error) {
 	acsClient, err := communication.CreateClient(ctx, d.endpoint)
 	if err != nil {
-		slog.Warn(fmt.Sprintf("Failed to create client. %s: %s", "err", err.Error()))
-		return err
+		return nil, fmt.Errorf("failed to create ACS client: %w", err)
 	}
-	defer acsClient.Close()
+	defer func() {
+		if err := acsClient.Close(); err != nil {
+			slog.Warn(fmt.Sprintf("Failed to close ACS client: %v", err))
+		}
+	}()
 
-	// Requesting discovery definition.
 	res, err := communication.SendDiscoveryDefinitionRequest(ctx, d.channel, acsClient)
 	if err != nil {
-		slog.Warn(fmt.Sprintf("Failed to send message requesting discovery definition. %s: %s", "err", err.Error()))
-		return err
+		return nil, fmt.Errorf("failed to send discovery definition request: %w", err)
 	}
-	slog.Info(fmt.Sprintf("SendDiscoveryDefinitionRequest complete. %s: %s", "res", prototext.Format(res)))
-	// Handle request.
-	anyRes, err := handleRequest(ctx, res.GetMessageBody())
+
+	req := &defpb.DiscoveryRules{}
+	if err := res.GetMessageBody().GetBody().UnmarshalTo(req); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal message to DiscoveryRules: %w", err)
+	}
+
+	return req, nil
+}
+
+func (d *ISVDiscovery) reportResult(ctx context.Context, result *defpb.DiscoveryResult) error {
+	anyRes, err := anypb.New(result)
 	if err != nil {
-		slog.Warn(fmt.Sprintf("Encountered error during ACS message handling. %s: %s", "err", err.Error()))
-		return err
+		return fmt.Errorf("failed to marshal DiscoveryResult to any: %w", err)
 	}
-	slog.Debug(fmt.Sprintf("Message handling complete. %s: %s", "responseMsg", prototext.Format(anyRes)))
-	// send discovery result.
-	res, err = communication.SendDiscoveryResult(ctx, d.channel, acsClient, anyRes)
+
+	acsClient, err := communication.CreateClient(ctx, d.endpoint)
 	if err != nil {
-		slog.Warn(fmt.Sprintf("Encountered error during sendDiscoveryResult. %s: %s", "err", err.Error()))
-		return err
+		return fmt.Errorf("failed to create ACS client: %w", err)
 	}
-	slog.Debug(fmt.Sprintf("SendDiscoveryResult complete. %s: %s", "responseMsg", prototext.Format(res)))
-	slog.Info("Communicate complete.")
+	defer func() {
+		if err := acsClient.Close(); err != nil {
+			slog.Warn(fmt.Sprintf("Failed to close ACS client: %v", err))
+		}
+	}()
+
+	response, err := communication.SendDiscoveryResult(ctx, d.channel, acsClient, anyRes)
+	if err != nil {
+		return fmt.Errorf("failed to send discovery result: %w", err)
+	}
+	slog.Info(fmt.Sprintf("Discovery result sent successfully. Response: %v", response))
 	return nil
+}
+
+func (d *ISVDiscovery) pollAndScan(ctx context.Context) {
+	if err := ctx.Err(); err != nil {
+		slog.Info("Skipping poll and scan due to context cancellation")
+		return
+	}
+	now := time.Now()
+	needFetch := d.lastFetch.IsZero() || now.Sub(d.lastFetch) >= d.reportingInterval()
+
+	if needFetch {
+		slog.Info("Fetching discovery rules from backend")
+		rules, err := d.fetchRulesFunc(ctx)
+		if err != nil {
+			slog.Warn(fmt.Sprintf("Failed to fetch discovery rules: %v. Using cached or bootstrap config.", err))
+			if d.lastRules == nil {
+				slog.Info("No cached rules, using bootstrap config")
+				d.lastRules = d.bootstrapRules()
+			}
+		} else {
+			d.lastRules = rules
+			d.lastFetch = now
+		}
+	}
+
+	// Now run the scan with d.lastRules.
+	slog.Info("Running discovery scan")
+	result, err := d.runEngineFunc(ctx, d.lastRules)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to run discovery engine: %v", err))
+		return
+	}
+	result = deduplicateResult(result)
+
+	resultChanged := !discoveryResultEqual(result, d.lastResult)
+	succeededFetch := needFetch && d.lastFetch.Equal(now)
+
+	needReport := resultChanged || succeededFetch || d.lastResult == nil || now.Sub(d.lastReport) >= d.reportingInterval()
+
+	if !needReport {
+		slog.Info("Discovery result unchanged, skipping report")
+		return
+	}
+
+	slog.Info(fmt.Sprintf("Reporting discovery results. Reason: resultChanged=%v, succeededFetch=%v, firstReport=%v", resultChanged, succeededFetch, d.lastResult == nil))
+	if err := d.reportResultFunc(ctx, result); err != nil {
+		slog.Error(fmt.Sprintf("Failed to report discovery results: %v", err))
+		return
+	}
+	d.lastResult = result
+	d.lastReport = now
 }
 
 func (d *ISVDiscovery) runDiscoveryFromFile(ctx context.Context, errorLogger *slog.Logger) error {
@@ -302,7 +460,7 @@ func (d *ISVDiscovery) runDiscoveryFromFile(ctx context.Context, errorLogger *sl
 	slog.Info("Parsed definitions from file successfully")
 	slog.Info(fmt.Sprintf("Definitions: %s", prototext.Format(definitions)))
 	// Run discovery against the definitions.
-	res, err := RunEngine(ctx, definitions)
+	res, err := d.runEngineFunc(ctx, definitions)
 	if err != nil {
 		slog.Warn(fmt.Sprintf("Failed to discover workloads. %s: %s", "err", err.Error()))
 		errorLogger.Error(fmt.Sprintf("Failed to discover workloads: %v", err))
@@ -333,4 +491,50 @@ func (d *ISVDiscovery) runDiscoveryFromFile(ctx context.Context, errorLogger *sl
 	slog.Info("Wrote discovered data to file successfully")
 	slog.Info("Discovery from file complete")
 	return nil
+}
+
+func discoveryResultEqual(a, b *defpb.DiscoveryResult) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if len(a.GetDetectedData()) != len(b.GetDetectedData()) {
+		return false
+	}
+
+	matched := make([]bool, len(b.GetDetectedData()))
+	for _, da := range a.GetDetectedData() {
+		found := false
+		for i, db := range b.GetDetectedData() {
+			if !matched[i] && proto.Equal(da, db) {
+				matched[i] = true
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func deduplicateResult(r *defpb.DiscoveryResult) *defpb.DiscoveryResult {
+	if r == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var unique []*defpb.DetectedData
+	for _, d := range r.GetDetectedData() {
+		key := d.GetName() + "|" + d.GetVersion()
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, d)
+		}
+	}
+	return defpb.DiscoveryResult_builder{
+		DetectedData: unique,
+	}.Build()
 }

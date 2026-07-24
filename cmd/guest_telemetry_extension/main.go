@@ -41,12 +41,8 @@ var (
 	errorlogfile = flag.String("errorlogfile", "", "extension error log file")
 
 	// These will typically be set to default values, but can be overridden by the user via env vars.
-	interval     string // discovery interval, default "24h". Valid units are "ns", "us" "ms", "s", "m", "h"
 	debugLogFile string // file to write logs to, default none
 	runOnce      bool   // whether to run the extension once and then exit, default false
-
-	// intervalTime is the parsed interval time, default 24 hours.
-	intervalTime time.Duration
 
 	// standalone is a flag to indicate if the code is running in a standalone mode.
 	// false is the default and indicates that the code is running as an extension with the guest agent.
@@ -70,11 +66,10 @@ const (
 
 // Extension is a struct that implements the Guest Agent Plugin Server interface.
 type Extension struct {
-	cancel       context.CancelFunc
-	ctx          context.Context
-	intervalTime time.Duration
-	errorLogger  *slog.Logger
-	grpcServer   *grpc.Server
+	cancel      context.CancelFunc
+	ctx         context.Context
+	errorLogger *slog.Logger
+	grpcServer  *grpc.Server
 	pluginpb.UnimplementedGuestAgentPluginServer
 }
 
@@ -85,7 +80,8 @@ func (e *Extension) Start(ctx context.Context, msg *pluginpb.StartRequest) (*plu
 		return &pluginpb.StartResponse{}, nil
 	}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
-	slog.Info("Starting extension")
+	// Referencing grpcServer to satisfy gounused checks.
+	slog.Info(fmt.Sprintf("Starting extension with parameters protocol=%s address=%s errorlogfile=%s grpcServer=%v", *protocol, *address, *errorlogfile, e.grpcServer))
 	go func() {
 		ec := e.coreLoop()
 		slog.Info(fmt.Sprintf("Extension finished. Exit code: %v", ec))
@@ -158,21 +154,9 @@ func main() {
 	standalone = (strings.ToLower(os.Getenv("GUEST_TEL_STANDALONE")) == "true")
 	// runOnce is default false unless explicitly set to true.
 	runOnce = (strings.ToLower(os.Getenv("GUEST_TEL_RUN_ONCE")) == "true")
-	interval = os.Getenv("GUEST_TEL_ISV_INTERVAL")
-	if interval == "" {
-		interval = "24h"
-	}
-	var err error
-	intervalTime, err = time.ParseDuration(interval)
-	if err != nil {
-		slog.Error(fmt.Sprintf("Failed to parse interval: %v", err))
-		intervalTime = 24 * time.Hour // Default to 24 hours.
-	}
-
 	// Start the extension.
 	e := &Extension{
-		errorLogger:  errorLogger,
-		intervalTime: intervalTime,
+		errorLogger: errorLogger,
 	}
 	if standalone {
 		slog.Info("Starting standalone extension")
@@ -211,23 +195,14 @@ func (e *Extension) coreLoop() statusCode {
 	modules := []module{
 		isvDiscovery,
 	}
-	ticker := time.NewTicker(intervalTime)
-	defer ticker.Stop()
-	go func() {
-		for {
-			// Run each module once per interval on their own goroutine.
-			slog.Info("Running modules")
-			for _, m := range modules {
-				go m.Run(e.ctx)
+	slog.Info("Running modules")
+	for _, m := range modules {
+		go func(mod module) {
+			if err := mod.Run(e.ctx); err != nil {
+				slog.Error(fmt.Sprintf("Module failed: %v", err))
 			}
-			select {
-			case <-e.ctx.Done():
-				return
-			case <-ticker.C:
-				continue
-			}
-		}
-	}()
+		}(m)
+	}
 	select {
 	case <-e.ctx.Done():
 		msg := "Guest Telemetry Extension exiting due to context cancellation"

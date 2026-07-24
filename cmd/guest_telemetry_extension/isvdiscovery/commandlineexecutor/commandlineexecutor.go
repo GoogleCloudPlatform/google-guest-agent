@@ -218,7 +218,7 @@ Restricted arguments are those that can cause security issues if used in certain
 func checkRestrictedArgs(args []string) string {
 	// These are restricted arguments that should not be allowed in a command.
 	// They can cause security issues if used in certain contexts.
-	restrictedArgs := []string{";", "&", "|", ">"}
+	restrictedArgs := []string{";", "&", "|", ">", "<", "`", "\n", "$("}
 	for _, arg := range args {
 		for _, restrictedArg := range restrictedArgs {
 			if strings.Contains(arg, restrictedArg) {

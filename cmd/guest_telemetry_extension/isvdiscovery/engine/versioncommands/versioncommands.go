@@ -19,7 +19,8 @@ package versioncommands
 
 // VersionCommands contains the command to be executed to gather version information.
 type VersionCommands struct {
-	Cmd []string
+	Cmd         []string
+	ExtendedCmd []string
 }
 
 // Commands is the list of commands to be executed to gather version information.
@@ -44,9 +45,10 @@ var Commands *VersionCommands = &VersionCommands{
 		"Get-Command",
 		"$IQDIR15/bin64/start_iq",
 		"$IQDIR16/bin64/start_iq",
-		"C:\\SAP\\IQ-16_0\\bin64\\iqsrv16.exe",
 		"C:\\SAP\\IQ-15_0\\bin64\\iqsrv15.exe",
-		"$(find /usr/sap -maxdepth 5 -name disp+work -print -quit)",
+		"C:\\SAP\\IQ-16_0\\bin64\\iqsrv16.exe",
+		// Deprecated: This command is not in use.
+		"DEPRECATED_FINDSAPWEBAS",
 		"/usr/sbin/pacemakerd",
 		"sqlservr",
 		"Get-ItemPropertyValue",
@@ -61,5 +63,24 @@ var Commands *VersionCommands = &VersionCommands{
 		"/usr/sbin/nodetool",
 		"/opt/mssql/bin/sqlservr",
 		"USE_DISCOVERED_PROCESS_PATH",
+	},
+	ExtendedCmd: []string{
+		"unspecified",
+		"HDB",
+		"disp+work",
+		"msg_server",
+		"enserver",
+		"awk",
+		"sapwebdisp",
+		"start_iq",
+		"enrep",
+		"spark-submit",
+		"$SPARK_HOME/bin/spark-submit",
+		"crictl",
+		"hadoop",
+		"$HADOOP_HOME/bin/hadoop",
+		"dpkg",
+		"rpm",
+		"Get-Package",
 	},
 }
