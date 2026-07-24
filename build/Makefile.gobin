@@ -1,6 +1,7 @@
 PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
+	cmd/guest_net_telemetry/proto/network_stats_report.pb.go \
 	internal/acp/proto/agent_controlplane.pb.go \
 	cmd/mwlid_extension/proto/mwlid/workload_identity.pb.go \
 	pkg/proto/plugin_comm.pb.go
