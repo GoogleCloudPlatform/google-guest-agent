@@ -205,20 +205,36 @@ func shellQuoteSlice(args []string) string {
 }
 
 func buildCommandParams(cmd string, args []string, runAsUser bool, processInfo *ProcessInfo) commandlineexecutor.Params {
-	if runAsUser && processInfo != nil && processInfo.Username != "" && runtime.GOOS != "windows" {
-		fullCmd := shellQuote(cmd)
-		cmdArgs := shellQuoteSlice(args)
-		if cmdArgs != "" {
-			fullCmd = fullCmd + " " + cmdArgs
-		}
+	return buildCommandParamsForOS(cmd, args, runAsUser, processInfo, runtime.GOOS)
+}
+
+func buildCommandParamsForOS(cmd string, args []string, runAsUser bool, processInfo *ProcessInfo, goos string) commandlineexecutor.Params {
+	shouldRunAsUser := runAsUser && processInfo != nil && processInfo.Username != ""
+	if !shouldRunAsUser {
 		return commandlineexecutor.Params{
-			Executable: "su",
-			Args:       []string{"-", processInfo.Username, "-c", fullCmd},
+			Executable: cmd,
+			Args:       args,
 		}
 	}
+	if goos == "windows" {
+		// On Windows (where 'su' is not available), populate the User field on Params
+		// to convey the target process user context to the commandlineexecutor.
+		return commandlineexecutor.Params{
+			Executable: cmd,
+			Args:       args,
+			User:       processInfo.Username,
+		}
+	}
+	fullCmd := shellQuote(cmd)
+	cmdArgs := shellQuoteSlice(args)
+	if cmdArgs != "" {
+		fullCmd = fullCmd + " " + cmdArgs
+	}
+	// Note: User field must NOT be set when Executable is "su".
+	// "su" must be launched as root so it can switch process credentials to processInfo.Username.
 	return commandlineexecutor.Params{
-		Executable: cmd,
-		Args:       args,
+		Executable: "su",
+		Args:       []string{"-", processInfo.Username, "-c", fullCmd},
 	}
 }
 
@@ -288,7 +304,12 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 				}
 				cmd = resolveEnvVars(cmd, processInfo)
 				args := resolveEnvVarsSlice(step.GetCommandArgs(), processInfo)
-				params := buildCommandParams(cmd, args, step.GetRunAsDiscoveredProcessUser(), processInfo)
+				if step.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH && (processInfo == nil || processInfo.Username == "") {
+					slog.Debug("Skipping USE_DISCOVERED_PROCESS_PATH execution: process username is missing", "command", cmd)
+					break
+				}
+				runAsUser := step.GetRunAsDiscoveredProcessUser() || step.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH
+				params := buildCommandParams(cmd, args, runAsUser, processInfo)
 				if step.GetUsePreviousOutputAsStdin() {
 					params.Stdin = prevOutput
 				}
@@ -327,7 +348,12 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 		}
 		cmd = resolveEnvVars(cmd, processInfo)
 		args := resolveEnvVarsSlice(versionRule.GetCommandArgs(), processInfo)
-		params := buildCommandParams(cmd, args, versionRule.GetRunAsDiscoveredProcessUser(), processInfo)
+		if versionRule.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH && (processInfo == nil || processInfo.Username == "") {
+			slog.Debug("Skipping USE_DISCOVERED_PROCESS_PATH execution: process username is missing", "command", cmd)
+			continue
+		}
+		runAsUser := versionRule.GetRunAsDiscoveredProcessUser() || versionRule.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH
+		params := buildCommandParams(cmd, args, runAsUser, processInfo)
 		res := executeCommand(ctx, params)
 
 		if res.Error != nil || res.ExitCode != 0 || !res.ExecutableFound {

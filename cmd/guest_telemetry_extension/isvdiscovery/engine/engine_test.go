@@ -1219,9 +1219,379 @@ func TestExecuteVersionRules_DiscoveredPath(t *testing.T) {
 	}
 	defer func() { executeCommand = originalExec }()
 
-	executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Path: "/mock/path"})
-	if capturedParams == nil || capturedParams.Executable != "/mock/path" {
+	executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Path: "/mock/path", Username: "testuser"})
+	wantExec := "/mock/path"
+	if runtime.GOOS != "windows" {
+		wantExec = "su"
+	}
+	if capturedParams == nil || capturedParams.Executable != wantExec {
 		t.Errorf("executeVersionRules did not use process path, got %+v", capturedParams)
+	}
+}
+
+func TestExecuteVersionRules_DiscoveredPathRunsAsUser(t *testing.T) {
+	ruleMock := defpb.DiscoveryRule_builder{
+		VersionRules: []*defpb.DiscoveryVersionRule{
+			defpb.DiscoveryVersionRule_builder{
+				Command:     defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH,
+				CommandArgs: []string{"--version"},
+				RegexMatch:  ".*",
+				// Note: run_as_discovered_process_user is intentionally false (default)
+			}.Build(),
+		},
+	}.Build()
+
+	var capturedParams *commandlineexecutor.Params
+	originalExec := executeCommand
+	executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+		capturedParams = &params
+		return commandlineexecutor.Result{
+			StdOut:          "1.2.3",
+			ExitCode:        0,
+			ExecutableFound: true,
+		}
+	}
+	defer func() { executeCommand = originalExec }()
+
+	executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Path: "/mock/path", Username: "testuser"})
+	if capturedParams == nil {
+		t.Fatal("capturedParams is nil")
+	}
+	if runtime.GOOS != "windows" {
+		if capturedParams.Executable != "su" {
+			t.Errorf("got executable %q, want 'su'", capturedParams.Executable)
+		}
+	}
+}
+
+func TestExecuteVersionRules_StepRunAsDiscoveredProcessUser(t *testing.T) {
+	wantNonSuExec := "cat"
+
+	tests := []struct {
+		name          string
+		command       defpb.VersionCommand
+		runAsUserFlag bool
+		username      string
+		wantExec      string
+		wantUser      string
+	}{
+		{
+			name:          "step with run_as_user false and non-discovered command does not run as user",
+			command:       defpb.VersionCommand_CAT,
+			runAsUserFlag: false,
+			username:      "testuser",
+			wantExec:      wantNonSuExec,
+			wantUser:      "",
+		},
+		{
+			name:          "step with run_as_user true and non-discovered command runs as user",
+			command:       defpb.VersionCommand_CAT,
+			runAsUserFlag: true,
+			username:      "testuser",
+			wantExec:      "su",
+			wantUser:      "",
+		},
+		{
+			name:          "step with USE_DISCOVERED_PROCESS_PATH runs as user regardless of flag",
+			command:       defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH,
+			runAsUserFlag: false,
+			username:      "testuser",
+			wantExec:      "su",
+			wantUser:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				if tt.wantExec == "su" {
+					if tt.command == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH {
+						tt.wantExec = "/mock/path"
+					} else {
+						tt.wantExec = wantNonSuExec
+					}
+					tt.wantUser = tt.username
+				}
+			}
+
+			ruleMock := defpb.DiscoveryRule_builder{
+				VersionRules: []*defpb.DiscoveryVersionRule{
+					defpb.DiscoveryVersionRule_builder{
+						Steps: []*defpb.VersionCommandStep{
+							defpb.VersionCommandStep_builder{
+								Command:                    tt.command,
+								CommandArgs:                []string{"--version"},
+								RegexMatch:                 ".*",
+								RunAsDiscoveredProcessUser: tt.runAsUserFlag,
+							}.Build(),
+						},
+					}.Build(),
+				},
+			}.Build()
+
+			var capturedParams *commandlineexecutor.Params
+			originalExec := executeCommand
+			executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+				capturedParams = &params
+				return commandlineexecutor.Result{
+					StdOut:          "1.2.3",
+					ExitCode:        0,
+					ExecutableFound: true,
+				}
+			}
+			defer func() { executeCommand = originalExec }()
+
+			executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Path: "/mock/path", Username: tt.username})
+			if capturedParams == nil {
+				t.Fatal("executeCommand was not called")
+			}
+			if capturedParams.Executable != tt.wantExec {
+				t.Errorf("Executable = %q, want %q", capturedParams.Executable, tt.wantExec)
+			}
+			if capturedParams.User != tt.wantUser {
+				t.Errorf("User = %q, want %q", capturedParams.User, tt.wantUser)
+			}
+		})
+	}
+}
+
+func TestExecuteVersionRules_RuleRunAsDiscoveredProcessUser(t *testing.T) {
+	wantNonSuExec := "cat"
+
+	tests := []struct {
+		name          string
+		command       defpb.VersionCommand
+		runAsUserFlag bool
+		username      string
+		wantExec      string
+		wantUser      string
+	}{
+		{
+			name:          "rule with run_as_user false and non-discovered command does not run as user",
+			command:       defpb.VersionCommand_CAT,
+			runAsUserFlag: false,
+			username:      "testuser",
+			wantExec:      wantNonSuExec,
+			wantUser:      "",
+		},
+		{
+			name:          "rule with run_as_user true and non-discovered command runs as user",
+			command:       defpb.VersionCommand_CAT,
+			runAsUserFlag: true,
+			username:      "testuser",
+			wantExec:      "su",
+			wantUser:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				if tt.wantExec == "su" {
+					tt.wantExec = wantNonSuExec
+					tt.wantUser = tt.username
+				}
+			}
+
+			ruleMock := defpb.DiscoveryRule_builder{
+				VersionRules: []*defpb.DiscoveryVersionRule{
+					defpb.DiscoveryVersionRule_builder{
+						Command:                    tt.command,
+						CommandArgs:                []string{"--version"},
+						RegexMatch:                 ".*",
+						RunAsDiscoveredProcessUser: tt.runAsUserFlag,
+					}.Build(),
+				},
+			}.Build()
+
+			var capturedParams *commandlineexecutor.Params
+			originalExec := executeCommand
+			executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+				capturedParams = &params
+				return commandlineexecutor.Result{
+					StdOut:          "1.2.3",
+					ExitCode:        0,
+					ExecutableFound: true,
+				}
+			}
+			defer func() { executeCommand = originalExec }()
+
+			executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Path: "/mock/path", Username: tt.username})
+			if capturedParams == nil {
+				t.Fatal("executeCommand was not called")
+			}
+			if capturedParams.Executable != tt.wantExec {
+				t.Errorf("Executable = %q, want %q", capturedParams.Executable, tt.wantExec)
+			}
+			if capturedParams.User != tt.wantUser {
+				t.Errorf("User = %q, want %q", capturedParams.User, tt.wantUser)
+			}
+		})
+	}
+}
+
+func TestBuildCommandParams(t *testing.T) {
+	t.Run("Windows runAsUser populates User field", func(t *testing.T) {
+		pInfo := &ProcessInfo{Username: "winuser"}
+		params := buildCommandParamsForOS("cmd.exe", []string{"/c", "ver"}, true, pInfo, "windows")
+		if params.Executable != "cmd.exe" {
+			t.Errorf("Executable = %q, want 'cmd.exe'", params.Executable)
+		}
+		if params.User != "winuser" {
+			t.Errorf("User = %q, want 'winuser'", params.User)
+		}
+	})
+
+	t.Run("Linux runAsUser uses su and leaves User field empty", func(t *testing.T) {
+		pInfo := &ProcessInfo{Username: "linuxuser"}
+		params := buildCommandParamsForOS("mybinary", []string{"--version"}, true, pInfo, "linux")
+		if params.Executable != "su" {
+			t.Errorf("Executable = %q, want 'su'", params.Executable)
+		}
+		if params.User != "" {
+			t.Errorf("User = %q, want empty (su runs as root)", params.User)
+		}
+		wantCmdStr := "mybinary --version"
+		if len(params.Args) != 4 || params.Args[3] != wantCmdStr {
+			t.Errorf("Args[3] = %q, want %q", params.Args[3], wantCmdStr)
+		}
+	})
+
+	t.Run("runAsUser false does not populate User or su", func(t *testing.T) {
+		pInfo := &ProcessInfo{Username: "someuser"}
+		params := buildCommandParamsForOS("mybinary", []string{"--version"}, false, pInfo, "linux")
+		if params.Executable != "mybinary" {
+			t.Errorf("Executable = %q, want 'mybinary'", params.Executable)
+		}
+		if params.User != "" {
+			t.Errorf("User = %q, want empty", params.User)
+		}
+	})
+}
+
+func TestExecuteVersionRules_PathWithSpaces(t *testing.T) {
+	ruleMock := defpb.DiscoveryRule_builder{
+		VersionRules: []*defpb.DiscoveryVersionRule{
+			defpb.DiscoveryVersionRule_builder{
+				Command:     defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH,
+				CommandArgs: []string{"--version", "--conf", "key=value with spaces"},
+				RegexMatch:  ".*",
+			}.Build(),
+		},
+	}.Build()
+
+	var capturedParams *commandlineexecutor.Params
+	originalExec := executeCommand
+	executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+		capturedParams = &params
+		return commandlineexecutor.Result{
+			StdOut:          "1.2.3",
+			ExitCode:        0,
+			ExecutableFound: true,
+		}
+	}
+	defer func() { executeCommand = originalExec }()
+
+	executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Path: "/usr/bin/my app", Username: "testuser"})
+	if capturedParams == nil {
+		t.Fatal("executeCommand was not called")
+	}
+
+	if runtime.GOOS != "windows" {
+		if capturedParams.Executable != "su" {
+			t.Errorf("Executable = %q, want 'su'", capturedParams.Executable)
+		}
+		wantCmdStr := "'/usr/bin/my app' --version --conf 'key=value with spaces'"
+		if len(capturedParams.Args) < 4 || capturedParams.Args[3] != wantCmdStr {
+			t.Errorf("capturedParams.Args = %v, want shell-quoted command string %q in su args", capturedParams.Args, wantCmdStr)
+		}
+	} else {
+		if capturedParams.Executable != "/usr/bin/my app" {
+			t.Errorf("Executable = %q, want '/usr/bin/my app'", capturedParams.Executable)
+		}
+		if capturedParams.User != "testuser" {
+			t.Errorf("User = %q, want 'testuser'", capturedParams.User)
+		}
+	}
+}
+
+func TestExecuteVersionRules_MissingUsernameFailsSafe(t *testing.T) {
+	tests := []struct {
+		name        string
+		processInfo *ProcessInfo
+		rule        *defpb.DiscoveryRule
+	}{
+		{
+			name:        "USE_DISCOVERED_PROCESS_PATH rule with empty username fails safe",
+			processInfo: &ProcessInfo{Path: "/mock/path", Username: ""},
+			rule: defpb.DiscoveryRule_builder{
+				VersionRules: []*defpb.DiscoveryVersionRule{
+					defpb.DiscoveryVersionRule_builder{
+						Command:     defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH,
+						CommandArgs: []string{"--version"},
+						RegexMatch:  ".*",
+					}.Build(),
+				},
+			}.Build(),
+		},
+		{
+			name:        "USE_DISCOVERED_PROCESS_PATH step with empty username fails safe",
+			processInfo: &ProcessInfo{Path: "/mock/path", Username: ""},
+			rule: defpb.DiscoveryRule_builder{
+				VersionRules: []*defpb.DiscoveryVersionRule{
+					defpb.DiscoveryVersionRule_builder{
+						Steps: []*defpb.VersionCommandStep{
+							defpb.VersionCommandStep_builder{
+								Command:     defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH,
+								CommandArgs: []string{"--version"},
+								RegexMatch:  ".*",
+							}.Build(),
+						},
+					}.Build(),
+				},
+			}.Build(),
+		},
+		{
+			name:        "nil processInfo for USE_DISCOVERED_PROCESS_PATH step fails safe",
+			processInfo: nil,
+			rule: defpb.DiscoveryRule_builder{
+				VersionRules: []*defpb.DiscoveryVersionRule{
+					defpb.DiscoveryVersionRule_builder{
+						Steps: []*defpb.VersionCommandStep{
+							defpb.VersionCommandStep_builder{
+								Command:     defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH,
+								CommandArgs: []string{"--version"},
+								RegexMatch:  ".*",
+							}.Build(),
+						},
+					}.Build(),
+				},
+			}.Build(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var called bool
+			originalExec := executeCommand
+			executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+				called = true
+				return commandlineexecutor.Result{
+					StdOut:          "1.2.3",
+					ExitCode:        0,
+					ExecutableFound: true,
+				}
+			}
+			defer func() { executeCommand = originalExec }()
+
+			version := executeVersionRules(context.Background(), tt.rule, tt.processInfo)
+			if called {
+				t.Errorf("executeCommand was unexpectedly called when Username is missing (fail-open vulnerability)")
+			}
+			if version != "" {
+				t.Errorf("got %q, want empty version for fail-safe execution", version)
+			}
+		})
 	}
 }
 
@@ -1579,12 +1949,16 @@ func TestExecuteVersionRules_UseDiscoveredProcessPathEmptyPath(t *testing.T) {
 	}
 	defer func() { executeCommand = originalExec }()
 
-	_ = executeVersionRules(context.Background(), ruleMock, &ProcessInfo{})
+	_ = executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Username: "testuser"})
 	if executable == "" {
 		t.Error("got empty string, want non-empty executable")
 	}
-	if executable != "USE_DISCOVERED_PROCESS_PATH" {
-		t.Errorf("got %q, want 'USE_DISCOVERED_PROCESS_PATH'", executable)
+	wantExec := "USE_DISCOVERED_PROCESS_PATH"
+	if runtime.GOOS != "windows" {
+		wantExec = "su"
+	}
+	if executable != wantExec {
+		t.Errorf("got %q, want %q", executable, wantExec)
 	}
 }
 
@@ -2174,8 +2548,9 @@ func TestExecuteVersionRules_ResolveEnvVarsInCmd(t *testing.T) {
 		},
 	}.Build()
 	processInfo := &ProcessInfo{
-		Path:   "$MY_BIN",
-		EnvVar: "MY_BIN=/actual/path/foo\x00",
+		Path:     "$MY_BIN",
+		EnvVar:   "MY_BIN=/actual/path/foo\x00",
+		Username: "testuser",
 	}
 
 	var capturedParams commandlineexecutor.Params
@@ -2194,8 +2569,12 @@ func TestExecuteVersionRules_ResolveEnvVarsInCmd(t *testing.T) {
 	if version != "1.2.3" {
 		t.Errorf("executeVersionRules() = %q, want %q", version, "1.2.3")
 	}
-	if capturedParams.Executable != "/actual/path/foo" {
-		t.Errorf("captured Executable = %q, want %q", capturedParams.Executable, "/actual/path/foo")
+	wantExec := "/actual/path/foo"
+	if runtime.GOOS != "windows" {
+		wantExec = "su"
+	}
+	if capturedParams.Executable != wantExec {
+		t.Errorf("captured Executable = %q, want %q", capturedParams.Executable, wantExec)
 	}
 }
 
@@ -2219,7 +2598,8 @@ func TestExecuteVersionRules_ExecutableNotFound(t *testing.T) {
 		},
 	}.Build()
 	processInfo := &ProcessInfo{
-		Path: "/path/foo",
+		Path:     "/path/foo",
+		Username: "testuser",
 	}
 
 	var execCount int
