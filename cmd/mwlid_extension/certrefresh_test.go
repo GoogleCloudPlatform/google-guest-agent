@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -169,6 +170,116 @@ func TestShouldEnable(t *testing.T) {
 			if got := j.isEnabled(ctx); got != test.want {
 				t.Errorf("isEnabled(ctx) = %t, want %t", got, test.want)
 			}
+		})
+	}
+}
+
+func TestHandleMetadataEvent(t *testing.T) {
+	emptyDesc, err := metadata.UnmarshalDescriptor(`{}`)
+	if err != nil {
+		t.Fatalf("failed to unmarshal empty descriptor: %v", err)
+	}
+
+	desc1, err := metadata.UnmarshalDescriptor(`{
+		"instance": {
+			"identity-configuration": {
+				"identity-uuid": "identity_uuid_1"
+			}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("failed to unmarshal descriptor 1: %v", err)
+	}
+
+	desc2, err := metadata.UnmarshalDescriptor(`{
+		"instance": {
+			"identity-configuration": {
+				"identity-uuid": "identity_uuid_2"
+			}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("failed to unmarshal descriptor 2: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		prevUUID string
+		desc     *metadata.Descriptor
+		// want indicates whether a signal should be sent on refreshChan
+		want         bool
+		wantPrevUUID string
+	}{
+		{
+			name:         "empty_descriptor",
+			desc:         emptyDesc,
+			want:         false,
+			wantPrevUUID: "",
+		},
+		{
+			name:         "first_descriptor",
+			prevUUID:     "",
+			desc:         desc1,
+			want:         true,
+			wantPrevUUID: "identity_uuid_1",
+		},
+		{
+			name:         "second_descriptor",
+			prevUUID:     "identity_uuid_1",
+			desc:         desc2,
+			want:         true,
+			wantPrevUUID: "identity_uuid_2",
+		},
+		{
+			name:         "same_descriptor",
+			prevUUID:     "identity_uuid_1",
+			desc:         desc1,
+			want:         false,
+			wantPrevUUID: "identity_uuid_1",
+		},
+	}
+
+	ctx := context.Background()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			extension := &Extension{}
+			refreshChan = make(chan bool, 1)
+
+			prevUUIDMutex.Lock()
+			prevUUID = tc.prevUUID
+			prevUUIDMutex.Unlock()
+
+			_, _, err := extension.handleMetadataEvent(ctx, "", tc.desc, nil)
+			if err != nil {
+				t.Fatalf("handleMetadataEvent() failed: %v", err)
+			}
+
+			// Verify that the refreshChan received a signal as expected.
+			// A signal would have already been sent by the time we check here. The
+			// buffer allows us to not block on the send.
+			select {
+			case <-refreshChan:
+				if !tc.want {
+					t.Errorf("refreshChan received a signal, want no signal")
+				}
+			default:
+				if tc.want {
+					t.Errorf("refreshChan did not receive a signal, want signal")
+				}
+			}
+
+			// Verify that the previous UUID was updated as expected.
+			fmt.Printf("Checking previous UUID")
+			prevUUIDMutex.RLock()
+			if prevUUID != tc.wantPrevUUID {
+				t.Errorf("prevUUID = %q, want %q", prevUUID, tc.wantPrevUUID)
+			}
+			prevUUIDMutex.RUnlock()
+
+			t.Cleanup(func() {
+				prevUUID = ""
+				close(refreshChan)
+			})
 		})
 	}
 }
