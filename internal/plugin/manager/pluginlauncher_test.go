@@ -195,6 +195,7 @@ func TestLauncherStep(t *testing.T) {
 		pluginInstallationType acmpb.PluginInstallationType
 		serviceCfg             string
 		status                 acmpb.CurrentPluginStates_StatusValue
+		createStateFile        bool
 		launchFail             bool
 		shouldFail             bool
 	}{
@@ -203,6 +204,13 @@ func TestLauncherStep(t *testing.T) {
 			path:                   t.TempDir(),
 			pluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
 			status:                 acmpb.CurrentPluginStates_RUNNING,
+		},
+		{
+			name:                   "success_local_plugin_preexisting_state_file",
+			path:                   t.TempDir(),
+			pluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+			status:                 acmpb.CurrentPluginStates_RUNNING,
+			createStateFile:        true,
 		},
 		{
 			name:                   "success_dynamic_plugin",
@@ -246,6 +254,16 @@ func TestLauncherStep(t *testing.T) {
 			plugin.Manifest.StartConfig = &ServiceConfig{Simple: tc.serviceCfg}
 			tr.shouldFail = tc.launchFail
 
+			if tc.createStateFile {
+				file := plugin.stateFile()
+				if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+					t.Fatalf("Failed to create state file directory %q: %v", filepath.Dir(file), err)
+				}
+				if err := os.WriteFile(file, []byte("test"), 0644); err != nil {
+					t.Fatalf("Failed to create state file %q: %v", file, err)
+				}
+			}
+
 			err := step.Run(ctx, plugin)
 			if (err != nil) != tc.shouldFail {
 				t.Errorf("launchStep.Run(ctx, %+v) = error: %v, want error: %t", plugin, err, tc.shouldFail)
@@ -258,8 +276,16 @@ func TestLauncherStep(t *testing.T) {
 			// Test state was stored on successful run.
 			file := plugin.stateFile()
 			if !tc.shouldFail {
-				if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
-					t.Errorf("launchStep.Run(ctx, %+v) did not write plugin state to file %s", plugin, file)
+				if tc.pluginInstallationType == acmpb.PluginInstallationType_LOCAL_INSTALLATION {
+					// Local plugins should not store state.
+					if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("launchStep.Run(ctx, %+v) wrote plugin state to file %s for local plugin", plugin, file)
+					}
+				} else {
+					// Dynamic plugins should store state.
+					if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
+						t.Errorf("launchStep.Run(ctx, %+v) did not write plugin state to file %s", plugin, file)
+					}
 				}
 			}
 
