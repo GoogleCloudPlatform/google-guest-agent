@@ -791,10 +791,14 @@ func (m *PluginManager) applyConfig(ctx context.Context, req *acpb.ConfigurePlug
 	}
 
 	// Update the plugin state file with the new config.
-	galog.Infof("Updating on-disk config for plugin %q", p.FullName())
-	if err := p.Store(); err != nil {
-		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to store config: %v", err))
-		return fmt.Errorf("failed to store config: %w", err)
+	if !p.IsLocal() {
+		galog.Infof("Updating on-disk config for plugin %q", p.FullName())
+		if err := p.Store(); err != nil {
+			sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to store config: %v", err))
+			return fmt.Errorf("failed to store config: %w", err)
+		}
+	} else {
+		galog.Debugf("Skipping on-disk config update for local plugin %q", p.FullName())
 	}
 
 	// Reset start config hash.
