@@ -232,9 +232,11 @@ func buildCommandParamsForOS(cmd string, args []string, runAsUser bool, processI
 	}
 	// Note: User field must NOT be set when Executable is "su".
 	// "su" must be launched as root so it can switch process credentials to processInfo.Username.
+	// We pass -s /bin/sh to override disabled shells (like /sbin/nologin) for service accounts,
+	// and -l to run as a login shell so profile environment variables are sourced.
 	return commandlineexecutor.Params{
 		Executable: "su",
-		Args:       []string{"-", processInfo.Username, "-c", fullCmd},
+		Args:       []string{"-s", "/bin/sh", "-l", processInfo.Username, "-c", fullCmd},
 	}
 }
 

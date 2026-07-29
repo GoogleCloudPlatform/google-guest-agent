@@ -811,7 +811,7 @@ func TestExecuteVersionRulesMockRunAsUser(t *testing.T) {
 			t.Errorf("Executable = %q, want 'su'", capturedParams.Executable)
 		}
 
-		wantArgs := []string{"-", "cool_test_user", "-c", "cat --help"}
+		wantArgs := []string{"-s", "/bin/sh", "-l", "cool_test_user", "-c", "cat --help"}
 		if !cmp.Equal(capturedParams.Args, wantArgs) {
 			t.Errorf("Args mismatch: got %v, want %v", capturedParams.Args, wantArgs)
 		}
@@ -861,7 +861,7 @@ func TestExecuteVersionRulesMockRunAsUserWithSpaces(t *testing.T) {
 			t.Errorf("Executable = %q, want 'su'", capturedParams.Executable)
 		}
 
-		wantArgs := []string{"-", "cool_test_user", "-c", "cat --path '/path with spaces'"}
+		wantArgs := []string{"-s", "/bin/sh", "-l", "cool_test_user", "-c", "cat --path '/path with spaces'"}
 		if !cmp.Equal(capturedParams.Args, wantArgs) {
 			t.Errorf("Args mismatch: got %v, want %v", capturedParams.Args, wantArgs)
 		}
@@ -908,7 +908,7 @@ func TestExecuteVersionRulesMockRunAsUserWithMetacharacters(t *testing.T) {
 			t.Errorf("Executable = %q, want 'su'", capturedParams.Executable)
 		}
 
-		wantArgs := []string{"-", "cool_test_user", "-c", "cat --val 'foo; rm -rf /'"}
+		wantArgs := []string{"-s", "/bin/sh", "-l", "cool_test_user", "-c", "cat --val 'foo; rm -rf /'"}
 		if !cmp.Equal(capturedParams.Args, wantArgs) {
 			t.Errorf("Args mismatch: got %v, want %v", capturedParams.Args, wantArgs)
 		}
@@ -955,7 +955,7 @@ func TestExecuteVersionRulesMockRunAsUserWithSingleQuotes(t *testing.T) {
 			t.Errorf("Executable = %q, want 'su'", capturedParams.Executable)
 		}
 
-		wantArgs := []string{"-", "cool_test_user", "-c", "cat --val 'O'\\''Reilly'"}
+		wantArgs := []string{"-s", "/bin/sh", "-l", "cool_test_user", "-c", "cat --val 'O'\\''Reilly'"}
 		if !cmp.Equal(capturedParams.Args, wantArgs) {
 			t.Errorf("Args mismatch: got %v, want %v", capturedParams.Args, wantArgs)
 		}
@@ -1001,7 +1001,7 @@ func TestExecuteVersionRulesMockRunAsUserUnresolvedEnvVar(t *testing.T) {
 			t.Errorf("Executable = %q, want 'su'", capturedParams.Executable)
 		}
 
-		wantArgs := []string{"-", "cool_test_user", "-c", "cat --val \"$UNRESOLVED_VAR\""}
+		wantArgs := []string{"-s", "/bin/sh", "-l", "cool_test_user", "-c", "cat --val \"$UNRESOLVED_VAR\""}
 		if !cmp.Equal(capturedParams.Args, wantArgs) {
 			t.Errorf("Args mismatch: got %v, want %v", capturedParams.Args, wantArgs)
 		}
@@ -1452,8 +1452,8 @@ func TestBuildCommandParams(t *testing.T) {
 			t.Errorf("User = %q, want empty (su runs as root)", params.User)
 		}
 		wantCmdStr := "mybinary --version"
-		if len(params.Args) != 4 || params.Args[3] != wantCmdStr {
-			t.Errorf("Args[3] = %q, want %q", params.Args[3], wantCmdStr)
+		if len(params.Args) != 6 || params.Args[5] != wantCmdStr {
+			t.Errorf("Args = %v, want command string %q at index 5", params.Args, wantCmdStr)
 		}
 	})
 
@@ -1502,7 +1502,7 @@ func TestExecuteVersionRules_PathWithSpaces(t *testing.T) {
 			t.Errorf("Executable = %q, want 'su'", capturedParams.Executable)
 		}
 		wantCmdStr := "'/usr/bin/my app' --version --conf 'key=value with spaces'"
-		if len(capturedParams.Args) < 4 || capturedParams.Args[3] != wantCmdStr {
+		if len(capturedParams.Args) < 6 || capturedParams.Args[5] != wantCmdStr {
 			t.Errorf("capturedParams.Args = %v, want shell-quoted command string %q in su args", capturedParams.Args, wantCmdStr)
 		}
 	} else {
@@ -2422,19 +2422,19 @@ func TestBuildCommandParamsRunAsUser(t *testing.T) {
 			name: "simple cmd and args",
 			cmd:  "cat",
 			args: []string{"--help"},
-			want: []string{"-", "cool_user", "-c", "cat --help"},
+			want: []string{"-s", "/bin/sh", "-l", "cool_user", "-c", "cat --help"},
 		},
 		{
 			name: "cmd with spaces",
 			cmd:  "/opt/my app/bin/program",
 			args: []string{"--help"},
-			want: []string{"-", "cool_user", "-c", "'/opt/my app/bin/program' --help"},
+			want: []string{"-s", "/bin/sh", "-l", "cool_user", "-c", "'/opt/my app/bin/program' --help"},
 		},
 		{
 			name: "args with spaces and vars",
 			cmd:  "cat",
 			args: []string{"--path", "/path with spaces", "$VAR"},
-			want: []string{"-", "cool_user", "-c", "cat --path '/path with spaces' \"$VAR\""},
+			want: []string{"-s", "/bin/sh", "-l", "cool_user", "-c", "cat --path '/path with spaces' \"$VAR\""},
 		},
 	}
 
