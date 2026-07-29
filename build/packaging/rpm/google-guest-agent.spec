@@ -40,6 +40,8 @@ install -p -m 0755 cmd/google_guest_agent/google_guest_agent %{buildroot}%{_bind
 install -p -m 0755 cmd/google_guest_agent/ggactl %{buildroot}%{_bindir}/ggactl
 install -p -m 0755 cmd/core_plugin/core_plugin %{buildroot}%{_libdir}/google/guest_agent/GuestAgentCorePlugin/core_plugin
 install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.linux.binpb %{buildroot}%/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
+install -p -m 0755 cmd/guest_net_telemetry/guest_net_telemetry %{buildroot}%{_libdir}/google/guest_agent/GuestNetTelemetry/guest_net_telemetry
+install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestNetTelemetry/manifest.binpb %{buildroot}%/usr/lib/google/guest_agent/GuestNetTelemetry/manifest.binpb
 install -p -m 0755 cmd/guest_telemetry_extension/guest_telemetry %{buildroot}%{_libdir}/google/guest_agent/GuestTelemetryExtension/guest_telemetry
 install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb %{buildroot}%/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb
 
@@ -52,6 +54,8 @@ install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestTelemetryExtens
 %{_bindir}/ggactl
 %{_libdir}/google/guest_agent/GuestAgentCorePlugin/core_plugin
 %{_libdir}/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
+%{_libdir}/google/guest_agent/GuestNetTelemetry/guest_net_telemetry
+%{_libdir}/google/guest_agent/GuestNetTelemetry/manifest.binpb
 %{_libdir}/google/guest_agent/GuestTelemetryExtension/guest_telemetry
 %{_libdir}/google/guest_agent/GuestTelemetryExtension/manifest.binpb
 

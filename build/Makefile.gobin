@@ -1,6 +1,7 @@
 PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
+	cmd/guest_net_telemetry/proto/network_stats_report.pb.go \
 	internal/acp/proto/agent_controlplane.pb.go \
 	cmd/mwlid_extension/proto/mwlid/workload_identity.pb.go \
 	pkg/proto/plugin_comm.pb.go
@@ -19,6 +20,7 @@ GO_BINARIES = \
 
 LINUX_BINPB_FILES = \
   build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb \
+	build/configs/usr/lib/google/guest_agent/GuestNetTelemetry/manifest.binpb \
 	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb \
 	build/configs/usr/lib/google/guest_agent/ManagedWorkloadIdentityExtension/manifest.binpb
 
@@ -33,6 +35,10 @@ MWLID_PROTO_URL = https://github.com/GoogleCloudPlatform/managed-workload-identi
 
 GOOS ?= "linux"
 VERSION ?= "dev"
+
+ifeq ($(findstring linux,$(GOOS)),linux)
+GO_BINARIES += cmd/guest_net_telemetry/guest_net_telemetry
+endif
 
 # Create a temporary directory if ARTIFACTS is not provided.
 ifeq ($(ARTIFACTS),)
