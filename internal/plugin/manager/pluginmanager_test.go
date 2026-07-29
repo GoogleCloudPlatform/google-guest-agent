@@ -1491,6 +1491,10 @@ func TestApplyConfig(t *testing.T) {
 	stateDir := t.TempDir()
 	connDir := t.TempDir()
 	infoDir := filepath.Join(stateDir, "test-instance-id", agentStateDir, pluginInfoDir)
+	pluginsDir := filepath.Join(stateDir, "test-instance-id", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatalf("os.MkdirAll(%q) failed unexpectedly with error: %v", pluginsDir, err)
+	}
 
 	tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\nsocket_connections_dir = %s\n[Core]\nacs_client = false\n", stateDir, connDir)
 	if err := cfg.Load([]byte(tmp)); err != nil {
@@ -1498,14 +1502,17 @@ func TestApplyConfig(t *testing.T) {
 	}
 
 	addr := filepath.Join(connDir, "PluginA_RevisionA.sock")
-
 	ps := &testPluginServer{ctrs: make(map[string]int)}
 	startTestServer(t, ps, udsProtocol, addr)
 
 	setupConstraintTestClient(t)
 	setupMockPsClient(t, &mockPsClient{alive: true, exe: "test-entry-point"})
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: "test-entry-point", RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{startConfigHash: "oldhash", StopTimeout: time.Second * 3, StartTimeout: time.Second * 3, PluginType: acpb.PluginType_DAEMON, PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION}}
+	installPath := filepath.Join(stateDir, "test-instance-id", "plugins", "PluginA_RevisionA")
+	if err := os.MkdirAll(installPath, 0755); err != nil {
+		t.Fatalf("Failed to create install path directory %q: %v", installPath, err)
+	}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: "test-entry-point", InstallPath: installPath, RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{startConfigHash: "oldhash", StopTimeout: time.Second * 3, StartTimeout: time.Second * 3, PluginType: acpb.PluginType_DAEMON, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}
@@ -1603,8 +1610,13 @@ func TestApplyConfig(t *testing.T) {
 				if plugin.Manifest.startConfigHash != tc.wantHash {
 					t.Errorf("applyConfig(ctx, %s) did not reset start config hash, got %q, want %q", tc.name, plugin.Manifest.startConfigHash, tc.wantHash)
 				}
-				if got := pluginMap[tc.plugin].Manifest.StartConfig.Simple; got != tc.config {
-					t.Errorf("applyConfig(ctx, %s) did not update plugin state file with new config, got %q, want %q", tc.name, got, tc.config)
+				p, ok := pluginMap[tc.plugin]
+				if !ok {
+					t.Errorf("applyConfig(ctx, %s) did not add plugin %s to plugin map", tc.name, tc.plugin)
+				} else {
+					if got := p.Manifest.StartConfig.Simple; got != tc.config {
+						t.Errorf("applyConfig(ctx, %s) did not update plugin state file with new config, got %q, want %q", tc.name, got, tc.config)
+					}
 				}
 				validatePluginRelaunched(t, tc.wantRelaunch, plugin, tr, ps)
 			}
