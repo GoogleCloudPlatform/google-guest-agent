@@ -208,11 +208,12 @@ type ISVDiscovery struct {
 	dataFile       string // file to write discovered data to, default none
 	definitionFile string // file based discovery definitions, default none
 
-	envInterval time.Duration
-	lastRules   *defpb.DiscoveryRules
-	lastResult  *defpb.DiscoveryResult
-	lastFetch   time.Time
-	lastReport  time.Time
+	envReportingInterval time.Duration
+	envScanInterval      time.Duration
+	lastRules            *defpb.DiscoveryRules
+	lastResult           *defpb.DiscoveryResult
+	lastFetch            time.Time
+	lastReport           time.Time
 
 	// Function fields for mocking in tests.
 	pollAndScanFunc      func(ctx context.Context)
@@ -256,16 +257,25 @@ func (d *ISVDiscovery) parseEnvVars() {
 	d.dataFile = os.Getenv("GUEST_TEL_ISV_DATA_FILE")
 	d.definitionFile = os.Getenv("GUEST_TEL_ISV_DEFINITION_FILE")
 
-	intervalStr := os.Getenv("GUEST_TEL_ISV_INTERVAL")
-	if intervalStr != "" {
-		if t, err := time.ParseDuration(intervalStr); err == nil {
-			d.envInterval = t
+	reportingIntervalStr := os.Getenv("GUEST_TEL_ISV_REPORTING_INTERVAL")
+	if reportingIntervalStr != "" {
+		if t, err := time.ParseDuration(reportingIntervalStr); err == nil {
+			d.envReportingInterval = t
 		} else {
-			slog.Error(fmt.Sprintf("Failed to parse GUEST_TEL_ISV_INTERVAL: %v", err))
+			slog.Error(fmt.Sprintf("Failed to parse GUEST_TEL_ISV_REPORTING_INTERVAL: %v", err))
 		}
 	}
 
-	slog.Info(fmt.Sprintf("ISVDiscovery created with channel: %s, endpoint: %s, dataFile: %s, definitionFile: %s, envInterval: %v", d.channel, d.endpoint, d.dataFile, d.definitionFile, d.envInterval))
+	scanIntervalStr := os.Getenv("GUEST_TEL_ISV_SCAN_INTERVAL")
+	if scanIntervalStr != "" {
+		if t, err := time.ParseDuration(scanIntervalStr); err == nil {
+			d.envScanInterval = t
+		} else {
+			slog.Error(fmt.Sprintf("Failed to parse GUEST_TEL_ISV_SCAN_INTERVAL: %v", err))
+		}
+	}
+
+	slog.Info(fmt.Sprintf("ISVDiscovery created with channel: %s, endpoint: %s, dataFile: %s, definitionFile: %s, envReportingInterval: %v, envScanInterval: %v", d.channel, d.endpoint, d.dataFile, d.definitionFile, d.envReportingInterval, d.envScanInterval))
 }
 
 const (
@@ -316,6 +326,9 @@ func (d *ISVDiscovery) Run(ctx context.Context) error {
 }
 
 func (d *ISVDiscovery) scanInterval() time.Duration {
+	if d.envScanInterval > 0 {
+		return d.envScanInterval
+	}
 	if d.lastRules.GetConfig().GetScanIntervalSeconds() > 0 {
 		return time.Duration(d.lastRules.GetConfig().GetScanIntervalSeconds()) * time.Second
 	}
@@ -323,8 +336,8 @@ func (d *ISVDiscovery) scanInterval() time.Duration {
 }
 
 func (d *ISVDiscovery) reportingInterval() time.Duration {
-	if d.envInterval > 0 {
-		return d.envInterval
+	if d.envReportingInterval > 0 {
+		return d.envReportingInterval
 	}
 	if d.lastRules.GetConfig().GetMinimumReportingIntervalSeconds() > 0 {
 		return time.Duration(d.lastRules.GetConfig().GetMinimumReportingIntervalSeconds()) * time.Second

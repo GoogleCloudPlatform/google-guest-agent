@@ -499,7 +499,7 @@ func TestPollAndScan(t *testing.T) {
 			t.Parallel()
 			d := New(nil)
 			if test.envInterval > 0 {
-				d.envInterval = test.envInterval
+				d.envReportingInterval = test.envInterval
 			}
 			d.lastRules = test.initialRules
 			d.lastResult = test.initialResult
@@ -581,6 +581,39 @@ func TestRun_LoopTicks(t *testing.T) {
 
 	// Set scan interval to 1s.
 	d.lastRules = rulesWithConfig(1, 0)
+
+	var pollCalled atomic.Int32
+	d.pollAndScanFunc = func(ctx context.Context) {
+		pollCalled.Add(1)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- d.Run(ctx)
+	}()
+
+	// Wait for 2.5 seconds to allow 2 ticks (T=0, T=1s, T=2s)
+	time.Sleep(2500 * time.Millisecond)
+	cancel()
+
+	err := <-errChan
+	if err != nil {
+		t.Errorf("Run returned error: %v", err)
+	}
+
+	if pollCalled.Load() != 3 {
+		t.Errorf("pollAndScanFunc called %d times, want 3", pollCalled.Load())
+	}
+}
+
+func TestRun_LoopTicksEnvScanInterval(t *testing.T) {
+	t.Setenv("GUEST_TEL_ISV_SCAN_INTERVAL", "1s")
+	d := New(nil)
+	d.metadataDisabledFunc = func(ctx context.Context) (bool, error) {
+		return false, nil
+	}
 
 	var pollCalled atomic.Int32
 	d.pollAndScanFunc = func(ctx context.Context) {
@@ -1014,8 +1047,8 @@ func TestReportingInterval_Boundary(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			d := &ISVDiscovery{
-				lastRules:   test.lastRules,
-				envInterval: test.envInterval,
+				lastRules:            test.lastRules,
+				envReportingInterval: test.envInterval,
 			}
 			got := d.reportingInterval()
 			if got != test.want {
@@ -1203,11 +1236,12 @@ func TestDeduplicateResult(t *testing.T) {
 
 func TestParseEnvVars(t *testing.T) {
 	tests := []struct {
-		name         string
-		env          map[string]string
-		wantChannel  string
-		wantEndpoint string
-		wantInterval time.Duration
+		name             string
+		env              map[string]string
+		wantChannel      string
+		wantEndpoint     string
+		wantInterval     time.Duration
+		wantScanInterval time.Duration
 	}{
 		{
 			name:         "defaults",
@@ -1219,24 +1253,28 @@ func TestParseEnvVars(t *testing.T) {
 		{
 			name: "custom values",
 			env: map[string]string{
-				"GUEST_TEL_ISV_CHANNEL":         "custom/channel",
-				"GUEST_TEL_ISV_ENDPOINT":        "custom:endpoint",
-				"GUEST_TEL_ISV_INTERVAL":        "5m",
-				"GUEST_TEL_ISV_DATA_FILE":       "/tmp/data",
-				"GUEST_TEL_ISV_DEFINITION_FILE": "/tmp/def",
+				"GUEST_TEL_ISV_CHANNEL":            "custom/channel",
+				"GUEST_TEL_ISV_ENDPOINT":           "custom:endpoint",
+				"GUEST_TEL_ISV_REPORTING_INTERVAL": "5m",
+				"GUEST_TEL_ISV_SCAN_INTERVAL":      "2s",
+				"GUEST_TEL_ISV_DATA_FILE":          "/tmp/data",
+				"GUEST_TEL_ISV_DEFINITION_FILE":    "/tmp/def",
 			},
-			wantChannel:  "custom/channel",
-			wantEndpoint: "custom:endpoint",
-			wantInterval: 5 * time.Minute,
+			wantChannel:      "custom/channel",
+			wantEndpoint:     "custom:endpoint",
+			wantInterval:     5 * time.Minute,
+			wantScanInterval: 2 * time.Second,
 		},
 		{
 			name: "invalid interval",
 			env: map[string]string{
-				"GUEST_TEL_ISV_INTERVAL": "invalid",
+				"GUEST_TEL_ISV_REPORTING_INTERVAL": "invalid",
+				"GUEST_TEL_ISV_SCAN_INTERVAL":      "invalid",
 			},
-			wantChannel:  "compute.googleapis.com/isv-discovery",
-			wantEndpoint: "",
-			wantInterval: 0,
+			wantChannel:      "compute.googleapis.com/isv-discovery",
+			wantEndpoint:     "",
+			wantInterval:     0,
+			wantScanInterval: 0,
 		},
 	}
 
@@ -1253,8 +1291,11 @@ func TestParseEnvVars(t *testing.T) {
 			if d.endpoint != tc.wantEndpoint {
 				t.Errorf("parseEnvVars() endpoint = %q, want %q", d.endpoint, tc.wantEndpoint)
 			}
-			if d.envInterval != tc.wantInterval {
-				t.Errorf("parseEnvVars() envInterval = %v, want %v", d.envInterval, tc.wantInterval)
+			if d.envReportingInterval != tc.wantInterval {
+				t.Errorf("parseEnvVars() envReportingInterval = %v, want %v", d.envReportingInterval, tc.wantInterval)
+			}
+			if d.envScanInterval != tc.wantScanInterval {
+				t.Errorf("parseEnvVars() envScanInterval = %v, want %v", d.envScanInterval, tc.wantScanInterval)
 			}
 		})
 	}
