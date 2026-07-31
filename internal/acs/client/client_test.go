@@ -236,6 +236,9 @@ func TestNotify(t *testing.T) {
 func TestFetchACSClientOverride(t *testing.T) {
 	testConn := &conn{isNotify: true, throwErr: false}
 	ctx := context.WithValue(context.Background(), OverrideConnection, testConn)
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
 	if err := acs.connect(ctx); err != nil {
 		t.Fatalf("Failed to set test connection: %v", err)
 	}

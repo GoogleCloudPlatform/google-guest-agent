@@ -248,6 +248,12 @@ func TestModuleSetupInputValidity(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
 	}
+
+	// Unsubscribe from metadata.LongpollEvent after the test is done.
+	t.Cleanup(func() {
+		events.FetchManager().Unsubscribe(metadata.LongpollEvent, "metadatasshkey")
+	})
+
 	if err := moduleSetup(context.Background(), descriptorFromJSON(t, "{}")); err != nil {
 		t.Fatalf("moduleSetup(ctx, {}) = %v, want nil", err)
 	}

@@ -34,6 +34,8 @@ func TestNew(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	t.Cleanup(func() {
+		registryMu.Lock()
+		defer registryMu.Unlock()
 		registries = make(map[string]*MetricRegistry)
 	})
 
@@ -179,6 +181,11 @@ func TestConfigSkip(t *testing.T) {
 	cfg.Retrieve().Telemetry.MetricCollectionEnabled = false
 
 	mr := New(ctx, time.Nanosecond, 10, "test")
+	t.Cleanup(func() {
+		registryMu.Lock()
+		registries = make(map[string]*MetricRegistry)
+		registryMu.Unlock()
+	})
 
 	mr.Record(ctx, &acmpb.GuestAgentModuleMetric{})
 	if mr.size() != 0 {
