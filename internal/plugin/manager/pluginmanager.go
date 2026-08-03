@@ -205,8 +205,9 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 
 	// Cleanup old plugin state in a separate goroutine. This operation is not
 	// critical for plugin manager initialization and should not block it.
+	stateParentDir := filepath.Dir(baseState())
 	go func() {
-		if err := pluginManager.cleanupOldState(ctx, filepath.Dir(baseState())); err != nil {
+		if err := pluginManager.cleanupOldState(ctx, stateParentDir); err != nil {
 			galog.Errorf("Failed to cleanup old plugin state: %v", err)
 		}
 	}()
