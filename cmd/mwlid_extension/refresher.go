@@ -30,6 +30,7 @@ import (
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -105,6 +106,8 @@ type RefresherJob struct {
 	// grpcClient is the client connection to the grpc server. This is used to
 	// cache the connection so it doesn't need to be recreated every time.
 	grpcClient *grpc.ClientConn
+	// retryPolicy is the retry policy for gRPC calls.
+	retryPolicy retry.Policy
 }
 
 // outputOpts is a struct for output directory name and symlink templates.
@@ -473,6 +476,39 @@ func (j *RefresherJob) closeClient() {
 	j.grpcClient = nil
 }
 
+// shouldRetryGRPC checks if the gRPC error is retriable.
+func shouldRetryGRPC(err error) bool {
+	switch status.Code(err) {
+	// gRPC equivalents for HTTP 500 internal server errors. Terminate retry loop.
+	case codes.Internal, codes.DataLoss, codes.Unknown:
+		return false
+	// Permanent client or precondition errors. Terminate retry loop.
+	case codes.FailedPrecondition, codes.InvalidArgument,
+		codes.Unauthenticated, codes.PermissionDenied, codes.Unimplemented:
+		return false
+	// On gRPC equivalents for HTTP 503 (codes.Unavailable) and other transient errors, retry.
+	default:
+		return true
+	}
+}
+
+func (j *RefresherJob) getGRPCRetryPolicy() retry.Policy {
+	p := j.retryPolicy
+	if p.MaxAttempts == 0 {
+		p.MaxAttempts = 5
+	}
+	if p.BackoffFactor == 0 {
+		p.BackoffFactor = 1
+	}
+	if p.Jitter == 0 {
+		p.Jitter = time.Second
+	}
+	if p.ShouldRetry == nil {
+		p.ShouldRetry = shouldRetryGRPC
+	}
+	return p
+}
+
 // refreshCredsWithGRPC refreshes the workload certificates using the MWLID
 // service over gRPC.
 func (j *RefresherJob) refreshCredsWithGRPC(ctx context.Context, contentDir string) error {
@@ -488,17 +524,23 @@ func (j *RefresherJob) refreshCredsWithGRPC(ctx context.Context, contentDir stri
 	// Close the client if we failed to make a successful call to the server. Next
 	// attempt to connect to the server will recreate the client.
 
-	tCtxCerts, cancelCerts := context.WithTimeout(ctx, defaultGRPCTimeout)
-	defer cancelCerts()
-	certs, err := c.GetWorkloadCertificates(tCtxCerts, &wipb.GetWorkloadCertificatesRequest{})
+	policy := j.getGRPCRetryPolicy()
+
+	certs, err := retry.RunWithResponse(ctx, policy, func() (*wipb.GetWorkloadCertificatesResponse, error) {
+		tCtxCerts, cancelCerts := context.WithTimeout(ctx, defaultGRPCTimeout)
+		defer cancelCerts()
+		return c.GetWorkloadCertificates(tCtxCerts, &wipb.GetWorkloadCertificatesRequest{})
+	})
 	if err != nil {
 		j.closeClient()
 		return fmt.Errorf("failed to get workload certificates: %w", err)
 	}
 
-	tCtxBundle, cancelBundle := context.WithTimeout(ctx, defaultGRPCTimeout)
-	defer cancelBundle()
-	bundle, err := c.GetWorkloadTrustBundles(tCtxBundle, &wipb.GetWorkloadTrustBundlesRequest{})
+	bundle, err := retry.RunWithResponse(ctx, policy, func() (*wipb.GetWorkloadTrustBundlesResponse, error) {
+		tCtxBundle, cancelBundle := context.WithTimeout(ctx, defaultGRPCTimeout)
+		defer cancelBundle()
+		return c.GetWorkloadTrustBundles(tCtxBundle, &wipb.GetWorkloadTrustBundlesRequest{})
+	})
 	if err != nil {
 		j.closeClient()
 		return fmt.Errorf("failed to get workload trust bundles: %w", err)

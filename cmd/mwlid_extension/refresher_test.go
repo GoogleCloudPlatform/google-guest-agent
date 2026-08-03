@@ -30,6 +30,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/grpc"
@@ -567,21 +568,33 @@ type mockWorkloadIdentityServer struct {
 	wipb.UnimplementedWorkloadIdentityServer
 	getWorkloadCertificatesErr      error
 	getWorkloadTrustBundlesErr      error
+	getWorkloadCertificatesErrFn    func(reqCount int) error
+	getWorkloadTrustBundlesErrFn    func(reqCount int) error
 	reqCount                        int
+	trustBundlesReqCount            int
 	getWorkloadCertificatesResponse *wipb.GetWorkloadCertificatesResponse
 	getWorkloadTrustBundlesResponse *wipb.GetWorkloadTrustBundlesResponse
 }
 
 func (s *mockWorkloadIdentityServer) GetWorkloadCertificates(ctx context.Context, req *wipb.GetWorkloadCertificatesRequest) (*wipb.GetWorkloadCertificatesResponse, error) {
 	s.reqCount++
-	if s.getWorkloadCertificatesErr != nil {
+	if s.getWorkloadCertificatesErrFn != nil {
+		if err := s.getWorkloadCertificatesErrFn(s.reqCount); err != nil {
+			return nil, err
+		}
+	} else if s.getWorkloadCertificatesErr != nil {
 		return nil, s.getWorkloadCertificatesErr
 	}
 	return s.getWorkloadCertificatesResponse, nil
 }
 
 func (s *mockWorkloadIdentityServer) GetWorkloadTrustBundles(ctx context.Context, req *wipb.GetWorkloadTrustBundlesRequest) (*wipb.GetWorkloadTrustBundlesResponse, error) {
-	if s.getWorkloadTrustBundlesErr != nil {
+	s.trustBundlesReqCount++
+	if s.getWorkloadTrustBundlesErrFn != nil {
+		if err := s.getWorkloadTrustBundlesErrFn(s.trustBundlesReqCount); err != nil {
+			return nil, err
+		}
+	} else if s.getWorkloadTrustBundlesErr != nil {
 		return nil, s.getWorkloadTrustBundlesErr
 	}
 	return s.getWorkloadTrustBundlesResponse, nil
@@ -823,6 +836,283 @@ func TestRefreshCredsWithGRPC(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestShouldRetryGRPC(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "Unavailable_503_Retries",
+			err:  status.Error(codes.Unavailable, "service unavailable"),
+			want: true,
+		},
+		{
+			name: "Internal_500_Terminates",
+			err:  status.Error(codes.Internal, "internal error"),
+			want: false,
+		},
+		{
+			name: "DataLoss_500_Terminates",
+			err:  status.Error(codes.DataLoss, "data loss error"),
+			want: false,
+		},
+		{
+			name: "Unknown_500_Terminates",
+			err:  status.Error(codes.Unknown, "unknown error"),
+			want: false,
+		},
+		{
+			name: "InvalidArgument_Terminates",
+			err:  status.Error(codes.InvalidArgument, "invalid argument"),
+			want: false,
+		},
+		{
+			name: "NonGRPCError_Terminates",
+			err:  fmt.Errorf("generic error"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldRetryGRPC(tt.err); got != tt.want {
+				t.Errorf("shouldRetryGRPC(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetGRPCRetryPolicy(t *testing.T) {
+	tests := []struct {
+		name         string
+		initial      retry.Policy
+		wantMax      int
+		wantBackoff  float64
+		wantJitter   time.Duration
+		testErr      error
+		wantRetryRes bool
+	}{
+		{
+			name:         "DefaultsApplied",
+			initial:      retry.Policy{},
+			wantMax:      5,
+			wantBackoff:  1,
+			wantJitter:   time.Second,
+			testErr:      status.Error(codes.Unavailable, "503 unavailable"),
+			wantRetryRes: true,
+		},
+		{
+			name: "ExistingValuesPreserved",
+			initial: retry.Policy{
+				MaxAttempts:   10,
+				BackoffFactor: 2.5,
+				Jitter:        time.Minute,
+				ShouldRetry:   func(err error) bool { return false },
+			},
+			wantMax:      10,
+			wantBackoff:  2.5,
+			wantJitter:   time.Minute,
+			testErr:      status.Error(codes.Unavailable, "503 unavailable"),
+			wantRetryRes: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &RefresherJob{retryPolicy: tt.initial}
+			got := job.getGRPCRetryPolicy()
+
+			if got.MaxAttempts != tt.wantMax {
+				t.Errorf("getGRPCRetryPolicy().MaxAttempts = %d, want %d", got.MaxAttempts, tt.wantMax)
+			}
+			if got.BackoffFactor != tt.wantBackoff {
+				t.Errorf("getGRPCRetryPolicy().BackoffFactor = %v, want %v", got.BackoffFactor, tt.wantBackoff)
+			}
+			if got.Jitter != tt.wantJitter {
+				t.Errorf("getGRPCRetryPolicy().Jitter = %v, want %v", got.Jitter, tt.wantJitter)
+			}
+			if got.ShouldRetry == nil {
+				t.Fatalf("getGRPCRetryPolicy().ShouldRetry is nil")
+			}
+			if res := got.ShouldRetry(tt.testErr); res != tt.wantRetryRes {
+				t.Errorf("getGRPCRetryPolicy().ShouldRetry(%v) = %v, want %v", tt.testErr, res, tt.wantRetryRes)
+			}
+		})
+	}
+}
+
+func TestRefreshCredsWithGRPCRetry503(t *testing.T) {
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	config := cfg.Retrieve()
+	config.MWLID.Enabled = true
+
+	mockServer := &mockWorkloadIdentityServer{
+		getWorkloadCertificatesErr: status.Error(codes.Unavailable, "service unavailable (503)"),
+	}
+
+	addr, stop := startTestGRPCServer(t, mockServer)
+	defer stop()
+
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("failed to parse address: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("failed to parse port: %v", err)
+	}
+
+	config.MWLID.ServiceIP = host
+	config.MWLID.ServicePort = port
+
+	job := &RefresherJob{
+		retryPolicy: retry.Policy{
+			MaxAttempts: 3,
+			Jitter:      time.Millisecond,
+		},
+	}
+	job.setStatus(ServiceAvailable)
+
+	tmpDir := t.TempDir()
+	opts := outputOpts{
+		contentDirPrefix:  filepath.Join(tmpDir, "contents"),
+		tempSymlinkPrefix: filepath.Join(tmpDir, "symlink"),
+		symlink:           filepath.Join(tmpDir, "creds"),
+	}
+
+	err = job.refreshCreds(ctx, opts, time.Now().Format(time.RFC3339))
+	if err == nil {
+		t.Errorf("refreshCreds expected error for 503 unavailable, got nil")
+	}
+
+	if mockServer.reqCount != 3 {
+		t.Errorf("mockServer.reqCount = %d, want 3 (retried 503 error)", mockServer.reqCount)
+	}
+}
+
+func TestRefreshCredsWithGRPCTerminate500(t *testing.T) {
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	config := cfg.Retrieve()
+	config.MWLID.Enabled = true
+
+	mockServer := &mockWorkloadIdentityServer{
+		getWorkloadCertificatesErr: status.Error(codes.Internal, "internal server error (500)"),
+	}
+
+	addr, stop := startTestGRPCServer(t, mockServer)
+	defer stop()
+
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("failed to parse address: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("failed to parse port: %v", err)
+	}
+
+	config.MWLID.ServiceIP = host
+	config.MWLID.ServicePort = port
+
+	job := &RefresherJob{
+		retryPolicy: retry.Policy{
+			MaxAttempts: 3,
+			Jitter:      time.Millisecond,
+		},
+	}
+	job.setStatus(ServiceAvailable)
+
+	tmpDir := t.TempDir()
+	opts := outputOpts{
+		contentDirPrefix:  filepath.Join(tmpDir, "contents"),
+		tempSymlinkPrefix: filepath.Join(tmpDir, "symlink"),
+		symlink:           filepath.Join(tmpDir, "creds"),
+	}
+
+	err = job.refreshCreds(ctx, opts, time.Now().Format(time.RFC3339))
+	if err == nil {
+		t.Errorf("refreshCreds expected error for 500 internal error, got nil")
+	}
+
+	if mockServer.reqCount != 1 {
+		t.Errorf("mockServer.reqCount = %d, want 1 (terminated on 500 internal error)", mockServer.reqCount)
+	}
+}
+
+func TestRefreshCredsWithGRPCRetry503ThenSuccess(t *testing.T) {
+	ctx := context.Background()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	config := cfg.Retrieve()
+	config.MWLID.Enabled = true
+
+	testPrivateKey := []byte("test-private-key")
+	testCertChain := []byte("test-cert-chain")
+	testTrustBundles := []byte("test-trust-bundles")
+
+	mockServer := &mockWorkloadIdentityServer{
+		getWorkloadCertificatesResponse: &wipb.GetWorkloadCertificatesResponse{
+			CertificateChainPem: testCertChain, PrivateKeyPem: testPrivateKey,
+		},
+		getWorkloadTrustBundlesResponse: &wipb.GetWorkloadTrustBundlesResponse{
+			SpiffeTrustBundlesMapJson: testTrustBundles,
+		},
+		getWorkloadCertificatesErrFn: func(reqCount int) error {
+			if reqCount < 3 {
+				return status.Error(codes.Unavailable, "temporary 503 unavailable")
+			}
+			return nil
+		},
+	}
+
+	addr, stop := startTestGRPCServer(t, mockServer)
+	defer stop()
+
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("failed to parse address: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("failed to parse port: %v", err)
+	}
+
+	config.MWLID.ServiceIP = host
+	config.MWLID.ServicePort = port
+
+	job := &RefresherJob{
+		retryPolicy: retry.Policy{
+			MaxAttempts: 5,
+			Jitter:      time.Millisecond,
+		},
+	}
+	job.setStatus(ServiceAvailable)
+
+	tmpDir := t.TempDir()
+	opts := outputOpts{
+		contentDirPrefix:  filepath.Join(tmpDir, "contents"),
+		tempSymlinkPrefix: filepath.Join(tmpDir, "symlink"),
+		symlink:           filepath.Join(tmpDir, "creds"),
+	}
+
+	err = job.refreshCreds(ctx, opts, time.Now().Format(time.RFC3339))
+	if err != nil {
+		t.Errorf("refreshCreds failed unexpectedly: %v", err)
+	}
+
+	if mockServer.reqCount != 3 {
+		t.Errorf("mockServer.reqCount = %d, want 3 (succeeded on 3rd attempt after retrying 503)", mockServer.reqCount)
 	}
 }
 
