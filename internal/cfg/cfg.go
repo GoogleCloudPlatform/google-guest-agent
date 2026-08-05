@@ -394,7 +394,7 @@ type MetadataScripts struct {
 	ShutdownWindows   bool   `ini:"shutdown-windows,omitempty"`
 	Startup           bool   `ini:"startup,omitempty"`
 	StartupWindows    bool   `ini:"startup-windows,omitempty"`
-	SysprepSpecialize bool   `ini:"sysprep_specialize,omitempty"`
+	SysprepSpecialize bool   `ini:"sysprep-specialize,omitempty"`
 }
 
 // OSLogin contains the configurations of OSLogin section.

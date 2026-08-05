@@ -43,6 +43,10 @@ func TestMain(m *testing.M) {
 }
 
 func TestMdsScriptKeys(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
 	getWantedTests := []struct {
 		event string
 		os    string
@@ -129,6 +133,13 @@ func TestMdsScriptKeysError(t *testing.T) {
 			cfg: `[MetadataScripts]
 			startup-windows = false`,
 			arg: "startup",
+			os:  "windows",
+		},
+		{
+			desc: "windows_specialize_disabled",
+			cfg: `[MetadataScripts]
+			sysprep-specialize = false`,
+			arg: "specialize",
 			os:  "windows",
 		},
 	}

@@ -360,6 +360,9 @@ func mdsScriptKeys(prefix string, os string) ([]string, error) {
 	config := cfg.Retrieve()
 	switch prefix {
 	case "specialize":
+		if !config.MetadataScripts.SysprepSpecialize {
+			return nil, fmt.Errorf("sysprep-specialize scripts disabled in instance config")
+		}
 		prefix = "sysprep-specialize"
 	case "startup":
 		if os == "windows" {
