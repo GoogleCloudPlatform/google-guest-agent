@@ -88,7 +88,7 @@ func (ps *PluginServer) runAgent(ctx context.Context) {
 
 	// Run early platform initialization path. All the steps executed in this
 	// phase assumes metadata server is not accessible yet.
-	// It is ok to run this is separate go routine and not within [Start] RPC as
+	// It is ok to run this in a separate go routine and not within [Start] RPC as
 	// we have [GetStatus: early-initialization] check way to report Guest Agent
 	// that core plugin has successfully initialized.
 	if err := early.Retrieve().Run(ctx); err != nil {
@@ -137,8 +137,7 @@ func sigHandler(ctx context.Context, cancel func(sig os.Signal)) {
 	}()
 }
 
-// handleVMEvent spins up the metadata script runner that runs scripts based on
-// the VM event.
+// handleVMEvent handles VM events, currently only 'shutdown' is handled.
 func handleVMEvent(ctx context.Context, req []byte) error {
 	galog.Debugf("Handling VM event")
 	evReq := &manager.Request{}
@@ -170,7 +169,6 @@ type PluginServer struct {
 }
 
 // Apply applies the config sent or performs the work defined in the message.
-// There's no use-case defined for this yet and is un-implemented.
 func (ps *PluginServer) Apply(ctx context.Context, msg *pb.ApplyRequest) (*pb.ApplyResponse, error) {
 	galog.Debugf("Handling apply request %+v", msg)
 	reqBytes := []byte(msg.GetStringConfig())
