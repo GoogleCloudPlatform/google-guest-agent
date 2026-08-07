@@ -16,6 +16,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -187,8 +188,17 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	p.setState(acmpb.CurrentPluginStates_RUNNING)
 	galog.Infof("Successfully started plugin %q", p.FullName())
 
-	if err := p.Store(); err != nil {
-		return fmt.Errorf("store plugin %s info failed: %w", p.FullName(), err)
+	// Only store the plugin state if the plugin is not a local plugin. This also
+	// removes the state file for local plugins, if it exists.
+	if p.IsLocal() {
+		file := p.stateFile()
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+			galog.Warnf("Failed to remove state file %q for local plugin %q: %v", file, p.FullName(), err)
+		}
+	} else {
+		if err := p.Store(); err != nil {
+			return fmt.Errorf("store plugin %s info failed: %w", p.FullName(), err)
+		}
 	}
 
 	return nil
