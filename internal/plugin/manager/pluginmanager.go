@@ -1154,8 +1154,9 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 				}
 			}(ctx, req, config)
 		}
+	} else {
+		galog.Infof("No local plugins to install")
 	}
-	galog.Infof("No local plugins to install")
 	return nil
 }
 
