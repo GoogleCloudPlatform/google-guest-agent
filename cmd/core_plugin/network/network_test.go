@@ -22,6 +22,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 const mdsJSON = `
@@ -80,6 +81,158 @@ func TestNetworkDaemonDisabled(t *testing.T) {
 	t.Cleanup(func() {
 		events.FetchManager().Unsubscribe(metadata.LongpollEvent, networkModuleID)
 	})
+}
+
+func TestAddressManagerDisabled(t *testing.T) {
+	events.FetchManager().Unsubscribe(metadata.LongpollEvent, networkModuleID)
+
+	emptyMDS := `{}`
+
+	disableInstanceMDS := `{
+		"instance": {
+			"attributes": {
+				"disable-address-manager": "true"
+			}
+		}
+	}`
+
+	enableInstanceMDS := `{
+		"instance": {
+			"attributes": {
+				"disable-address-manager": "false"
+			}
+		}
+	}`
+
+	tests := []struct {
+		name                     string
+		mdsJSON                  string
+		cfgDisableAddressManager *bool
+		networkSetupCalled       bool
+		wantSubscribe            bool
+	}{
+		{
+			// The network module should subscribe in case the address manager is
+			// re-enabled in MDS.
+			name:          "disabled-in-instance-mds",
+			mdsJSON:       disableInstanceMDS,
+			wantSubscribe: true,
+		},
+		{
+			// Config file always disables.
+			name:                     "disabled-in-config",
+			cfgDisableAddressManager: proto.Bool(true),
+			mdsJSON:                  emptyMDS,
+			wantSubscribe:            false,
+		},
+		{
+			// Config file disables, but MDS enables. Config file takes precedence
+			// here, so the network module should not subscribe.
+			name:                     "disabled-in-config-enabled-in-mds",
+			mdsJSON:                  enableInstanceMDS,
+			cfgDisableAddressManager: proto.Bool(true),
+			wantSubscribe:            false,
+		},
+		{
+			// Config file enables, but MDS disables. Because the config file enables
+			// the address manager, the network module should subscribe.
+			name:                     "enabled-in-config-disabled-in-mds",
+			mdsJSON:                  disableInstanceMDS,
+			cfgDisableAddressManager: proto.Bool(false),
+			wantSubscribe:            true,
+		},
+		{
+			// Instance MDS should take precedence over project MDS.
+			name: "disabled-in-project-mds-enabled-in-instance-mds",
+			mdsJSON: `{
+				"project": {
+					"attributes": {
+						"disable-address-manager": "true"
+					}
+				},
+				"instance": {
+					"attributes": {
+						"disable-address-manager": "false"
+					}
+				}
+			}`,
+			networkSetupCalled: true,
+			wantSubscribe:      true,
+		},
+		{
+			// Instance MDS and project MDS both disable the address manager.
+			name: "disabled-in-project-mds-and-instance-mds",
+			mdsJSON: `{
+				"project": {
+					"attributes": {
+						"disable-address-manager": "true"
+					}
+				},
+				"instance": {
+					"attributes": {
+						"disable-address-manager": "true"
+					}
+				}
+			}`,
+			wantSubscribe: true,
+		},
+		{
+			// Project MDS enables, but instance MDS disables. Instance MDS takes
+			// precedence.
+			name: "enabled-in-project-mds-disabled-in-instance-mds",
+			mdsJSON: `{
+				"project": {
+					"attributes": {
+						"disable-address-manager": "false"
+					}
+				},
+				"instance": {
+					"attributes": {
+						"disable-address-manager": "true"
+					}
+				}
+			}`,
+			wantSubscribe: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := cfg.Load(nil); err != nil {
+				t.Fatalf("cfg.Load() returned unexpected error: %v", err)
+			}
+
+			if tc.cfgDisableAddressManager != nil {
+				cfg.Retrieve().AddressManager = &cfg.AddressManager{
+					Disable: *tc.cfgDisableAddressManager,
+				}
+			}
+
+			mds, err := metadata.UnmarshalDescriptor(tc.mdsJSON)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor() returned unexpected error: %v", err)
+			}
+
+			t.Cleanup(func() {
+				events.FetchManager().Unsubscribe(metadata.LongpollEvent, networkModuleID)
+			})
+
+			mod := &module{}
+			if err := mod.setup(context.Background(), mds); err != nil {
+				t.Errorf("module.setup() returned unexpected error: %v", err)
+			}
+
+			// prevMetadata is only set when network setup runs. This should serve as
+			// confirmation that network setup was skipped.
+			if (mod.prevMetadata != nil) != tc.networkSetupCalled {
+				t.Errorf("module.prevMetadata = %v, want nil", mod.prevMetadata)
+			}
+
+			if events.FetchManager().IsSubscribed(metadata.LongpollEvent, networkModuleID) != tc.wantSubscribe {
+				t.Errorf("%s subscribed to metadata.LongpollEvent, want subscribed = %t", networkModuleID, tc.wantSubscribe)
+			}
+		})
+	}
 }
 
 func TestInitFailure(t *testing.T) {
