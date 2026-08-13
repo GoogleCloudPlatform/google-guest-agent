@@ -503,15 +503,18 @@ func (mod *osloginModule) setupOpenSSH(desc *metadata.Descriptor) error {
 
 	cfg := cfg.Retrieve()
 	certReq := desc.CertRequiredEnabled()
-	// Certificates can be used to bypass OS Login security key authentication. Certificate based
-	// authentication will only be enabled if security keys are not enabled.
-	if (certReq || cfg.OSLogin.CertAuthentication) && !desc.SecurityKeyEnabled() {
+	skEnabled := desc.SecurityKeyEnabled()
+	// Certificates can be used to bypass OS Login security key authentication.
+	// Certificate based authentication will only be enabled if security keys are
+	// not enabled.
+	if (certReq || cfg.OSLogin.CertAuthentication) && !skEnabled {
 		// Add the relevant certificate authority keys.
 		block.Append("TrustedUserCAKeys", defaultPipePath)
 		block.Append("AuthorizedPrincipalsCommand", "/usr/bin/google_authorized_principals %u %k")
 		block.Append("AuthorizedPrincipalsCommandUser", "root")
 	}
-	if !certReq && cfg.OSLogin.CertAuthentication {
+
+	if !certReq || skEnabled {
 		block.Append("AuthorizedKeysCommand", authorizedKeysCommand)
 		block.Append("AuthorizedKeysCommandUser", "root")
 	}
