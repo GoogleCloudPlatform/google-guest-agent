@@ -1,0 +1,106 @@
+edition = "2024";
+
+package cloud_cluster_guest_net_drivers_guest_agent_plugin_proto;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "/network_stats_report";
+
+// Not used directly - provides mappings for `metrics` in `MetricsGroup`
+enum MetricId {
+  METRIC_ID_UNSPECIFIED = 0;
+  RX_PACKETS = 1;
+  TX_PACKETS = 2;
+  RX_BYTES = 3;
+  TX_BYTES = 4;
+  LINK_DETECTED = 5;
+  DRIVER_VERSION = 6;
+  PACKET_DROPPED = 7;
+  AGENT_STARTED = 8;
+  KERNEL_VERSION = 9;
+
+  // ... etc
+}
+
+// Not used directly - provides mappings for `source` in `MetricsGroup`
+enum SourceId {
+  SOURCE_ID_UNSPECIFIED = 0;
+  SOURCE_ETHTOOL = 1;
+  SOURCE_IP_S_LINK = 2;
+  SOURCE_NSTAT = 3;
+  SOURCE_SNMP = 4;
+  SOURCE_PROC_INTERRUPTS = 5;
+  SOURCE_AGENT_EVENT = 6;
+
+  // ... etc
+}
+
+// Provides mappings for `device_element_identifier_type` in
+// `MetricsGroupIdentifiers`
+enum DeviceElementType {
+  ELEMENT_UNSPECIFIED = 0;
+  ELEMENT_MAC_ADDRESS = 1;
+  ELEMENT_BUS_ADDRESS = 2;
+  ELEMENT_INTERFACE_NAME = 3;
+  ELEMENT_DRIVER_NAME = 4;
+
+  // ... etc
+}
+
+// Identifier that can be added to MetricsGroup to denote additional system
+// information
+message MetricsGroupIdentifier {
+  // Refer to `DeviceElementType` enum for identifier mappings
+  DeviceElementType device_element_identifier_type = 1;
+
+  // Device identifier (i.e. bus address/MAC address)
+  string device_element_identifier = 2;
+}
+
+// The representation for a single metric - that value can be any one
+// of the provided data types
+message MetricValue {
+  oneof value {
+    int64 int_value = 1;
+    double double_value = 2;
+    string string_value = 3;
+
+    bool bool_value = 4;
+  }
+}
+
+// Contains all statistics collected from a single tool/command execution.
+message MetricsGroup {
+  // Refer to `SourceId` enum for identifier mappings
+  uint64 source = 1;
+
+  // A set of identifiers used for additional system descriptions/tags where
+  // these metrics were collected. This field is empty or not set if the metrics
+  // are system-wide.
+  repeated MetricsGroupIdentifier metrics_group_identifiers = 2;
+
+  // Refer to `MetricId` enum for identifier mappings
+  map<uint64, MetricValue> metrics = 3 [deprecated = true];
+
+  // Timestamp when collecting metrics for this group was started.
+  google.protobuf.Timestamp start_timestamp = 4;
+
+  // Timestamp when collecting metrics for this group was ended.
+  google.protobuf.Timestamp end_timestamp = 5;
+
+  // Key-value pairs of metrics collected from the source.
+  map<string, MetricValue> agent_metrics = 6;
+}
+
+// Represents a single report of network statistics for a specific instance.
+message NetworkStatsReport {
+  // A collection of stats, with each element containing all stats
+  // gathered from a specific tool or source.
+  repeated MetricsGroup metrics = 1;
+
+  // Timestamp when metrics collection started.
+  google.protobuf.Timestamp collection_start_timestamp = 2;
+
+  // Timestamp when metrics collection ended.
+  google.protobuf.Timestamp collection_end_timestamp = 3;
+}
