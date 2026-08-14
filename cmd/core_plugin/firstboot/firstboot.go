@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	// firstbootModuleID is the ID of the iosched module.
+	// firstbootModuleID is the ID of the firstboot module.
 	firstbootModuleID = "firstboot"
 	// instanceIDFile is the name of the instance id file.
 	instanceIDFile = "google_instance_id"
@@ -172,12 +172,8 @@ func writeInstanceID(fPath string, newInstanceID string) error {
 	}
 	defer f.Close()
 
-	n, err := f.WriteString(newInstanceID)
+	_, err = f.WriteString(newInstanceID)
 	if err != nil {
-		return fmt.Errorf("failed to write instance id file: %w", err)
-	}
-
-	if n != len(newInstanceID) {
 		return fmt.Errorf("failed to write instance id file: %w", err)
 	}
 
