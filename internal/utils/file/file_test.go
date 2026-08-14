@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -391,6 +392,70 @@ func TestReadLastNLines(t *testing.T) {
 				t.Errorf("ReadLastNLines(%s, %d) returned diff (-want +got):\n%s", test.file, test.lines, diff)
 			}
 		})
+	}
+}
+
+func TestReadLastNLinesLarge(t *testing.T) {
+	tmp := t.TempDir()
+	file := filepath.Join(tmp, "large_file")
+
+	write := []string{
+		"0: " + strings.Repeat("a", 1000),
+		"1: " + strings.Repeat("b", 1000),
+		"2: " + strings.Repeat("c", 1000),
+		"3: " + strings.Repeat("d", 1000),
+		"4: " + strings.Repeat("e", 1000),
+		"5: " + strings.Repeat("f", 1000),
+		"6: " + strings.Repeat("g", 1000),
+		"7: " + strings.Repeat("h", 1000),
+		"8: " + strings.Repeat("i", 1000),
+		"9: " + strings.Repeat("j", 1000),
+	}
+
+	if err := os.WriteFile(file, []byte(strings.Join(write, "\n")), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	got, err := ReadLastNLines(file, 3)
+	if err != nil {
+		t.Fatalf("ReadLastNLines failed unexpectedly: %v", err)
+	}
+
+	want := []string{write[7], write[8], write[9]}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("ReadLastNLines returned diff (-want +got):\n%s", diff)
+	}
+}
+
+func TestReadLastNLines_Performance(t *testing.T) {
+	tmp := t.TempDir()
+	file := filepath.Join(tmp, "sparse_large_file")
+
+	f, err := os.Create(file)
+	if err != nil {
+		t.Fatalf("Failed to create sparse file: %v", err)
+	}
+	// Create a 5MB sparse file
+	if err := f.Truncate(5 * 1024 * 1024); err != nil {
+		f.Close()
+		t.Fatalf("Failed to truncate sparse file: %v", err)
+	}
+	f.Close()
+
+	// Read last 3 lines. Since the file has no newlines, it has to scan the entire file.
+	// We expect an error since there are no newlines, but we want to measure how long it takes.
+	start := time.Now()
+	_, err = ReadLastNLines(file, 3)
+	duration := time.Since(start)
+
+	if err == nil {
+		t.Errorf("ReadLastNLines succeeded, want error for no newlines")
+	}
+
+	// Without the fix, 5 million single-byte reads takes several seconds.
+	// With the fix, it reads in 4KB chunks (1220 reads) and takes < 50ms.
+	if duration > 500*time.Millisecond {
+		t.Errorf("ReadLastNLines took %v, want < 500ms", duration)
 	}
 }
 
