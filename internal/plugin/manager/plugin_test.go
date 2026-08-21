@@ -272,21 +272,24 @@ func TestStop(t *testing.T) {
 	tests := []struct {
 		name        string
 		reqDeadline int64
-		wantErr     string
+		wantCode    codes.Code
+		wantErrStr  string
 	}{
 		{
 			name:        "success",
 			reqDeadline: 5,
+			wantCode:    codes.OK,
 		},
 		{
 			name:        "failure_timeout",
-			wantErr:     context.DeadlineExceeded.Error(),
 			reqDeadline: 1,
+			wantCode:    codes.DeadlineExceeded,
 		},
 		{
 			name:        "failure_stop_err",
-			wantErr:     "test error",
 			reqDeadline: 2,
+			wantCode:    codes.Canceled,
+			wantErrStr:  "test error",
 		},
 	}
 
@@ -294,8 +297,11 @@ func TestStop(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			plugin.Manifest.StopTimeout = time.Duration(test.reqDeadline) * time.Second
 			_, err := plugin.Stop(ctx, false)
-			if err.Message() != test.wantErr {
-				t.Errorf("plugin.Stop(ctx, false) = error: %v, want error: %v", err, test.wantErr)
+			if err.Code() != test.wantCode {
+				t.Errorf("plugin.Stop(ctx, false) returned code %v, want %v (error: %v)", err.Code(), test.wantCode, err)
+			}
+			if test.wantErrStr != "" && !strings.Contains(err.Message(), test.wantErrStr) {
+				t.Errorf("plugin.Stop(ctx, false) error message %q does not contain %q", err.Message(), test.wantErrStr)
 			}
 		})
 	}
