@@ -262,7 +262,7 @@ func (d *ISVDiscovery) parseEnvVars() {
 		if t, err := time.ParseDuration(reportingIntervalStr); err == nil {
 			d.envReportingInterval = t
 		} else {
-			slog.Error(fmt.Sprintf("Failed to parse GUEST_TEL_ISV_REPORTING_INTERVAL: %v", err))
+			slog.Error(fmt.Sprintf("Failed to parse reporting interval env var: %v", err))
 		}
 	}
 

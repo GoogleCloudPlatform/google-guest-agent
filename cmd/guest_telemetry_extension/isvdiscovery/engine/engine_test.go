@@ -1595,6 +1595,68 @@ func TestExecuteVersionRules_MissingUsernameFailsSafe(t *testing.T) {
 	}
 }
 
+func TestExecuteVersionRules_FallbackToStdErr_SingleRule(t *testing.T) {
+	ruleMock := defpb.DiscoveryRule_builder{
+		VersionRules: []*defpb.DiscoveryVersionRule{
+			defpb.DiscoveryVersionRule_builder{
+				Command:               defpb.VersionCommand_CAT,
+				CommandArgs:           []string{"--version"},
+				RegexMatch:            `[vV]ersion\s+\d+(?:\.\d+)+`,
+				VersionExtractPattern: `[vV]ersion\s+(\d+(?:\.\d+)+)`,
+			}.Build(),
+		},
+	}.Build()
+
+	originalExec := executeCommand
+	executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+		return commandlineexecutor.Result{
+			StdOut:          "Picked up _JAVA_OPTIONS: ...",
+			StdErr:          "Apache Spark version 3.5.8\nUsing Scala...",
+			ExitCode:        0,
+			ExecutableFound: true,
+		}
+	}
+	defer func() { executeCommand = originalExec }()
+
+	version := executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Username: "testuser"})
+	if version != "3.5.8" {
+		t.Errorf("got %q, want %q", version, "3.5.8")
+	}
+}
+
+func TestExecuteVersionRules_FallbackToStdErr_Steps(t *testing.T) {
+	ruleMock := defpb.DiscoveryRule_builder{
+		VersionRules: []*defpb.DiscoveryVersionRule{
+			defpb.DiscoveryVersionRule_builder{
+				Steps: []*defpb.VersionCommandStep{
+					defpb.VersionCommandStep_builder{
+						Command:     defpb.VersionCommand_CAT,
+						CommandArgs: []string{"--version"},
+						RegexMatch:  `[vV]ersion\s+\d+(?:\.\d+)+`,
+					}.Build(),
+				},
+				VersionExtractPattern: `[vV]ersion\s+(\d+(?:\.\d+)+)`,
+			}.Build(),
+		},
+	}.Build()
+
+	originalExec := executeCommand
+	executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+		return commandlineexecutor.Result{
+			StdOut:          "Picked up _JAVA_OPTIONS: ...",
+			StdErr:          "Apache Spark version 3.5.8\nUsing Scala...",
+			ExitCode:        0,
+			ExecutableFound: true,
+		}
+	}
+	defer func() { executeCommand = originalExec }()
+
+	version := executeVersionRules(context.Background(), ruleMock, &ProcessInfo{Username: "testuser"})
+	if version != "3.5.8" {
+		t.Errorf("got %q, want %q", version, "3.5.8")
+	}
+}
+
 func TestExecuteVersionRules_OutOfBoundsCommand(t *testing.T) {
 	ruleMock := defpb.DiscoveryRule_builder{
 		VersionRules: []*defpb.DiscoveryVersionRule{

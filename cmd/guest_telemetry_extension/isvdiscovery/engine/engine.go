@@ -328,12 +328,14 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 					if err == nil {
 						if re.MatchString(res.StdOut) {
 							prevOutput = res.StdOut
+						} else if re.MatchString(res.StdErr) {
+							prevOutput = res.StdErr
 						}
 					}
 				}
 				// If we didn't get valid output, try the next version rule.
 				if prevOutput == "" {
-					slog.Debug("Step command did not produce valid output", "executable", params.Executable, "args", params.Args, "output", res.StdOut)
+					slog.Debug("Step command did not produce valid output", "executable", params.Executable, "args", params.Args, "stdout", res.StdOut, "stderr", res.StdErr)
 					break
 				}
 			}
@@ -366,12 +368,15 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 		if version, found := extractVersionFromOutput(res.StdOut, versionRule.GetRegexMatch(), versionRule.GetVersionExtractPattern()); found {
 			return version
 		}
+		if version, found := extractVersionFromOutput(res.StdErr, versionRule.GetRegexMatch(), versionRule.GetVersionExtractPattern()); found {
+			return version
+		}
 	}
 
 	return ""
 }
 
-func extractVersionFromOutput(stdout, versionRegex, versionExtractPattern string) (string, bool) {
+func extractVersionFromOutput(output, versionRegex, versionExtractPattern string) (string, bool) {
 	re, err := regexp.Compile(versionRegex)
 	if err != nil {
 		slog.Debug("Failed to compile version regex", "regex", versionRegex, "error", err)
@@ -385,7 +390,7 @@ func extractVersionFromOutput(stdout, versionRegex, versionExtractPattern string
 			return "", false
 		}
 	}
-	lines := strings.Split(stdout, "\n")
+	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		if re.MatchString(line) {
 			if extractRe != nil {
