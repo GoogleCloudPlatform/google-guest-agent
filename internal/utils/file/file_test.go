@@ -445,3 +445,68 @@ func TestUpdateSymlink(t *testing.T) {
 		})
 	}
 }
+
+func createZipSlipArchive(t *testing.T, badPath string) string {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "bad.tar.gz")
+	f, err := os.Create(tempFile)
+	if err != nil {
+		t.Fatalf("error creating test file: %v", err)
+	}
+
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	body := "malicious content"
+	if err := tw.WriteHeader(&tar.Header{Name: badPath, Mode: filePerms, Size: int64(len(body))}); err != nil {
+		t.Fatalf("error creating test archive header: %v", err)
+	}
+
+	if _, err := tw.Write([]byte(body)); err != nil {
+		t.Fatalf("error writing test archive content: %v", err)
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("error closing test archive tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("error closing test archive gzip writer: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("error closing test archive file: %v", err)
+	}
+
+	return tempFile
+}
+
+func TestUnpackTARGZFileZipSlip(t *testing.T) {
+	tests := []struct {
+		name    string
+		badPath string
+	}{
+		{
+			name:    "relative_parent",
+			badPath: "../../escaped_file.txt",
+		},
+		{
+			name:    "escaped_dot_dot",
+			badPath: "..",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			srcArchive := createZipSlipArchive(t, test.badPath)
+			destDir := t.TempDir()
+
+			err := UnpackTargzFile(srcArchive, destDir)
+			if err == nil {
+				t.Errorf("UnpackTargzFile with ZipSlip path %q should have failed", test.badPath)
+			} else if !strings.Contains(err.Error(), "escapes destination directory") && !strings.Contains(err.Error(), "illegal file path") {
+				t.Errorf("UnpackTargzFile failed with unexpected error: %v", err)
+			}
+		})
+	}
+}
