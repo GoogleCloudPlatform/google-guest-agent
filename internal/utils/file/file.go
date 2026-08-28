@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
 )
@@ -75,6 +76,7 @@ func SHA256FileSum(filePath string) (string, error) {
 // UnpackTargzFile unpacks a src *tar.gz file into dest directory. It also creates a dest
 // directory if it does not exist.
 func UnpackTargzFile(src, dest string) error {
+	dest = filepath.Clean(dest)
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %q: %w", dest, err)
 	}
@@ -105,12 +107,28 @@ func UnpackTargzFile(src, dest string) error {
 		name := filepath.Clean(hdr.Name)
 		entryPath := filepath.Join(dest, name)
 
+		rel, err := filepath.Rel(dest, entryPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("path traversal detected: %q is outside of %q", entryPath, dest)
+		}
+
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(entryPath, os.FileMode(hdr.Mode)); err != nil {
 				return fmt.Errorf("failed to create directory %q: %w", entryPath, err)
 			}
 		case tar.TypeSymlink:
+			// Reject absolute or volume-relative symlink targets.
+			if filepath.IsAbs(hdr.Linkname) || filepath.VolumeName(hdr.Linkname) != "" || strings.HasPrefix(hdr.Linkname, "/") || strings.HasPrefix(hdr.Linkname, "\\") {
+				return fmt.Errorf("invalid symlink target %q: target is outside of %q", hdr.Linkname, dest)
+			}
+
+			targetPath := filepath.Join(filepath.Dir(entryPath), hdr.Linkname)
+			relTarget, err := filepath.Rel(dest, targetPath)
+			if err != nil || strings.HasPrefix(relTarget, "..") {
+				return fmt.Errorf("invalid symlink target %q: target is outside of %q", hdr.Linkname, dest)
+			}
+
 			if err := os.Symlink(hdr.Linkname, entryPath); err != nil {
 				return fmt.Errorf("failed to create symlink %q: %w", entryPath, err)
 			}
