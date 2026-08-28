@@ -23,30 +23,48 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pluginpb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 )
 
+var (
+	// prevUUID is the previous identity UUID of the instance.
+	prevUUID      string
+	prevUUIDMutex sync.RWMutex
+
+	// refreshChan is the channel used to signal the core loop to refresh the credentials.
+	refreshChan chan bool
+)
+
 const (
+	// subscriberID is the ID of the subscriber to the metadata event.
+	subscriberID = "mwlid_extension"
+
 	healthy int32 = iota
 	unhealthy
 )
 
 // Extension is a struct that implements the Guest Agent Plugin Server interface.
 type Extension struct {
-	cancel      context.CancelFunc
-	ctx         context.Context
-	grpcServer  *grpc.Server
-	lastError   error
-	statusMutex sync.RWMutex
+	cancel          context.CancelFunc
+	ctx             context.Context
+	grpcServer      *grpc.Server
+	lastError       error
+	statusMutex     sync.RWMutex
+	metadataWatcher *metadata.Watcher
 	pluginpb.UnimplementedGuestAgentPluginServer
 }
 
 // Register enables the plugin manager to handle the starting and stopping of the extension.
 func Register(server *grpc.Server) {
-	pluginpb.RegisterGuestAgentPluginServer(server, &Extension{})
+	pluginpb.RegisterGuestAgentPluginServer(server, &Extension{
+		metadataWatcher: metadata.NewWatcher(),
+	})
 }
 
 // Start begins the extension execution.
@@ -60,7 +78,28 @@ func (e *Extension) Start(ctx context.Context, msg *pluginpb.StartRequest) (*plu
 		return &pluginpb.StartResponse{}, nil
 	}
 
+	// Add the metadata watcher, and subscribe to the metadata event.
+	if err := events.FetchManager().AddWatcher(ctx, e.metadataWatcher); err != nil {
+		return &pluginpb.StartResponse{}, status.Errorf(codes.Unavailable, "Failed to add metadata watcher: %v", err)
+	}
+	events.FetchManager().Subscribe(metadata.WatcherID, events.EventSubscriber{
+		Name:     subscriberID,
+		Callback: e.handleMetadataEvent,
+	})
+
+	// Create the refresh channel.
+	refreshChan = make(chan bool)
+
+	// Create the extension context.
 	e.ctx, e.cancel = context.WithCancel(context.Background())
+
+	// Run the events manager in a separate go routine.
+	go func(ctx context.Context) {
+		if err := events.FetchManager().Run(ctx); err != nil {
+			galog.Errorf("Failed to run events manager: %v", err)
+		}
+	}(e.ctx)
+
 	galog.Info("Starting extension")
 	go func(ctx context.Context) {
 		ec := e.coreLoop(ctx)
@@ -87,11 +126,18 @@ func (e *Extension) Stop(ctx context.Context, msg *pluginpb.StopRequest) (*plugi
 		return &pluginpb.StopResponse{}, err
 	}
 
+	// Stop the metadata watcher and unsubscribe from the metadata event.
+	events.FetchManager().Unsubscribe(metadata.WatcherID, subscriberID)
+	events.FetchManager().RemoveWatcher(ctx, e.metadataWatcher)
+
 	galog.Info("Stopping extension")
 	e.cancel()
 	e.cancel = nil
 	e.ctx = context.Background()
 	galog.Info("Extension stopped")
+
+	// Close the refresh channel.
+	close(refreshChan)
 
 	return &pluginpb.StopResponse{}, nil
 }
@@ -123,12 +169,6 @@ func (e *Extension) coreLoop(ctx context.Context) int32 {
 		},
 	}
 
-	// Watch the metadata server for changes to the identity.
-	mdsChan := refresher.watchIdentity(ctx)
-
-	// Run the refresher once on start.
-	e.runRefresher(ctx, refresher)
-
 	// Set up a ticker to refresh the credentials at the configured interval.
 	interval := time.Duration(cfg.Retrieve().MWLID.CredentialRefreshMinutes) * time.Minute
 	ticker := time.NewTicker(interval)
@@ -142,7 +182,7 @@ func (e *Extension) coreLoop(ctx context.Context) int32 {
 		case <-ticker.C:
 			galog.V(1).Debugf("Ticker fired, refreshing workload credentials...")
 			e.runRefresher(ctx, refresher)
-		case <-mdsChan:
+		case <-refreshChan:
 			galog.V(1).Debugf("MDS channel fired, refreshing workload credentials...")
 			e.runRefresher(ctx, refresher)
 			// Reset the ticker to prevent a useless refresh.
@@ -169,4 +209,28 @@ func (e *Extension) runRefresher(ctx context.Context, refresher *RefresherJob) {
 		e.lastError = nil
 		e.statusMutex.Unlock()
 	}
+}
+
+// The first return value indicates whether to refresh
+func (e *Extension) handleMetadataEvent(ctx context.Context, evType string, data any, evData *events.EventData) (bool, bool, error) {
+	desc, ok := data.(*metadata.Descriptor)
+	if !ok {
+		// If we didn't get a descriptor, we don't want to renew the subscription.
+		return false, true, nil
+	}
+
+	prevUUIDMutex.Lock()
+	defer prevUUIDMutex.Unlock()
+
+	// Compare the current identity with the previous identity.
+	if desc.Instance().IdentityConfiguration().IdentityUUID() == prevUUID {
+		return true, true, nil
+	}
+
+	// Update the previous identity UUID.
+	prevUUID = desc.Instance().IdentityConfiguration().IdentityUUID()
+
+	// Send a signal to the core loop to refresh the credentials.
+	refreshChan <- true
+	return true, false, nil
 }
