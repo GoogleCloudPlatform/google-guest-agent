@@ -378,12 +378,67 @@ func TestUpdateSSHKeys(t *testing.T) {
 			wantAuthorizedKeysContents: "",
 		},
 		{
-			name: "login_disallowed",
+			name: "login_disallowed_/sbin",
 			user: &accounts.User{
 				HomeDir: filepath.Join(t.TempDir(), "login_disallowed"),
 				UID:     "-1",
 				GID:     "-1",
 				Shell:   "/sbin/nologin",
+			},
+			keys:                       []string{"key1", "key2"},
+			wantAuthorizedKeysContents: "",
+		},
+		{
+			name: "login_disallowed_/usr/sbin",
+			user: &accounts.User{
+				HomeDir: filepath.Join(t.TempDir(), "login_disallowed"),
+				UID:     "-1",
+				GID:     "-1",
+				Shell:   "/usr/sbin/nologin",
+			},
+			keys:                       []string{"key1", "key2"},
+			wantAuthorizedKeysContents: "",
+		},
+		{
+			name: "login_disallowed_/bin/nologin",
+			user: &accounts.User{
+				HomeDir: filepath.Join(t.TempDir(), "login_disallowed"),
+				UID:     "-1",
+				GID:     "-1",
+				Shell:   "/bin/nologin",
+			},
+			keys:                       []string{"key1", "key2"},
+			wantAuthorizedKeysContents: "",
+		},
+		{
+			name: "login_disallowed_/bin/false",
+			user: &accounts.User{
+				HomeDir: filepath.Join(t.TempDir(), "login_disallowed"),
+				UID:     "-1",
+				GID:     "-1",
+				Shell:   "/bin/false",
+			},
+			keys:                       []string{"key1", "key2"},
+			wantAuthorizedKeysContents: "",
+		},
+		{
+			name: "root_user",
+			user: &accounts.User{
+				HomeDir: filepath.Join(t.TempDir(), "root_user"),
+				UID:     "0",
+				GID:     "0",
+				Shell:   "/bin/bash",
+			},
+			keys:                       []string{"key1", "key2"},
+			wantAuthorizedKeysContents: "",
+		},
+		{
+			name: "root_user_not_guid0",
+			user: &accounts.User{
+				HomeDir: filepath.Join(t.TempDir(), "root_user"),
+				UID:     "0",
+				GID:     "1",
+				Shell:   "/bin/bash",
 			},
 			keys:                       []string{"key1", "key2"},
 			wantAuthorizedKeysContents: "",
@@ -441,16 +496,6 @@ func TestUpdateSSHKeysError(t *testing.T) {
 		{
 			name: "no_homedir",
 			user: &accounts.User{},
-		},
-		{
-			name: "chown_failure",
-			user: &accounts.User{
-				HomeDir: filepath.Join(t.TempDir(), "write_keys"),
-				UID:     "0",
-				GID:     "0",
-			},
-			keys:       []string{"key1", "key2"},
-			skipIfRoot: true,
 		},
 		{
 			name: "restorecon_failure",
