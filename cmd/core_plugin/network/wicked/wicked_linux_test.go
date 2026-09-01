@@ -560,7 +560,7 @@ func TestSetup(t *testing.T) {
 				}
 			}
 
-			err := svc.Setup(context.Background(), tc.opts)
+			err := svc.Setup(context.Background(), tc.opts, false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want error: %v", err, tc.wantErr)
 			}
@@ -861,7 +861,7 @@ func TestRollback(t *testing.T) {
 				}
 			}
 
-			err := svc.Rollback(context.Background(), tc.opts, false)
+			_, err := svc.Rollback(context.Background(), tc.opts, false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Rollback() = %v, want error: %v", err, tc.wantErr)
 			}

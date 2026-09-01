@@ -134,10 +134,11 @@ func TestActiveManager(t *testing.T) {
 
 func TestRollback(t *testing.T) {
 	tests := []struct {
-		name           string
-		managers       []*service.Handle
-		skipID         string
-		wantRolledBack []string
+		name               string
+		managers           []*service.Handle
+		skipID             string
+		wantRolledBack     []string
+		wantReloadRequired bool
 	}{
 		{
 			name:           "success",
@@ -145,8 +146,8 @@ func TestRollback(t *testing.T) {
 			managers: []*service.Handle{
 				{
 					ID: "manager-1",
-					Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-						return nil
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return false, nil
 					},
 				},
 			},
@@ -157,8 +158,8 @@ func TestRollback(t *testing.T) {
 			managers: []*service.Handle{
 				{
 					ID: "manager-1",
-					Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-						return errors.New("error")
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return false, errors.New("error")
 					},
 				},
 			},
@@ -170,14 +171,48 @@ func TestRollback(t *testing.T) {
 			managers: []*service.Handle{
 				{
 					ID: "manager-1",
-					Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-						return nil
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return false, nil
 					},
 				},
 				{
 					ID: "manager-2",
-					Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-						return nil
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return false, nil
+					},
+				},
+			},
+		},
+		{
+			name:               "non-active-manager-rolled-back-requires-reload",
+			skipID:             "manager-1",
+			wantRolledBack:     []string{"manager-1", "manager-2"},
+			wantReloadRequired: true,
+			managers: []*service.Handle{
+				{
+					ID: "manager-1",
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return false, nil
+					},
+				},
+				{
+					ID: "manager-2",
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return true, nil
+					},
+				},
+			},
+		},
+		{
+			name:               "active-manager-rolled-back-does-not-require-reload",
+			skipID:             "manager-1",
+			wantRolledBack:     []string{"manager-1"},
+			wantReloadRequired: false,
+			managers: []*service.Handle{
+				{
+					ID: "manager-1",
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return true, nil
 					},
 				},
 			},
@@ -189,13 +224,17 @@ func TestRollback(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rolledBack, err := rollback(ctx, tc.managers, tc.skipID, opts)
+			rolledBack, reloadRequired, err := rollback(ctx, tc.managers, tc.skipID, opts)
 			if err != nil {
 				t.Errorf("rollback(ctx, %+v, %q, nil) = %v, want nil", tc.managers, tc.skipID, err)
 			}
 
 			if diff := cmp.Diff(tc.wantRolledBack, rolledBack); diff != "" {
 				t.Errorf("rollback(ctx, %+v, %q, nil) returned diff (-want +got):\n%s", tc.managers, tc.skipID, diff)
+			}
+
+			if reloadRequired != tc.wantReloadRequired {
+				t.Errorf("rollback(ctx, %+v, %q, nil) reloadRequired = %v, want %v", tc.managers, tc.skipID, reloadRequired, tc.wantReloadRequired)
 			}
 		})
 	}
@@ -229,11 +268,11 @@ func TestRunManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return errors.New("error")
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 				},
@@ -259,11 +298,11 @@ func TestRunManagerSetup(t *testing.T) {
 					IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 						return true, nil
 					},
-					Setup: func(ctx context.Context, opts *service.Options) error {
+					Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 						return nil
 					},
-					Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-						return nil
+					Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+						return false, nil
 					},
 				},
 			}, nil),
@@ -281,11 +320,11 @@ func TestRunManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, errors.New("error")
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 				},
@@ -312,11 +351,11 @@ func TestRunManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 					{
@@ -327,8 +366,8 @@ func TestRunManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return false, nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return errors.New("error")
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, errors.New("error")
 						},
 					},
 				},
@@ -354,11 +393,11 @@ func TestRunManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return errors.New("error")
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 				},
@@ -385,11 +424,11 @@ func TestRunManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 				},
@@ -416,11 +455,11 @@ func TestRunManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 				},
@@ -507,11 +546,11 @@ func TestManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, nil
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 					{
@@ -519,8 +558,8 @@ func TestManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return false, nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return errors.New("error")
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, errors.New("error")
 						},
 					},
 				},
@@ -539,11 +578,11 @@ func TestManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return true, errors.New("error")
 						},
-						Setup: func(ctx context.Context, opts *service.Options) error {
+						Setup: func(ctx context.Context, opts *service.Options, _ bool) error {
 							return nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return nil
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, nil
 						},
 					},
 					{
@@ -551,8 +590,8 @@ func TestManagerSetup(t *testing.T) {
 						IsManaging: func(ctx context.Context, opts *service.Options) (bool, error) {
 							return false, nil
 						},
-						Rollback: func(ctx context.Context, opts *service.Options, reload bool) error {
-							return errors.New("error")
+						Rollback: func(ctx context.Context, opts *service.Options, reload bool) (bool, error) {
+							return false, errors.New("error")
 						},
 					},
 				},

@@ -259,7 +259,7 @@ func (sn *Module) RollbackDropins(nics []*nic.Configuration, filePrefix string, 
 }
 
 // Setup sets up the network interfaces using systemd-networkd.
-func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
+func (sn *Module) Setup(ctx context.Context, opts *service.Options, forceReload bool) error {
 	galog.Info("Setting up systemd-networkd interfaces.")
 	nicConfigs := opts.FilteredNICConfigs()
 
@@ -306,8 +306,8 @@ func (sn *Module) Setup(ctx context.Context, opts *service.Options) error {
 	}
 
 	// If we've not changed any configuration we shouldn't have to reload
-	// systemd-networkd.
-	if !changed && !vlanCleanedup {
+	// systemd-networkd, unless a reload is forced.
+	if !forceReload && !changed && !vlanCleanedup {
 		galog.Debugf("No configuration changes made, skipping reload.")
 		galog.Infof("Finished setting up systemd-networkd interfaces.")
 		return nil
@@ -602,8 +602,9 @@ func (sn *Module) deprecatedNetworkFile(iface string) string {
 	return filepath.Join(sn.configDir, fName)
 }
 
-// Rollback rolls back the changes created in Setup.
-func (sn *Module) Rollback(ctx context.Context, opts *service.Options, active bool) error {
+// Rollback rolls back the changes created in Setup. It returns true if any
+// systemd-networkd configuration managed by the guest agent was rolled back.
+func (sn *Module) Rollback(ctx context.Context, opts *service.Options, active bool) (bool, error) {
 	galog.Infof("Rolling back changes for systemd-networkd with reload [%t].", !active)
 
 	ethernetRequiresReload := false
@@ -634,23 +635,23 @@ func (sn *Module) Rollback(ctx context.Context, opts *service.Options, active bo
 	// Cleanup vlan interfaces.
 	vlanCleanedUp, err := sn.cleanupVlanConfigs(nil)
 	if err != nil {
-		return fmt.Errorf("error cleaning up vlan configs: %w", err)
+		return false, fmt.Errorf("error cleaning up vlan configs: %w", err)
 	}
 
 	if !ethernetRequiresReload && !vlanCleanedUp {
 		galog.Debugf("No systemd-networkd configuration rolled back, skipping restart.")
-		return nil
+		return false, nil
 	}
 
 	// Attempt to reload systemd-networkd configurations.
 	if !active {
 		galog.Debugf("Reloading systemd-networkd daemon.")
 		if err := sn.Reload(ctx, 0); err != nil {
-			return fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
+			return true, fmt.Errorf("error reloading systemd-networkd daemon: %w", err)
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // networkdConfig wraps the interface configuration for systemd-networkd.

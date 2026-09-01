@@ -703,11 +703,13 @@ func TestNewInterfacePartitions(t *testing.T) {
 
 func TestRollback(t *testing.T) {
 	tests := []struct {
-		name              string
-		noDhclientCommand bool
-		wantIpv4Error     bool
-		wantIpv6Error     bool
-		wantError         bool
+		name                   string
+		noDhclientCommand      bool
+		wantIpv4Error          bool
+		wantIpv6Error          bool
+		wantError              bool
+		wantRolledBack         bool
+		wantReleasedInterfaces []string
 	}{
 		{
 			name:              "no-dhcp-command",
@@ -724,7 +726,9 @@ func TestRollback(t *testing.T) {
 			wantError:     true,
 		},
 		{
-			name: "success",
+			name:                   "success-releases-all-interfaces",
+			wantRolledBack:         true,
+			wantReleasedInterfaces: []string{"eth0", "eth1"},
 		},
 	}
 
@@ -744,6 +748,7 @@ func TestRollback(t *testing.T) {
 				execLookPath = exec.LookPath
 			})
 
+			var releasedIfaces []string
 			oldRunClient := run.Client
 			t.Cleanup(func() {
 				run.Client = oldRunClient
@@ -751,6 +756,9 @@ func TestRollback(t *testing.T) {
 
 			run.Client = &dhclientMockRunner{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+					if slices.Contains(opts.Args, "-r") && len(opts.Args) > 0 {
+						releasedIfaces = append(releasedIfaces, opts.Args[len(opts.Args)-1])
+					}
 					if tc.wantIpv4Error && slices.Contains(opts.Args, "-4") {
 						return nil, errors.New("error dhclient command for ipv4")
 					}
@@ -770,15 +778,19 @@ func TestRollback(t *testing.T) {
 
 			ps.Client = &dhclientMockPs{
 				FindRegexCallback: func(exematch string) ([]ps.Process, error) {
-					commandLine := []string{"dhclient", "eth1"}
-					if tc.wantIpv6Error {
-						commandLine = append(commandLine, "-6")
-					}
-					return []ps.Process{
+					res := []ps.Process{
 						{
-							CommandLine: commandLine,
+							CommandLine: []string{"dhclient", "eth0"},
 						},
-					}, nil
+						{
+							CommandLine: []string{"dhclient", "eth1"},
+						},
+					}
+					if tc.wantIpv6Error {
+						res[0].CommandLine = append(res[0].CommandLine, "-6")
+						res[1].CommandLine = append(res[1].CommandLine, "-6")
+					}
+					return res, nil
 				},
 			}
 
@@ -797,9 +809,19 @@ func TestRollback(t *testing.T) {
 			ds := &dhclientService{}
 			opts := service.NewOptions(nil, nicConfigs)
 
-			err := ds.Rollback(context.Background(), opts, false)
+			rolledBack, err := ds.Rollback(context.Background(), opts, false)
 			if (err == nil) == tc.wantError {
-				t.Fatalf("Rollback(ctx, %+v) returned %v, want %v", opts, err, tc.wantError)
+				t.Fatalf("Rollback(ctx, %+v) returned %v, want error %v", opts, err, tc.wantError)
+			}
+			if !tc.wantError {
+				if rolledBack != tc.wantRolledBack {
+					t.Errorf("Rollback() = rolledBack %v, want %v", rolledBack, tc.wantRolledBack)
+				}
+				for _, iface := range tc.wantReleasedInterfaces {
+					if !slices.Contains(releasedIfaces, iface) {
+						t.Errorf("Rollback() did not release expected interface %q, released: %v", iface, releasedIfaces)
+					}
+				}
 			}
 		})
 	}
@@ -1094,7 +1116,7 @@ func TestSetup(t *testing.T) {
 				},
 			}
 
-			err := ds.Setup(context.Background(), opts)
+			err := ds.Setup(context.Background(), opts, false)
 			if (err == nil) == tc.wantError {
 				t.Fatalf("Setup(ctx, %+v) returned %v, want error? %v", opts, err, tc.wantError)
 			}

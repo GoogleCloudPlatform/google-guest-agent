@@ -99,14 +99,17 @@ func runManagerSetup(ctx context.Context, opts *service.Options) error {
 
 	// Attempt to rollback the configuration of all the managers except the active
 	// one. As it's a non-fatal error we log it and proceed with the setup.
-	rolledBack, err := rollback(ctx, managers, active.ID, opts)
+	rolledBack, reloadRequired, err := rollback(ctx, managers, active.ID, opts)
 	if err != nil {
 		galog.Warnf("Failed to rollback network configuration: %v.", err)
 	}
 	galog.Infof("Rolled back network configuration for %v.", rolledBack)
 
-	// Attempt to setup the network configuration for the active manager.
-	if err := active.Setup(ctx, opts); err != nil {
+	// Attempt to setup the network configuration for the active manager. If a
+	// non-active manager rolled back state (e.g. dhclient released a lease), the
+	// active manager is forced to reload its configuration regardless of whether
+	// its configuration files changed.
+	if err := active.Setup(ctx, opts, reloadRequired); err != nil {
 		return fmt.Errorf("failed to setup network configuration(%q): %w", active.ID, err)
 	}
 
@@ -143,25 +146,37 @@ func activeManager(ctx context.Context, managers []*service.Handle, opts *servic
 }
 
 // rollback rolls back the changes created in Setup for all the network managers
-// except the one provided with skip argument.
-func rollback(ctx context.Context, managers []*service.Handle, skipID string, opts *service.Options) ([]string, error) {
+// except the one provided with skip argument. It returns the list of managers
+// that were rolled back and whether a non-active manager actually rolled back
+// state, which requires the active manager to reload regardless of its config
+// diff.
+func rollback(ctx context.Context, managers []*service.Handle, skipID string, opts *service.Options) ([]string, bool, error) {
 	galog.Debugf("Rolling back network configuration for all the linux network management service modules")
 
 	var rolledBack []string
+	var reloadRequired bool
 	for _, manager := range managers {
+		active := manager.ID == skipID
 		galog.V(1).Debugf("Rolling back network configuration for %q.", manager.ID)
 		// Rollback network configurations for the manager. Avoid reloading the
 		// active manager as we'll need to reload it anyway after the setup.
-		if err := manager.Rollback(ctx, opts, manager.ID == skipID); err != nil {
+		changed, err := manager.Rollback(ctx, opts, active)
+		if err != nil {
 			galog.Debugf("failed to rollback network configuration(%q): %v", manager.ID, err)
 		} else {
 			galog.V(1).Debugf("Successfully rolled back network configuration for %q.", manager.ID)
 		}
 
+		// If a non-active manager rolled back state, the active manager must
+		// reload its configuration regardless of its config diff to restore it.
+		if changed && !active {
+			reloadRequired = true
+		}
+
 		rolledBack = append(rolledBack, manager.ID)
 	}
 
-	return rolledBack, nil
+	return rolledBack, reloadRequired, nil
 }
 
 // logInterfaceState logs the interface state and routes for all the network

@@ -98,7 +98,7 @@ func (sn *serviceNetworkManager) IsManaging(ctx context.Context, opts *service.O
 }
 
 // Setup sets up the network interface.
-func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Options) error {
+func (sn *serviceNetworkManager) Setup(ctx context.Context, opts *service.Options, _ bool) error {
 	galog.Info("Setting up NetworkManager interfaces.")
 	nicConfigs := opts.FilteredNICConfigs()
 
@@ -333,8 +333,9 @@ func (sn *serviceNetworkManager) ifcfgFilePath(iface string) string {
 	return filepath.Join(sn.networkScriptsDir, fmt.Sprintf("ifcfg-%s", iface))
 }
 
-// Rollback rolls back the network interface.
-func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Options, active bool) error {
+// Rollback rolls back the network interface. It returns true if any
+// NetworkManager config file managed by the guest agent was removed.
+func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Options, active bool) (bool, error) {
 	galog.Infof("Rolling back changes for NetworkManager with reload [%t].", !active)
 
 	// removeOp is a helper struct to keep track of which config files to remove.
@@ -372,13 +373,18 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 		}
 	}
 
+	var rolledBack bool
 	var reconnectPrimaryNic bool
 	var primaryOp removeOp
 	for _, op := range deleteMe {
 		galog.Debugf("Removing NetworkManager configuration: %q", op.configFile)
 		err := os.Remove(op.configFile)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("error deleting NetworkManager %s config file(%q): %v", op.configType, op.configFile, err)
+			return rolledBack, fmt.Errorf("error deleting NetworkManager %s config file(%q): %v", op.configType, op.configFile, err)
+		}
+
+		if err == nil {
+			rolledBack = true
 		}
 
 		// If the primary NIC config file was removed successfully, we need to
@@ -391,14 +397,14 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 
 	if _, err := execLookPath("nmcli"); err != nil {
 		galog.Debugf("Cannot find nmcli, skipping reload: %v", err)
-		return nil
+		return rolledBack, nil
 	}
 
 	if !active {
 		if err := sn.reloadInterfaces(ctx); err != nil {
-			return fmt.Errorf("failed to reload NetworkManager interfaces: %w", err)
+			return rolledBack, fmt.Errorf("failed to reload NetworkManager interfaces: %w", err)
 		}
-		return nil
+		return rolledBack, nil
 	}
 
 	// NetworkManager will not create a default connection if we are removing the
@@ -410,9 +416,9 @@ func (sn *serviceNetworkManager) Rollback(ctx context.Context, opts *service.Opt
 	if reconnectPrimaryNic && !cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC {
 		opt := run.Options{OutputType: run.OutputNone, Name: "nmcli", Args: []string{"device", "connect", primaryOp.name}}
 		if _, err := run.WithContext(ctx, opt); err != nil {
-			return fmt.Errorf("error reconnecting device(%q): %w", primaryOp.name, err)
+			return rolledBack, fmt.Errorf("error reconnecting device(%q): %w", primaryOp.name, err)
 		}
 	}
 
-	return nil
+	return rolledBack, nil
 }

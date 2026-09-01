@@ -97,7 +97,7 @@ func (sn *serviceWicked) IsManaging(ctx context.Context, opts *service.Options) 
 }
 
 // Setup sets up the network interface.
-func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options) error {
+func (sn *serviceWicked) Setup(ctx context.Context, opts *service.Options, _ bool) error {
 	galog.Info("Setting up wicked interfaces.")
 
 	var ifupInterfaces []string
@@ -309,14 +309,15 @@ func (sn *serviceWicked) writeEthernetConfig(nic *nic.Configuration, filePath st
 	return nil
 }
 
-// Rollback rolls back the network interface.
-func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options, active bool) error {
+// Rollback rolls back the network interface. It returns true if any wicked
+// config file managed by the guest agent was removed.
+func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options, active bool) (bool, error) {
 	galog.Infof("Rolling back changes for wicked with reload [%t].", !active)
 
 	// If the config directory does not exist we got nothing to rollback, skip it.
 	if !file.Exists(sn.configDir, file.TypeDir) {
 		galog.Debugf("Wicked config directory does not exist, skipping rollback.")
-		return nil
+		return false, nil
 	}
 
 	// Remove the config files.
@@ -331,7 +332,7 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options, ac
 		// Remove the config file for the current NIC.
 		removed, err := sn.removeInterface(ctx, sn.ifcfgFilePath(nic.Interface.Name()), nic.Index == 0)
 		if err != nil {
-			return fmt.Errorf("failed to remove wicked config file: %w", err)
+			return false, fmt.Errorf("failed to remove wicked config file: %w", err)
 		}
 		if removed {
 			reloadInterfaces = append(reloadInterfaces, nic.Interface.Name())
@@ -340,27 +341,27 @@ func (sn *serviceWicked) Rollback(ctx context.Context, opts *service.Options, ac
 
 	// Remove all the vlan config files.
 	if err := sn.cleanupVlanInterfaces(ctx, nil); err != nil {
-		return fmt.Errorf("failed to cleanup vlan interfaces: %w", err)
+		return false, fmt.Errorf("failed to cleanup vlan interfaces: %w", err)
 	}
 
 	if len(reloadInterfaces) == 0 {
-		return nil
+		return false, nil
 	}
 
 	// Check if wicked is installed.
 	if _, err := exec.LookPath("wicked"); err != nil {
 		galog.Debugf("Cannot find wicked binary, skipping reload: %v", err)
-		return nil
+		return true, nil
 	}
 
 	// Reload the wicked configuration.
 	if !active {
 		if err := sn.reloadInterfaces(ctx, reloadInterfaces); err != nil {
-			return fmt.Errorf("failed to reload interfaces: %w", err)
+			return true, fmt.Errorf("failed to reload interfaces: %w", err)
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // removeInterface removes the wicked config file for the given interface.

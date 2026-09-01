@@ -142,7 +142,7 @@ func (sn *serviceNetplan) addPrefix(name string, after bool) string {
 }
 
 // Setup sets up the network configuration.
-func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) error {
+func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options, forceReload bool) error {
 	galog.Info("Setting up netplan interfaces.")
 	nicConfigs := opts.FilteredNICConfigs()
 
@@ -188,15 +188,16 @@ func (sn *serviceNetplan) Setup(ctx context.Context, opts *service.Options) erro
 		return err
 	}
 
-	// Apply the netplan configuration.
-	if netplanChanged || netplanVlanChanged || backendVlanChanged || backendVlanCleanedup {
+	// Apply the netplan configuration. If a non-active manager rolled back state,
+	// force the reload regardless of whether our config files changed.
+	if forceReload || netplanChanged || netplanVlanChanged || backendVlanChanged || backendVlanCleanedup {
 		if err := sn.generateConfigs(ctx); err != nil {
 			return fmt.Errorf("error applying netplan changes: %w", err)
 		}
 	}
 
 	// Reload the backend if networkd's configuration has changed.
-	if (netplanChanged || netplanVlanChanged || backendChanged || backendVlanChanged || backendVlanCleanedup) && sn.backendReload {
+	if (forceReload || netplanChanged || netplanVlanChanged || backendChanged || backendVlanChanged || backendVlanCleanedup) && sn.backendReload {
 		if err := sn.backend.Reload(ctx, len(nicConfigs)); err != nil {
 			return fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
 		}
@@ -417,14 +418,17 @@ func (sn *serviceNetplan) vlanDropinFile() string {
 	return filepath.Join(sn.netplanConfigDir, fPath)
 }
 
-// Rollback rolls back the network configuration.
-func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, active bool) error {
+// Rollback rolls back the network configuration. It returns true if any netplan
+// drop-in file managed by the guest agent was removed.
+func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, active bool) (bool, error) {
 	galog.Infof("Rolling back changes for netplan with reload [%t]", !active)
+
+	var rolledBack bool
 
 	// Rollback the backend's drop-in files.
 	for _, backend := range backends {
 		if err := backend.RollbackDropins(opts.FilteredNICConfigs(), backendDropinPrefix, active); err != nil {
-			return err
+			return rolledBack, err
 		}
 	}
 
@@ -432,21 +436,23 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 	// manager.
 	if !active && file.Exists(sn.ethernetDropinFile(), file.TypeFile) {
 		if err := os.Remove(sn.ethernetDropinFile()); err != nil {
-			return fmt.Errorf("error removing netplan dropin: %w", err)
+			return rolledBack, fmt.Errorf("error removing netplan dropin: %w", err)
 		}
+		rolledBack = true
 	}
 
 	// Remove the netplan vlan drop-in file.
 	vlanDropin := sn.vlanDropinFile()
 	if !active && file.Exists(vlanDropin, file.TypeFile) {
 		if err := os.Remove(vlanDropin); err != nil {
-			return fmt.Errorf("error removing netplan vlan dropin: %w", err)
+			return rolledBack, fmt.Errorf("error removing netplan vlan dropin: %w", err)
 		}
+		rolledBack = true
 	}
 
 	// Attempt to restore the default netplan configuration.
 	if err := sn.restoreDefaultConfig(ctx); err != nil {
-		return fmt.Errorf("error restoring default netplan configuration: %w", err)
+		return rolledBack, fmt.Errorf("error restoring default netplan configuration: %w", err)
 	}
 
 	if !active {
@@ -454,25 +460,25 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 		if _, err := execLookPath("netplan"); err != nil {
 			if errors.Is(err, exec.ErrNotFound) {
 				galog.Debugf("Netplan CLI not found, skipping reload.")
-				return nil
+				return rolledBack, nil
 			}
-			return fmt.Errorf("error looking up netplan path: %w", err)
+			return rolledBack, fmt.Errorf("error looking up netplan path: %w", err)
 		}
 		if sn.backend == nil {
 			// This could happen if backend is not found during setup or its Ubuntu
 			// 18.04 where we have exception.
 			galog.Debugf("No backend found, skipping netplan rollback.")
-			return nil
+			return rolledBack, nil
 		}
 		if err := sn.generateConfigs(ctx); err != nil {
-			return fmt.Errorf("error reloading netplan changes: %w", err)
+			return rolledBack, fmt.Errorf("error reloading netplan changes: %w", err)
 		}
 		if err := sn.backend.Reload(ctx, 0); err != nil {
-			return fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
+			return rolledBack, fmt.Errorf("error reloading backend(%q) configs: %v", sn.backend.ID(), err)
 		}
 	}
 
-	return nil
+	return rolledBack, nil
 }
 
 // restoreDefaultConfig restores the default netplan configuration.

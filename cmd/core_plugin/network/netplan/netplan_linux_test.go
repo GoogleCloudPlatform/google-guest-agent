@@ -606,7 +606,7 @@ func TestSetup(t *testing.T) {
 				}
 			}
 
-			err := svc.Setup(ctx, tc.opts)
+			err := svc.Setup(ctx, tc.opts, false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want error? %v", err, tc.wantErr)
 			}
@@ -641,7 +641,7 @@ func TestSetup(t *testing.T) {
 			if len(tc.opts.NICConfigs()) > 0 && len(tc.opts.NICConfigs()[0].VlanInterfaces) > 0 {
 				tc.opts.NICConfigs()[0].VlanInterfaces = nil
 
-				err := svc.Setup(ctx, tc.opts)
+				err := svc.Setup(ctx, tc.opts, false)
 				if (err == nil) == tc.wantErr {
 					t.Errorf("Setup() = %v, want error? %v", err, tc.wantErr)
 				}
@@ -790,7 +790,7 @@ func TestRollback(t *testing.T) {
 				}
 			}
 
-			err := svc.Rollback(ctx, tc.opts, false)
+			_, err := svc.Rollback(ctx, tc.opts, false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want error? %v", err, tc.wantErr)
 			}

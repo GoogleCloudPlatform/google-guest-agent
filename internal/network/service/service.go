@@ -44,13 +44,22 @@ type Handle struct {
 	IsManaging func(context.Context, *Options) (bool, error)
 
 	// Setup sets up the network interfaces.
-	Setup func(context.Context, *Options) error
+	//
+	// If forceReload is true, the network manager reloads and reapplies its
+	// configuration regardless of whether its own configuration files changed.
+	// This is used when another (non-active) network manager rolled back state
+	// (e.g. dhclient released a lease) and the active manager must reload to
+	// restore it.
+	Setup func(context.Context, *Options, bool) error
 
 	// Rollback rolls back the changes created in Setup.
 	//
 	// If active is false, the network configuration will be reloaded after the
 	// rollback is completed.
-	Rollback func(context.Context, *Options, bool) error
+	//
+	// It returns true if any state put in place by the guest agent was actually
+	// rolled back.
+	Rollback func(context.Context, *Options, bool) (bool, error)
 }
 
 // NewOptions creates a new Options struct.

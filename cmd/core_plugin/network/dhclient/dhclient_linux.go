@@ -120,7 +120,7 @@ func (ds *dhclientService) IsManaging(_ context.Context, _ *service.Options) (bo
 }
 
 // Setup sets up the network interfaces using dhclient.
-func (ds *dhclientService) Setup(ctx context.Context, opts *service.Options) error {
+func (ds *dhclientService) Setup(ctx context.Context, opts *service.Options, _ bool) error {
 	galog.Info("Setting up dhclient interfaces.")
 
 	// Setup regular ethernet interfaces.
@@ -389,15 +389,18 @@ func runConfiguredCommand(ctx context.Context, config *cfg.Sections) (bool, erro
 	return true, nil
 }
 
-// Rollback rolls back the changes created in Setup.
-func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, _ bool) error {
+// Rollback rolls back the changes created in Setup. It returns true if any
+// dhclient lease was released or any VLAN interface was removed.
+func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, _ bool) (bool, error) {
 	galog.Infof("Rolling back changes for dhclient.")
 
 	// Determine if we can even rollback dhclient processes.
 	if isInstalled, err := dhclientInstalled(); !isInstalled || err != nil {
 		galog.Debugf("No preconditions met for dhclient roll back, skipping.")
-		return nil
+		return false, nil
 	}
+
+	var rolledBack bool
 
 	// Release all the interface leases from dhclient.
 	for _, iface := range opts.FilteredNICConfigs() {
@@ -406,26 +409,28 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, 
 		// Release IPv4 leases.
 		ipv4Exists, err := dhclientProcessExists(iface, ipv4)
 		if err != nil {
-			return fmt.Errorf("failed to check if IPv4 process exists for %s: %w", ifaceName, err)
+			return rolledBack, fmt.Errorf("failed to check if IPv4 process exists for %s: %w", ifaceName, err)
 		}
 		// Only release IPv4 leases if the process exists.
 		if ipv4Exists {
 			if err := ds.runDhclient(ctx, ifaceName, ipv4, releaseLease); err != nil {
-				return fmt.Errorf("failed to release IPv4 lease for %s: %w", ifaceName, err)
+				return rolledBack, fmt.Errorf("failed to release IPv4 lease for %s: %w", ifaceName, err)
 			}
+			rolledBack = true
 		}
 
 		// Release IPv6 leases.
 		if iface.SupportsIPv6 {
 			ipv6Exists, err := dhclientProcessExists(iface, ipv6)
 			if err != nil {
-				return fmt.Errorf("failed to check if IPv6 process exists for %s: %w", ifaceName, err)
+				return rolledBack, fmt.Errorf("failed to check if IPv6 process exists for %s: %w", ifaceName, err)
 			}
 			// Only release IPv6 leases if the process exists.
 			if ipv6Exists {
 				if err := ds.runDhclient(ctx, ifaceName, ipv6, releaseLease); err != nil {
-					return fmt.Errorf("failed to release IPv6 lease for %s: %w", ifaceName, err)
+					return rolledBack, fmt.Errorf("failed to release IPv6 lease for %s: %w", ifaceName, err)
 				}
+				rolledBack = true
 			}
 		}
 
@@ -440,21 +445,22 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, 
 
 		ipv6DhclientProcess, err := dhclientProcessExists(iface, ipv6)
 		if err != nil {
-			return fmt.Errorf("failed to check if IPv6 dhclient process exists for %s: %w", ifaceName, err)
+			return rolledBack, fmt.Errorf("failed to check if IPv6 dhclient process exists for %s: %w", ifaceName, err)
 		}
 
 		ipv4DhclientProcess, err := dhclientProcessExists(iface, ipv4)
 		if err != nil {
-			return fmt.Errorf("failed to check if IPv4 dhclient process exists for %s: %w", ifaceName, err)
+			return rolledBack, fmt.Errorf("failed to check if IPv4 dhclient process exists for %s: %w", ifaceName, err)
 		}
 
 		if ipv6DhclientProcess || ipv4DhclientProcess {
 			if err := ds.removeVlanInterfaces(ctx, iface, nil); err != nil {
-				return fmt.Errorf("failed to remove vlan interfaces: %w", err)
+				return rolledBack, fmt.Errorf("failed to remove vlan interfaces: %w", err)
 			}
+			rolledBack = true
 		}
 	}
-	return nil
+	return rolledBack, nil
 }
 
 // dhclientInstalled returns true if the dhclient binary/executable is
