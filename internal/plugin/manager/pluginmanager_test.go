@@ -397,7 +397,10 @@ func TestInitPluginManager(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(func() { pm.stopMonitoring(tc.plugin) })
+			t.Cleanup(func() {
+				pm.stopMonitoring(tc.plugin)
+				pm.stopMetricsMonitoring(tc.plugin)
+			})
 			got, found := pm.plugins[tc.plugin.Name]
 			if !found {
 				t.Fatalf("InitPluginManager(ctx) failed to load plugin %q", tc.plugin.Name)
@@ -405,10 +408,26 @@ func TestInitPluginManager(t *testing.T) {
 			if got.State() != tc.plugin.State() {
 				t.Errorf("InitPluginManager(ctx) = state %q, want %q", got.State(), tc.plugin.State())
 			}
-			pm.pluginMonitorMu.Lock()
-			defer pm.pluginMonitorMu.Unlock()
-			if _, ok := pm.pluginMonitors[tc.plugin.FullName()]; ok != tc.wantMonitor {
-				t.Errorf("InitPluginManager(ctx) = added plugin monitor(%s): %t, want: %t", tc.plugin.FullName(), ok, tc.wantMonitor)
+			if tc.wantMonitor {
+				c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
+				err := retry.Run(ctx, c, func() error {
+					pm.pluginMonitorMu.Lock()
+					_, ok1 := pm.pluginMonitors[tc.plugin.FullName()]
+					pm.pluginMonitorMu.Unlock()
+					if !ok1 {
+						return fmt.Errorf("plugin monitor not found for %s", tc.plugin.FullName())
+					}
+					pm.pluginMetricsMu.Lock()
+					_, ok2 := pm.pluginMetricsMonitors[tc.plugin.FullName()]
+					pm.pluginMetricsMu.Unlock()
+					if !ok2 {
+						return fmt.Errorf("plugin metrics monitor not found for %s", tc.plugin.FullName())
+					}
+					return nil
+				})
+				if err != nil {
+					t.Errorf("InitPluginManager(ctx) error: %v", err)
+				}
 			}
 		})
 	}
@@ -810,10 +829,16 @@ func TestInstallPlugin(t *testing.T) {
 			c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
 			err = retry.Run(ctx, c, func() error {
 				pm.pluginMonitorMu.Lock()
-				defer pm.pluginMonitorMu.Unlock()
-				_, ok := pm.pluginMonitors[want.FullName()]
-				if !ok {
+				_, ok1 := pm.pluginMonitors[want.FullName()]
+				pm.pluginMonitorMu.Unlock()
+				if !ok1 {
 					return fmt.Errorf("installPlugin(ctx, %+v) did not create monitor for plugin %q", req, req.Plugin.Name)
+				}
+				pm.pluginMetricsMu.Lock()
+				_, ok2 := pm.pluginMetricsMonitors[want.FullName()]
+				pm.pluginMetricsMu.Unlock()
+				if !ok2 {
+					return fmt.Errorf("installPlugin(ctx, %+v) did not create metrics monitor for plugin %q", req, req.Plugin.Name)
 				}
 				return nil
 			})
@@ -924,6 +949,24 @@ func TestUpgradePlugin(t *testing.T) {
 
 	if got := plugin.pendingStatus(); got != nil {
 		t.Errorf("installPlugin(ctx, %+v) = pending plugin status %v, want nil on old revision %s", req, got, plugin.FullName())
+	}
+	c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
+	if err := retry.Run(ctx, c, func() error {
+		pm.pluginMonitorMu.Lock()
+		_, ok1 := pm.pluginMonitors[p.FullName()]
+		pm.pluginMonitorMu.Unlock()
+		if !ok1 {
+			return fmt.Errorf("installPlugin(ctx, %+v) did not create monitor for plugin %q", req, req.Plugin.Name)
+		}
+		pm.pluginMetricsMu.Lock()
+		_, ok2 := pm.pluginMetricsMonitors[p.FullName()]
+		pm.pluginMetricsMu.Unlock()
+		if !ok2 {
+			return fmt.Errorf("installPlugin(ctx, %+v) did not create metrics monitor for plugin %q", req, req.Plugin.Name)
+		}
+		return nil
+	}); err != nil {
+		t.Errorf("%v", err)
 	}
 }
 
@@ -1352,6 +1395,10 @@ func validatePluginRemoved(t *testing.T, plugin *Plugin, pm *PluginManager, ctc 
 
 	if _, ok := pm.pluginMonitors[plugin.FullName()]; ok {
 		t.Errorf("Remove Plugin for %s did not remove plugin monitor from map", plugin.FullName())
+	}
+
+	if _, ok := pm.pluginMetricsMonitors[plugin.FullName()]; ok {
+		t.Errorf("Remove Plugin for %s did not remove plugin metrics monitor from map", plugin.FullName())
 	}
 
 	if ctc.seenName != plugin.FullName() {
@@ -1909,10 +1956,16 @@ func TestStartLocalPlugin(t *testing.T) {
 			c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
 			err = retry.Run(ctx, c, func() error {
 				pm.pluginMonitorMu.Lock()
-				defer pm.pluginMonitorMu.Unlock()
-				_, ok := pm.pluginMonitors[want.FullName()]
-				if !ok {
+				_, ok1 := pm.pluginMonitors[want.FullName()]
+				pm.pluginMonitorMu.Unlock()
+				if !ok1 {
 					return fmt.Errorf("StartLocalPlugins(ctx, %+v) did not create monitor for plugin %q", installations, req.Plugin.Name)
+				}
+				pm.pluginMetricsMu.Lock()
+				_, ok2 := pm.pluginMetricsMonitors[want.FullName()]
+				pm.pluginMetricsMu.Unlock()
+				if !ok2 {
+					return fmt.Errorf("StartLocalPlugins(ctx, %+v) did not create metrics monitor for plugin %q", installations, req.Plugin.Name)
 				}
 				return nil
 			})
