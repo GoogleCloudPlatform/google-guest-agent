@@ -17,6 +17,7 @@ package manager
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/gob"
 	"encoding/hex"
 	"fmt"
 	"maps"
@@ -24,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"testing"
@@ -266,6 +268,375 @@ func TestStore(t *testing.T) {
 	}
 }
 
+func TestLoadCorruptStateFile(t *testing.T) {
+	t.Run("single_corrupt_file", func(t *testing.T) {
+		stateDir := t.TempDir()
+		setBaseStateDir(t, stateDir)
+		infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+		if err := os.MkdirAll(infoDir, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+		}
+
+		// Store one valid plugin state file.
+		validPlugin := &Plugin{
+			Name:     "validPlugin",
+			Revision: "1",
+			Address:  "test-address",
+			Protocol: "tcp",
+			Manifest: &Manifest{
+				StartAttempts:          3,
+				PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION,
+			},
+			RuntimeInfo: &RuntimeInfo{Pid: 123},
+		}
+		if err := validPlugin.Store(); err != nil {
+			t.Fatalf("plugin.Store() failed unexpectedly for [%+v] with error: %v", validPlugin, err)
+		}
+
+		// Write a corrupt state file that cannot be gob-decoded.
+		corruptFile := filepath.Join(infoDir, "corruptPlugin.gob")
+		if err := os.WriteFile(corruptFile, []byte("this is not a valid gob file"), 0644); err != nil {
+			t.Fatalf("os.WriteFile(%s) failed unexpectedly with error: %v", corruptFile, err)
+		}
+
+		// A corrupt state file must not fail the entire load.
+		got, err := load(infoDir)
+		if err != nil {
+			t.Fatalf("load(%s) failed unexpectedly with error: %v", infoDir, err)
+		}
+
+		// The valid plugin should still be loaded.
+		if _, ok := got["validPlugin"]; !ok {
+			t.Errorf("load(%s) did not return valid plugin, got: %v", infoDir, got)
+		}
+		if len(got) != 1 {
+			t.Errorf("load(%s) returned %d plugins, want 1", infoDir, len(got))
+		}
+
+		// The corrupt file should be quarantined (renamed) and no longer present.
+		if file.Exists(corruptFile, file.TypeFile) {
+			t.Errorf("load(%s) did not quarantine corrupt state file %q", infoDir, corruptFile)
+		}
+		quarantined := corruptFile + corruptStateFileSuffix
+		if !file.Exists(quarantined, file.TypeFile) {
+			t.Errorf("load(%s) did not create quarantined file %q", infoDir, quarantined)
+		}
+
+		// A subsequent load should skip the quarantined file without recreating it.
+		got, err = load(infoDir)
+		if err != nil {
+			t.Fatalf("second load(%s) failed unexpectedly with error: %v", infoDir, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("second load(%s) returned %d plugins, want 1", infoDir, len(got))
+		}
+	})
+
+	t.Run("multiple_corrupt_and_valid_files", func(t *testing.T) {
+		stateDir := t.TempDir()
+		setBaseStateDir(t, stateDir)
+		infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+		if err := os.MkdirAll(infoDir, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+		}
+
+		for _, name := range []string{"valid1", "valid2", "valid3"} {
+			p := &Plugin{
+				Name:        name,
+				Revision:    "1",
+				Address:     "addr-" + name,
+				Protocol:    "tcp",
+				Manifest:    &Manifest{PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION},
+				RuntimeInfo: &RuntimeInfo{Pid: 100},
+			}
+			if err := p.Store(); err != nil {
+				t.Fatalf("p.Store() failed for %s: %v", name, err)
+			}
+		}
+
+		corruptFiles := []string{
+			filepath.Join(infoDir, "corrupt1.gob"),
+			filepath.Join(infoDir, "corrupt2.gob"),
+			filepath.Join(infoDir, "corrupt3.gob"),
+		}
+		for _, cf := range corruptFiles {
+			if err := os.WriteFile(cf, []byte("bad data"), 0644); err != nil {
+				t.Fatalf("os.WriteFile(%s) failed: %v", cf, err)
+			}
+		}
+
+		got, err := load(infoDir)
+		if err != nil {
+			t.Fatalf("load(%s) failed unexpectedly with error: %v", infoDir, err)
+		}
+		if len(got) != 3 {
+			t.Errorf("load(%s) returned %d plugins, want 3", infoDir, len(got))
+		}
+		for _, name := range []string{"valid1", "valid2", "valid3"} {
+			if _, ok := got[name]; !ok {
+				t.Errorf("load(%s) missing expected valid plugin %q", infoDir, name)
+			}
+		}
+		for _, cf := range corruptFiles {
+			if file.Exists(cf, file.TypeFile) {
+				t.Errorf("corrupt file %s still exists", cf)
+			}
+			if !file.Exists(cf+corruptStateFileSuffix, file.TypeFile) {
+				t.Errorf("quarantined file %s does not exist", cf+corruptStateFileSuffix)
+			}
+		}
+
+		// Subsequent load ignores all quarantined files.
+		got, err = load(infoDir)
+		if err != nil {
+			t.Fatalf("second load(%s) failed: %v", infoDir, err)
+		}
+		if len(got) != 3 {
+			t.Errorf("second load(%s) returned %d plugins, want 3", infoDir, len(got))
+		}
+	})
+
+	t.Run("quarantine_collision_existing_corrupt_file", func(t *testing.T) {
+		stateDir := t.TempDir()
+		setBaseStateDir(t, stateDir)
+		infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+		if err := os.MkdirAll(infoDir, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+		}
+
+		corruptFile := filepath.Join(infoDir, "corruptPlugin.gob")
+		quarantined := corruptFile + corruptStateFileSuffix
+		// Pre-create the quarantined file on disk to simulate collision.
+		if err := os.WriteFile(quarantined, []byte("old corrupt state"), 0644); err != nil {
+			t.Fatalf("os.WriteFile(%s) failed: %v", quarantined, err)
+		}
+		if err := os.WriteFile(corruptFile, []byte("new corrupt state"), 0644); err != nil {
+			t.Fatalf("os.WriteFile(%s) failed: %v", corruptFile, err)
+		}
+
+		got, err := load(infoDir)
+		if err != nil {
+			t.Fatalf("load(%s) failed with existing quarantined file: %v", infoDir, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("load(%s) = %v, want empty map", infoDir, got)
+		}
+		if file.Exists(corruptFile, file.TypeFile) {
+			t.Errorf("corrupt file %s still exists after collision quarantine", corruptFile)
+		}
+		if !file.Exists(quarantined, file.TypeFile) {
+			t.Errorf("quarantined file %s does not exist", quarantined)
+		}
+	})
+
+	t.Run("quarantine_rename_failure_fallback_removal", func(t *testing.T) {
+		stateDir := t.TempDir()
+		setBaseStateDir(t, stateDir)
+		infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+		if err := os.MkdirAll(infoDir, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+		}
+
+		corruptFile := filepath.Join(infoDir, "corruptPlugin.gob")
+		quarantined := corruptFile + corruptStateFileSuffix
+		// Create a non-empty directory at the quarantined path so os.Rename fails.
+		if err := os.MkdirAll(quarantined, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed: %v", quarantined, err)
+		}
+		if err := os.WriteFile(filepath.Join(quarantined, "keep.txt"), []byte("non-empty"), 0644); err != nil {
+			t.Fatalf("os.WriteFile failed: %v", err)
+		}
+		if err := os.WriteFile(corruptFile, []byte("bad gob"), 0644); err != nil {
+			t.Fatalf("os.WriteFile(%s) failed: %v", corruptFile, err)
+		}
+
+		got, err := load(infoDir)
+		if err != nil {
+			t.Fatalf("load(%s) failed when rename fails: %v", infoDir, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("load(%s) = %v, want empty map", infoDir, got)
+		}
+		// Fallback removal should have deleted corruptFile.
+		if file.Exists(corruptFile, file.TypeFile) {
+			t.Errorf("corrupt file %s was not deleted by fallback removal", corruptFile)
+		}
+	})
+
+	t.Run("missing_critical_fields", func(t *testing.T) {
+		stateDir := t.TempDir()
+		setBaseStateDir(t, stateDir)
+		infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+		if err := os.MkdirAll(infoDir, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+		}
+
+		// Store one valid plugin.
+		valid := &Plugin{
+			Name:        "validPlugin",
+			Revision:    "1",
+			Address:     "addr",
+			Protocol:    "tcp",
+			Manifest:    &Manifest{PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION},
+			RuntimeInfo: &RuntimeInfo{Pid: 100},
+		}
+		if err := valid.Store(); err != nil {
+			t.Fatalf("valid.Store() failed: %v", err)
+		}
+
+		// Create state files that encode successfully but have missing/nil critical fields.
+		testCases := []struct {
+			filename string
+			plugin   *Plugin
+		}{
+			{
+				filename: "nil_manifest.gob",
+				plugin:   &Plugin{Name: "nilManifest", RuntimeInfo: &RuntimeInfo{Pid: 101}},
+			},
+			{
+				filename: "nil_runtime_info.gob",
+				plugin:   &Plugin{Name: "nilRuntime", Manifest: &Manifest{}},
+			},
+			{
+				filename: "empty_name.gob",
+				plugin:   &Plugin{Name: "", Manifest: &Manifest{}, RuntimeInfo: &RuntimeInfo{Pid: 102}},
+			},
+		}
+
+		for _, tc := range testCases {
+			fPath := filepath.Join(infoDir, tc.filename)
+			fh, err := os.Create(fPath)
+			if err != nil {
+				t.Fatalf("os.Create(%s) failed: %v", fPath, err)
+			}
+			if err := gob.NewEncoder(fh).Encode(tc.plugin); err != nil {
+				if closeErr := fh.Close(); closeErr != nil {
+					t.Errorf("fh.Close() failed for %s: %v", tc.filename, closeErr)
+				}
+				t.Fatalf("gob.Encode failed for %s: %v", tc.filename, err)
+			}
+			if err := fh.Close(); err != nil {
+				t.Fatalf("fh.Close() failed for %s: %v", tc.filename, err)
+			}
+		}
+
+		got, err := load(infoDir)
+		if err != nil {
+			t.Fatalf("load(%s) failed unexpectedly: %v", infoDir, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("load(%s) returned %d plugins, want 1", infoDir, len(got))
+		}
+		if _, ok := got["validPlugin"]; !ok {
+			t.Errorf("load(%s) did not return validPlugin", infoDir)
+		}
+
+		// All incomplete state files should be quarantined.
+		for _, tc := range testCases {
+			orig := filepath.Join(infoDir, tc.filename)
+			if file.Exists(orig, file.TypeFile) {
+				t.Errorf("state file %s with missing fields was not quarantined", orig)
+			}
+			if !file.Exists(orig+corruptStateFileSuffix, file.TypeFile) {
+				t.Errorf("quarantined file %s does not exist", orig+corruptStateFileSuffix)
+			}
+		}
+	})
+
+	t.Run("state_dir_read_error", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("skipping directory permission test on windows")
+		}
+		unreadableDir := t.TempDir()
+		if err := os.Chmod(unreadableDir, 0000); err != nil {
+			t.Fatalf("os.Chmod failed: %v", err)
+		}
+		t.Cleanup(func() { os.Chmod(unreadableDir, 0755) })
+		if _, err := load(unreadableDir); err == nil {
+			t.Errorf("load(%s) succeeded unexpectedly, want error", unreadableDir)
+		}
+	})
+
+	t.Run("unreadable_state_file", func(t *testing.T) {
+		stateDir := t.TempDir()
+		setBaseStateDir(t, stateDir)
+		infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+		if err := os.MkdirAll(infoDir, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+		}
+		valid := &Plugin{
+			Name:        "validPlugin",
+			Revision:    "1",
+			Address:     "addr",
+			Protocol:    "tcp",
+			Manifest:    &Manifest{PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION},
+			RuntimeInfo: &RuntimeInfo{Pid: 100},
+		}
+		if err := valid.Store(); err != nil {
+			t.Fatalf("valid.Store() failed: %v", err)
+		}
+		unreadableFile := filepath.Join(infoDir, "unreadable.gob")
+		if err := os.WriteFile(unreadableFile, []byte("data"), 0000); err != nil {
+			t.Fatalf("os.WriteFile failed: %v", err)
+		}
+		if err := os.Chmod(unreadableFile, 0000); err != nil {
+			t.Fatalf("os.Chmod failed: %v", err)
+		}
+		got, err := load(infoDir)
+		if err != nil {
+			t.Fatalf("load(%s) failed: %v", infoDir, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("load(%s) returned %d plugins, want 1", infoDir, len(got))
+		}
+		if _, ok := got["validPlugin"]; !ok {
+			t.Errorf("load(%s) missing validPlugin", infoDir)
+		}
+	})
+
+	t.Run("dir_with_gob_extension", func(t *testing.T) {
+		stateDir := t.TempDir()
+		setBaseStateDir(t, stateDir)
+		infoDir := filepath.Join(stateDir, agentStateDir, pluginInfoDir)
+		if err := os.MkdirAll(infoDir, 0755); err != nil {
+			t.Fatalf("os.MkdirAll(%s) failed to create test directories with error: %v", infoDir, err)
+		}
+		valid := &Plugin{
+			Name:        "validPlugin",
+			Revision:    "1",
+			Address:     "addr",
+			Protocol:    "tcp",
+			Manifest:    &Manifest{PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION},
+			RuntimeInfo: &RuntimeInfo{Pid: 100},
+		}
+		if err := valid.Store(); err != nil {
+			t.Fatalf("valid.Store() failed: %v", err)
+		}
+
+		// Create a directory with .gob extension.
+		gobDir := filepath.Join(infoDir, "directory.gob")
+		if err := os.Mkdir(gobDir, 0755); err != nil {
+			t.Fatalf("os.Mkdir(%s) failed: %v", gobDir, err)
+		}
+
+		got, err := load(infoDir)
+		if err != nil {
+			t.Fatalf("load(%s) failed unexpectedly: %v", infoDir, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("load(%s) returned %d plugins, want 1", infoDir, len(got))
+		}
+		if _, ok := got["validPlugin"]; !ok {
+			t.Errorf("load(%s) missing validPlugin", infoDir)
+		}
+	})
+
+	t.Run("quarantine_rename_and_remove_failure", func(t *testing.T) {
+		nonExistentFile := filepath.Join(t.TempDir(), "non_existent.gob")
+		quarantineCorruptStateFile(nonExistentFile)
+	})
+}
+
 func TestConnectOrReLaunch(t *testing.T) {
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	setConnectionsDir(t, "")
@@ -397,7 +768,10 @@ func TestInitPluginManager(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(func() { pm.stopMonitoring(tc.plugin) })
+			t.Cleanup(func() {
+				pm.stopMonitoring(tc.plugin)
+				pm.stopMetricsMonitoring(tc.plugin)
+			})
 			got, found := pm.plugins[tc.plugin.Name]
 			if !found {
 				t.Fatalf("InitPluginManager(ctx) failed to load plugin %q", tc.plugin.Name)
@@ -405,10 +779,26 @@ func TestInitPluginManager(t *testing.T) {
 			if got.State() != tc.plugin.State() {
 				t.Errorf("InitPluginManager(ctx) = state %q, want %q", got.State(), tc.plugin.State())
 			}
-			pm.pluginMonitorMu.Lock()
-			defer pm.pluginMonitorMu.Unlock()
-			if _, ok := pm.pluginMonitors[tc.plugin.FullName()]; ok != tc.wantMonitor {
-				t.Errorf("InitPluginManager(ctx) = added plugin monitor(%s): %t, want: %t", tc.plugin.FullName(), ok, tc.wantMonitor)
+			if tc.wantMonitor {
+				c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
+				err := retry.Run(ctx, c, func() error {
+					pm.pluginMonitorMu.Lock()
+					_, ok1 := pm.pluginMonitors[tc.plugin.FullName()]
+					pm.pluginMonitorMu.Unlock()
+					if !ok1 {
+						return fmt.Errorf("plugin monitor not found for %s", tc.plugin.FullName())
+					}
+					pm.pluginMetricsMu.Lock()
+					_, ok2 := pm.pluginMetricsMonitors[tc.plugin.FullName()]
+					pm.pluginMetricsMu.Unlock()
+					if !ok2 {
+						return fmt.Errorf("plugin metrics monitor not found for %s", tc.plugin.FullName())
+					}
+					return nil
+				})
+				if err != nil {
+					t.Errorf("InitPluginManager(ctx) error: %v", err)
+				}
 			}
 		})
 	}
@@ -810,10 +1200,16 @@ func TestInstallPlugin(t *testing.T) {
 			c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
 			err = retry.Run(ctx, c, func() error {
 				pm.pluginMonitorMu.Lock()
-				defer pm.pluginMonitorMu.Unlock()
-				_, ok := pm.pluginMonitors[want.FullName()]
-				if !ok {
+				_, ok1 := pm.pluginMonitors[want.FullName()]
+				pm.pluginMonitorMu.Unlock()
+				if !ok1 {
 					return fmt.Errorf("installPlugin(ctx, %+v) did not create monitor for plugin %q", req, req.Plugin.Name)
+				}
+				pm.pluginMetricsMu.Lock()
+				_, ok2 := pm.pluginMetricsMonitors[want.FullName()]
+				pm.pluginMetricsMu.Unlock()
+				if !ok2 {
+					return fmt.Errorf("installPlugin(ctx, %+v) did not create metrics monitor for plugin %q", req, req.Plugin.Name)
 				}
 				return nil
 			})
@@ -924,6 +1320,24 @@ func TestUpgradePlugin(t *testing.T) {
 
 	if got := plugin.pendingStatus(); got != nil {
 		t.Errorf("installPlugin(ctx, %+v) = pending plugin status %v, want nil on old revision %s", req, got, plugin.FullName())
+	}
+	c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
+	if err := retry.Run(ctx, c, func() error {
+		pm.pluginMonitorMu.Lock()
+		_, ok1 := pm.pluginMonitors[p.FullName()]
+		pm.pluginMonitorMu.Unlock()
+		if !ok1 {
+			return fmt.Errorf("installPlugin(ctx, %+v) did not create monitor for plugin %q", req, req.Plugin.Name)
+		}
+		pm.pluginMetricsMu.Lock()
+		_, ok2 := pm.pluginMetricsMonitors[p.FullName()]
+		pm.pluginMetricsMu.Unlock()
+		if !ok2 {
+			return fmt.Errorf("installPlugin(ctx, %+v) did not create metrics monitor for plugin %q", req, req.Plugin.Name)
+		}
+		return nil
+	}); err != nil {
+		t.Errorf("%v", err)
 	}
 }
 
@@ -1352,6 +1766,10 @@ func validatePluginRemoved(t *testing.T, plugin *Plugin, pm *PluginManager, ctc 
 
 	if _, ok := pm.pluginMonitors[plugin.FullName()]; ok {
 		t.Errorf("Remove Plugin for %s did not remove plugin monitor from map", plugin.FullName())
+	}
+
+	if _, ok := pm.pluginMetricsMonitors[plugin.FullName()]; ok {
+		t.Errorf("Remove Plugin for %s did not remove plugin metrics monitor from map", plugin.FullName())
 	}
 
 	if ctc.seenName != plugin.FullName() {
@@ -1909,10 +2327,16 @@ func TestStartLocalPlugin(t *testing.T) {
 			c := retry.Policy{MaxAttempts: 3, Jitter: time.Second * 2, BackoffFactor: 1}
 			err = retry.Run(ctx, c, func() error {
 				pm.pluginMonitorMu.Lock()
-				defer pm.pluginMonitorMu.Unlock()
-				_, ok := pm.pluginMonitors[want.FullName()]
-				if !ok {
+				_, ok1 := pm.pluginMonitors[want.FullName()]
+				pm.pluginMonitorMu.Unlock()
+				if !ok1 {
 					return fmt.Errorf("StartLocalPlugins(ctx, %+v) did not create monitor for plugin %q", installations, req.Plugin.Name)
+				}
+				pm.pluginMetricsMu.Lock()
+				_, ok2 := pm.pluginMetricsMonitors[want.FullName()]
+				pm.pluginMetricsMu.Unlock()
+				if !ok2 {
+					return fmt.Errorf("StartLocalPlugins(ctx, %+v) did not create metrics monitor for plugin %q", installations, req.Plugin.Name)
 				}
 				return nil
 			})

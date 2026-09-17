@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,6 +47,9 @@ const (
 	pluginInfoDir = "plugin_info"
 	// manifestFile is the name of the file containing the plugin manifest.
 	manifestFile = "manifest.binpb"
+	// corruptStateFileSuffix is appended to plugin state files that could not be
+	// decoded so they are quarantined and skipped on subsequent loads.
+	corruptStateFileSuffix = ".corrupt"
 	// healthCheckFrequency is the frequency at which plugin health check is
 	// executed.
 	healthCheckFrequency = 10 * time.Second
@@ -133,8 +137,8 @@ func Instance() *PluginManager {
 	return pluginManager
 }
 
-func init() {
-	pluginManager = &PluginManager{
+func newPluginManager() *PluginManager {
+	return &PluginManager{
 		protocol:                 tcpProtocol,
 		pluginMonitors:           make(map[string]string),
 		pluginMetricsMonitors:    make(map[string]string),
@@ -142,6 +146,10 @@ func init() {
 		inProgressPluginRequests: make(map[string]bool),
 		requestCount:             make(map[acpb.ConfigurePluginStates_Action]map[bool]int),
 	}
+}
+
+func init() {
+	pluginManager = newPluginManager()
 }
 
 func (m *PluginManager) setInstanceID(id string) {
@@ -163,16 +171,22 @@ func (m *PluginManager) currentInstanceID() string {
 // required. InitAdHocPluginManager skips some initialization steps like
 // scheduling plugin monitors that are not required for ad-hoc requests.
 func InitAdHocPluginManager(ctx context.Context, instanceID string) (*PluginManager, error) {
+	return pluginManager.initAdHoc(ctx, instanceID)
+}
+
+func (m *PluginManager) initAdHoc(ctx context.Context, instanceID string) (*PluginManager, error) { // NOGOUNUSED
 	galog.Infof("Initializing ad-hoc plugin manager for instance %q", instanceID)
 
-	pluginManager.setInstanceID(instanceID)
+	m.setInstanceID(instanceID)
 	plugins, err := load(agentPluginState())
 	if err != nil {
 		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
 	}
-	pluginManager.plugins = plugins
+	m.mu.Lock()
+	m.plugins = plugins
+	m.mu.Unlock()
 
-	return pluginManager, nil
+	return m, nil
 }
 
 // StopPlugin stops the plugin. This is used for ad-hoc requests that does not
@@ -199,15 +213,19 @@ func (m *PluginManager) StopPlugin(ctx context.Context, name string) error {
 // ACS is disabled. Plugin Manager will be initialized during early Guest Agent
 // startup to configure the core plugins.
 func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, error) {
+	return pluginManager.init(ctx, instanceID)
+}
+
+func (m *PluginManager) init(ctx context.Context, instanceID string) (*PluginManager, error) {
 	version := cfg.Retrieve().Core.Version
 	galog.Infof("Initializing plugin manager for instance %q, agent version: %q", instanceID, version)
-	pluginManager.setInstanceID(instanceID)
+	m.setInstanceID(instanceID)
 
 	// Cleanup old plugin state in a separate goroutine. This operation is not
 	// critical for plugin manager initialization and should not block it.
 	stateParentDir := filepath.Dir(baseState())
 	go func() {
-		if err := pluginManager.cleanupOldState(ctx, stateParentDir); err != nil {
+		if err := m.cleanupOldState(ctx, stateParentDir); err != nil {
 			galog.Errorf("Failed to cleanup old plugin state: %v", err)
 		}
 	}()
@@ -218,30 +236,32 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
 	}
 
-	pluginManager.plugins = plugins
+	m.mu.Lock()
+	m.plugins = plugins
+	m.mu.Unlock()
 
 	// Subscribe to cleanup event. This needs to happen after plugin manager is
 	// initialized, or we may accidentally cleanup plugins that shouldn't be removed.
-	scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(pluginManager)}, false)
+	scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(m)}, false)
 
 	if err := RegisterCmdHandler(ctx); err != nil {
 		return nil, fmt.Errorf("failed to register plugin command handler: %w", err)
 	}
 
 	wg := sync.WaitGroup{}
-	pluginManager.pendingPluginRevisionsMu.Lock()
+	m.pendingPluginRevisionsMu.Lock()
 
 	for _, p := range plugins {
-		pluginManager.inProgressPluginRequests[p.Name] = true
+		m.inProgressPluginRequests[p.Name] = true
 		wg.Add(1)
 
 		go func(p *Plugin) {
 			// Regardless of the outcome, we should remove the plugin from the pending
 			// list as request is no longer in process for this plugin.
 			defer func() {
-				pluginManager.pendingPluginRevisionsMu.Lock()
-				defer pluginManager.pendingPluginRevisionsMu.Unlock()
-				delete(pluginManager.inProgressPluginRequests, p.Name)
+				m.pendingPluginRevisionsMu.Lock()
+				defer m.pendingPluginRevisionsMu.Unlock()
+				delete(m.inProgressPluginRequests, p.Name)
 				wg.Done()
 			}()
 
@@ -259,31 +279,31 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 			if err := connectOrReLaunch(ctx, p); err != nil {
 				galog.Errorf("Failed to connect or relaunch plugin %q: %v", p.FullName(), err)
 			} else {
-				pluginManager.startPluginSchedulers(ctx, p)
+				m.startPluginSchedulers(ctx, p)
 			}
 		}(p)
 	}
-	pluginManager.IsInitialized.Store(true)
-	pluginManager.pendingPluginRevisionsMu.Unlock()
+	m.IsInitialized.Store(true)
+	m.pendingPluginRevisionsMu.Unlock()
 	wg.Wait()
 
 	// TCP is always supported, so if the forced connection type is TCP, we can
 	// return early.
 	connType := cfg.Retrieve().Plugin.ConnectionType
 	if connType == tcpProtocol {
-		pluginManager.protocol = tcpProtocol
-		return pluginManager, nil
+		m.protocol = tcpProtocol
+		return m, nil
 	}
 
 	// If the connection type is not TCP, check if UDS is supported and set the
 	// protocol to UDS if it is. Otherwise, fallback to TCP.
 	if isUDSSupported() {
-		pluginManager.protocol = udsProtocol
+		m.protocol = udsProtocol
 	} else {
 		galog.Debugf("UDS is not supported, fallback to TCP")
-		pluginManager.protocol = tcpProtocol
+		m.protocol = tcpProtocol
 	}
-	return pluginManager, nil
+	return m, nil
 }
 
 // RemoveAllDynamicPlugins filters out core plugins and triggers plugin manager
@@ -953,17 +973,45 @@ func load(stateDir string) (map[string]*Plugin, error) {
 			galog.Debugf("Found unknown directory %q in %q, ignoring", f.Name(), stateDir)
 			continue
 		}
+
+		// Skip files that were previously quarantined because they could not be
+		// decoded. They are kept around only for debugging and will be rebuilt
+		// from their source of truth (local manifest or ACS config).
+		if strings.HasSuffix(f.Name(), corruptStateFileSuffix) {
+			galog.Debugf("Skipping quarantined plugin state file %q", f.Name())
+			continue
+		}
+
 		file := filepath.Join(stateDir, f.Name())
 		fh, err := os.Open(file)
 		if err != nil {
-			return nil, fmt.Errorf("unabled to read plugin state from %s: %w", file, err)
+			// A single unreadable state file should not prevent the remaining
+			// plugins from loading, just log and continue.
+			galog.Errorf("Unable to read plugin state from %q, skipping: %v", file, err)
+			continue
 		}
-		defer fh.Close()
 
 		plugin := &Plugin{}
-		if err := gob.NewDecoder(fh).Decode(plugin); err != nil {
-			return nil, fmt.Errorf("unable to decode plugin state file %s: %w", f, err)
+		err = gob.NewDecoder(fh).Decode(plugin)
+		if closeErr := fh.Close(); closeErr != nil {
+			galog.Errorf("Failed to close plugin state file %q: %v", file, closeErr)
 		}
+		if err != nil {
+			// A corrupted state file should not prevent the remaining plugins from
+			// loading. Quarantine the file so it can be inspected later and rebuilt
+			// from its source of truth (local manifest or ACS config) on the next
+			// launch/config apply.
+			galog.Errorf("Unable to decode plugin state file %q, quarantining and skipping: %v", file, err)
+			quarantineCorruptStateFile(file)
+			continue
+		}
+
+		if plugin.RuntimeInfo == nil || plugin.Manifest == nil || plugin.Name == "" {
+			galog.Errorf("Plugin state file %q decoded but missing critical fields (Name, RuntimeInfo, or Manifest), quarantining and skipping", file)
+			quarantineCorruptStateFile(file)
+			continue
+		}
+
 		plugin.RuntimeInfo.metrics = boundedlist.New[Metric](plugin.Manifest.MaxMetricDatapoints)
 		plugins[plugin.Name] = plugin
 
@@ -978,6 +1026,22 @@ func load(stateDir string) (map[string]*Plugin, error) {
 		}
 	}
 	return plugins, nil
+}
+
+// quarantineCorruptStateFile renames a plugin state file that could not be
+// decoded so it is skipped on subsequent loads while remaining available for
+// debugging. If the rename fails, the file is removed as a last resort to
+// avoid it repeatedly failing to decode on every startup.
+func quarantineCorruptStateFile(file string) {
+	quarantined := file + corruptStateFileSuffix
+	if err := os.Rename(file, quarantined); err != nil {
+		galog.Warnf("Failed to quarantine corrupt plugin state file %q, removing it: %v", file, err)
+		if err := os.Remove(file); err != nil {
+			galog.Errorf("Failed to remove corrupt plugin state file %q: %v", file, err)
+		}
+		return
+	}
+	galog.Infof("Quarantined corrupt plugin state file %q as %q", file, quarantined)
 }
 
 // sendEvent sends a plugin event on ACS channel.
