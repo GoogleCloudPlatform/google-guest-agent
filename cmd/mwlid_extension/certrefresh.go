@@ -101,13 +101,15 @@ func (e *Extension) GetStatus(ctx context.Context, msg *pluginpb.GetStatusReques
 	e.statusMutex.RLock()
 	defer e.statusMutex.RUnlock()
 
+	// Returning a non-nil error will cause the guest agent to attempt to restart
+	// the plugin process.
 	if e.ctx != nil {
 		if err := e.ctx.Err(); err != nil {
 			return &pluginpb.Status{Code: int32(unhealthy), Results: []string{err.Error()}}, err
 		}
 	}
 	if e.lastError != nil {
-		return &pluginpb.Status{Code: int32(unhealthy), Results: []string{e.lastError.Error()}}, e.lastError
+		return &pluginpb.Status{Code: int32(unhealthy), Results: []string{e.lastError.Error()}}, nil
 	}
 
 	return &pluginpb.Status{Code: int32(healthy)}, nil

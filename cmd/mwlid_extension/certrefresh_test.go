@@ -25,9 +25,73 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	pluginpb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestGetStatus(t *testing.T) {
+	ctxCancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name        string
+		lastError   error
+		context     context.Context
+		wantCode    int32
+		wantError   bool
+		wantResults []string
+	}{
+		{
+			name:        "healthy",
+			context:     context.Background(),
+			wantCode:    healthy,
+			wantResults: nil,
+		},
+		{
+			name:        "unhealthy",
+			lastError:   fmt.Errorf("test error"),
+			context:     context.Background(),
+			wantCode:    unhealthy,
+			wantResults: []string{"test error"},
+			wantError:   false,
+		},
+		{
+			name:        "unhealthy_context_cancelled",
+			context:     ctxCancelled,
+			wantCode:    unhealthy,
+			wantResults: []string{ctxCancelled.Err().Error()},
+			wantError:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Extension{
+				ctx:       tc.context,
+				cancel:    func() {},
+				lastError: tc.lastError,
+			}
+			got, err := e.GetStatus(context.Background(), &pluginpb.GetStatusRequest{})
+			if err != nil {
+				if !tc.wantError {
+					t.Fatalf("GetStatus() failed with error: %v", err)
+				}
+			} else if tc.wantError {
+				t.Fatalf("GetStatus() succeeded, want error")
+			}
+
+			if got.GetCode() != tc.wantCode {
+				t.Errorf("GetStatus() returned code %d, want %d", got.GetCode(), tc.wantCode)
+			}
+			if diff := cmp.Diff(tc.wantResults, got.GetResults(), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("GetStatus() returned unexpected diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
 
 func TestRefresherJobAPI(t *testing.T) {
 	tests := []struct {
