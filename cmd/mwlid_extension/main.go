@@ -20,12 +20,14 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
 	"google.golang.org/grpc"
 )
 
@@ -39,14 +41,26 @@ var (
 func main() {
 	flag.Parse()
 
-	if *errorlogfile != "" {
-		galog.RegisterBackend(context.Background(), galog.NewFileBackend(*errorlogfile))
-		defer galog.Shutdown(time.Second * 5)
+	if err := cfg.Load(nil); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 	}
 
-	if err := cfg.Load(nil); err != nil {
-		galog.Warnf("Failed to load configuration: %v. Using defaults.", err)
+	// Initialize logging.
+	logOpts := logger.Options{
+		Ident:                       "mwlid_extension",
+		Prefix:                      "MWLIDExtension",
+		CloudIdent:                  "MWLIDExtension",
+		Level:                       cfg.Retrieve().Core.LogLevel,
+		Verbosity:                   cfg.Retrieve().Core.LogVerbosity,
+		LogFile:                     *errorlogfile,
+		LogToCloudLogging:           cfg.Retrieve().Core.CloudLoggingEnabled,
+		InitCloudLoggingImmediately: true,
 	}
+	if err := logger.Init(context.Background(), logOpts); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer galog.Shutdown(3 * time.Second)
 
 	if *protocol == "" {
 		galog.Error("No protocol specified, exiting with an error.")
