@@ -258,8 +258,16 @@ func TestLauncherStep(t *testing.T) {
 			// Test state was stored on successful run.
 			file := plugin.stateFile()
 			if !tc.shouldFail {
-				if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
-					t.Errorf("launchStep.Run(ctx, %+v) did not write plugin state to file %s", plugin, file)
+				if tc.pluginInstallationType == acmpb.PluginInstallationType_LOCAL_INSTALLATION {
+					// Local plugins should not store state.
+					if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("launchStep.Run(ctx, %+v) wrote plugin state to file %s for local plugin", plugin, file)
+					}
+				} else {
+					// Dynamic plugins should store state.
+					if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
+						t.Errorf("launchStep.Run(ctx, %+v) did not write plugin state to file %s", plugin, file)
+					}
 				}
 			}
 

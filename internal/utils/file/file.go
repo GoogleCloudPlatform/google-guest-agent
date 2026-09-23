@@ -319,9 +319,10 @@ func ReadLastNLines(path string, n int) ([]string, error) {
 func UpdateSymlink(symlink, target string) error {
 	galog.Debugf("Updating symlink %q to %q", symlink, target)
 	currTarget, err := os.Readlink(symlink)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return os.Symlink(target, symlink)
-	} else if err != nil {
+	}
+	if err != nil {
 		return fmt.Errorf("unable to read symlink %q: %w", symlink, err)
 	}
 

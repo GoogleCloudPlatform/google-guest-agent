@@ -220,6 +220,20 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 
 	pluginManager.plugins = plugins
 
+	// Remove the state file for local plugins. This should prevent local plugins
+	// from being started in cases where they are disabled.
+	for _, p := range plugins {
+		if p.IsLocal() {
+			// Delete the state file if it exists.
+			if err := os.Remove(p.stateFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
+				galog.Warnf("Failed to remove state file %q for local plugin %q: %v", p.stateFile(), p.FullName(), err)
+			}
+
+			// Remove the plugin from the plugin manager.
+			delete(pluginManager.plugins, p.Name)
+		}
+	}
+
 	// Subscribe to cleanup event. This needs to happen after plugin manager is
 	// initialized, or we may accidentally cleanup plugins that shouldn't be removed.
 	scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(pluginManager)}, false)
@@ -791,10 +805,14 @@ func (m *PluginManager) applyConfig(ctx context.Context, req *acpb.ConfigurePlug
 	}
 
 	// Update the plugin state file with the new config.
-	galog.Infof("Updating on-disk config for plugin %q", p.FullName())
-	if err := p.Store(); err != nil {
-		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to store config: %v", err))
-		return fmt.Errorf("failed to store config: %w", err)
+	if !p.IsLocal() {
+		galog.Infof("Updating on-disk config for plugin %q", p.FullName())
+		if err := p.Store(); err != nil {
+			sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_APPLY_FAILED, fmt.Sprintf("Failed to store config: %v", err))
+			return fmt.Errorf("failed to store config: %w", err)
+		}
+	} else {
+		galog.Debugf("Skipping on-disk config update for local plugin %q", p.FullName())
 	}
 
 	// Reset start config hash.

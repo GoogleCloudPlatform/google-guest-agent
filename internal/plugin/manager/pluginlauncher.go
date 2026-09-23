@@ -187,8 +187,11 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	p.setState(acmpb.CurrentPluginStates_RUNNING)
 	galog.Infof("Successfully started plugin %q", p.FullName())
 
-	if err := p.Store(); err != nil {
-		return fmt.Errorf("store plugin %s info failed: %w", p.FullName(), err)
+	// Only store the plugin state if the plugin is not a local plugin.
+	if !p.IsLocal() {
+		if err := p.Store(); err != nil {
+			return fmt.Errorf("store plugin %s info failed: %w", p.FullName(), err)
+		}
 	}
 
 	return nil
