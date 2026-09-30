@@ -6,4 +6,5 @@ if [ "$1" = "configure" ]; then
   fi
   systemctl enable 'google-guest-agent.service' > /dev/null || true
   systemctl restart 'google-guest-agent.service' > /dev/null || true
+  systemctl enable 'google-guest-net-telemetry-early.service' > /dev/null || true
 fi

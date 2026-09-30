@@ -1,0 +1,19 @@
+[Unit]
+Description=Google Cloud Guest Network Telemetry (Early Boot vSock)
+DefaultDependencies=no
+After=systemd-modules-load.service systemd-udevd.service local-fs.target
+Before=network-pre.target network.target google-guest-agent.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/dev/vsock
+
+[Service]
+Type=simple
+ExecStartPre=-/sbin/modprobe vmw_vsock_virtio_transport
+ExecStart=/usr/lib/google/guest_agent/GuestNetTelemetry/guest_net_telemetry --standalone
+Restart=on-failure
+RestartSec=5s
+SuccessExitStatus=0 143 SIGTERM
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=sysinit.target
