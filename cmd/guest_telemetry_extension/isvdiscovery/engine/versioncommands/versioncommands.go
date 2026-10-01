@@ -24,6 +24,8 @@ type VersionCommands struct {
 }
 
 // Commands is the list of commands to be executed to gather version information.
+// The PowerShell cmdlets in the lists aren't programs; the engine runs them with
+// the wincommands package, which only works on Windows.
 var Commands *VersionCommands = &VersionCommands{
 	// Order matters. The order here needs to match the order in the enum in definition.proto.
 	Cmd: []string{
@@ -36,7 +38,7 @@ var Commands *VersionCommands = &VersionCommands{
 		"nodetool",
 		"mongod",
 		"/usr/sbin/mysqld",
-		"sqlplus",
+		"$ORACLE_HOME/bin/sqlplus",
 		"redis-server",
 		"mariadb",
 		// wildcard because we don't know the SID.
