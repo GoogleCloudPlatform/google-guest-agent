@@ -31,6 +31,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/logtest"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/privatefile"
 	defpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/definition/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/engine"
 	"github.com/google/go-cmp/cmp"
@@ -223,6 +225,7 @@ func TestVmInfo(t *testing.T) {
 			&fakeProcess{
 				name:     "workload1",
 				username: "test_user",
+				pid:      42,
 				exe:      "/usr/bin/workload1",
 				cmdlines: []string{"arg1", "arg2"},
 				environ:  []string{"ENV1=VAL1", "ENV2=VAL2"},
@@ -243,11 +246,46 @@ func TestVmInfo(t *testing.T) {
 		ProcessArgs:    []string{"arg1 arg2"},
 		ProcessEnvVars: []string{"ENV1=VAL1\nENV2=VAL2"},
 		Usernames:      []string{"test_user"},
+		PIDs:           []int32{42},
 		OSName:         runtime.GOOS,
 	}
 
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("vmInfo() returned unexpected diff (-want +got):\n%s", diff)
+	}
+}
+
+func TestRunEngineDoesNotLogProcessDetails(t *testing.T) {
+	const secret = "hunter2"
+	oldProcs := procs
+	t.Cleanup(func() { procs = oldProcs })
+	procs = fakeProcessLister{
+		processes: []ProcessWrapper{
+			&fakeProcess{
+				name:     "workload1",
+				username: "test_user",
+				exe:      "/usr/bin/workload1",
+				cmdlines: []string{"/usr/bin/workload1", "--password=" + secret},
+				environ:  []string{"DB_PASSWORD=" + secret},
+			},
+		},
+	}
+	logs := logtest.CaptureDefault(t)
+	req := defpb.DiscoveryRules_builder{
+		Rules: []*defpb.DiscoveryRule{
+			stringMatchRule("rule1", "WORKLOAD_1", defpb.StringMatchCondition_VM_ENV_VARS, "DB_PASSWORD="),
+		},
+	}.Build()
+
+	got, err := RunEngine(t.Context(), req)
+	if err != nil {
+		t.Fatalf("RunEngine(%v) returned an unexpected error: %v", req, err)
+	}
+	if diff := cmp.Diff(wantResult("WORKLOAD_1"), got, protocmp.Transform()); diff != "" {
+		t.Errorf("RunEngine(%v) returned an unexpected diff (-want +got): %v", req, diff)
+	}
+	if strings.Contains(logs.String(), secret) {
+		t.Errorf("RunEngine(%v) logged process details containing a secret:\n%s", req, logs)
 	}
 }
 
@@ -760,8 +798,10 @@ func setupFileDiscoveryTest(t *testing.T, rules *defpb.DiscoveryRules, invalidCo
 	definitionFile := filepath.Join(tmpDir, "definitions.textproto")
 	dataFile := filepath.Join(tmpDir, "data.bin")
 
+	// Private files are trusted on both Linux and Windows, where the temporary
+	// directory may allow other users to modify the files it contains.
 	if invalidContent {
-		if err := os.WriteFile(definitionFile, []byte("invalid content"), 0644); err != nil {
+		if err := privatefile.WriteFile(definitionFile, []byte("invalid content")); err != nil {
 			t.Fatalf("failed to write definition file: %v", err)
 		}
 	} else if rules != nil {
@@ -769,7 +809,7 @@ func setupFileDiscoveryTest(t *testing.T, rules *defpb.DiscoveryRules, invalidCo
 		if err != nil {
 			t.Fatalf("failed to marshal rules: %v", err)
 		}
-		if err := os.WriteFile(definitionFile, rulesBytes, 0644); err != nil {
+		if err := privatefile.WriteFile(definitionFile, rulesBytes); err != nil {
 			t.Fatalf("failed to write definition file: %v", err)
 		}
 	}
@@ -834,6 +874,16 @@ func TestRunDiscoveryFromFile_Success(t *testing.T) {
 	if !proto.Equal(gotResult, dummyResult) {
 		t.Errorf("got result %v, want %v", gotResult, dummyResult)
 	}
+
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(dataFile)
+		if err != nil {
+			t.Fatalf("failed to stat data file: %v", err)
+		}
+		if got, want := fi.Mode().Perm(), os.FileMode(0o600); got != want {
+			t.Errorf("data file permissions = %v, want %v", got, want)
+		}
+	}
 }
 
 func TestRunDiscoveryFromFile_ReadError(t *testing.T) {
@@ -844,6 +894,33 @@ func TestRunDiscoveryFromFile_ReadError(t *testing.T) {
 	err := d.runDiscoveryFromFile(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
 		t.Error("runDiscoveryFromFile expected error, got nil")
+	}
+}
+
+func TestRunDiscoveryFromFile_UntrustedDefinitionFile(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ACLs are tested in the trustedfile package")
+	}
+	definitionFile, dataFile := setupFileDiscoveryTest(t, defpb.DiscoveryRules_builder{}.Build(), false)
+	if err := os.Chmod(definitionFile, 0o666); err != nil {
+		t.Fatalf("failed to make definition file world-writable: %v", err)
+	}
+
+	d := New(nil)
+	d.definitionFile = definitionFile
+	d.dataFile = dataFile
+	runEngineCalled := false
+	d.runEngineFunc = func(ctx context.Context, req *defpb.DiscoveryRules) (*defpb.DiscoveryResult, error) {
+		runEngineCalled = true
+		return defpb.DiscoveryResult_builder{}.Build(), nil
+	}
+
+	if err := d.runDiscoveryFromFile(t.Context(), slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+		t.Error("runDiscoveryFromFile() with a world-writable definition file succeeded, want error")
+	}
+	if runEngineCalled {
+		t.Error("runDiscoveryFromFile() ran rules from a world-writable definition file")
 	}
 }
 
@@ -1242,6 +1319,7 @@ func TestParseEnvVars(t *testing.T) {
 		wantEndpoint     string
 		wantInterval     time.Duration
 		wantScanInterval time.Duration
+		wantErrorLog     bool
 	}{
 		{
 			name:         "defaults",
@@ -1254,14 +1332,14 @@ func TestParseEnvVars(t *testing.T) {
 			name: "custom values",
 			env: map[string]string{
 				"GUEST_TEL_ISV_CHANNEL":            "custom/channel",
-				"GUEST_TEL_ISV_ENDPOINT":           "custom:endpoint",
+				"GUEST_TEL_ISV_ENDPOINT":           "us-central1-agentcommunication.googleapis.com:443",
 				"GUEST_TEL_ISV_REPORTING_INTERVAL": "5m",
 				"GUEST_TEL_ISV_SCAN_INTERVAL":      "2s",
 				"GUEST_TEL_ISV_DATA_FILE":          "/tmp/data",
 				"GUEST_TEL_ISV_DEFINITION_FILE":    "/tmp/def",
 			},
 			wantChannel:      "custom/channel",
-			wantEndpoint:     "custom:endpoint",
+			wantEndpoint:     "us-central1-agentcommunication.googleapis.com:443",
 			wantInterval:     5 * time.Minute,
 			wantScanInterval: 2 * time.Second,
 		},
@@ -1276,6 +1354,27 @@ func TestParseEnvVars(t *testing.T) {
 			wantInterval:     0,
 			wantScanInterval: 0,
 		},
+		{
+			name:         "invalid endpoint",
+			env:          map[string]string{"GUEST_TEL_ISV_ENDPOINT": "custom:endpoint"},
+			wantChannel:  "compute.googleapis.com/isv-discovery",
+			wantEndpoint: "",
+			wantErrorLog: true,
+		},
+		{
+			name:         "endpoint outside googleapis.com",
+			env:          map[string]string{"GUEST_TEL_ISV_ENDPOINT": "agentcommunication.example.com:443"},
+			wantChannel:  "compute.googleapis.com/isv-discovery",
+			wantEndpoint: "",
+			wantErrorLog: true,
+		},
+		{
+			name:         "IP address endpoint",
+			env:          map[string]string{"GUEST_TEL_ISV_ENDPOINT": "127.0.0.1:443"},
+			wantChannel:  "compute.googleapis.com/isv-discovery",
+			wantEndpoint: "",
+			wantErrorLog: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -1283,7 +1382,8 @@ func TestParseEnvVars(t *testing.T) {
 			for k, v := range tc.env {
 				t.Setenv(k, v)
 			}
-			d := &ISVDiscovery{}
+			var errorLog strings.Builder
+			d := &ISVDiscovery{ErrorLogger: slog.New(slog.NewTextHandler(&errorLog, nil))}
 			d.parseEnvVars()
 			if d.channel != tc.wantChannel {
 				t.Errorf("parseEnvVars() channel = %q, want %q", d.channel, tc.wantChannel)
@@ -1296,6 +1396,9 @@ func TestParseEnvVars(t *testing.T) {
 			}
 			if d.envScanInterval != tc.wantScanInterval {
 				t.Errorf("parseEnvVars() envScanInterval = %v, want %v", d.envScanInterval, tc.wantScanInterval)
+			}
+			if got := strings.Contains(errorLog.String(), "GUEST_TEL_ISV_ENDPOINT"); got != tc.wantErrorLog {
+				t.Errorf("parseEnvVars() logged GUEST_TEL_ISV_ENDPOINT error: %t, want %t; error log:\n%s", got, tc.wantErrorLog, errorLog.String())
 			}
 		})
 	}

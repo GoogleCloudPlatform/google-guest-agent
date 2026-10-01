@@ -18,12 +18,14 @@ package commandlineexecutor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/logtest"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -417,7 +419,7 @@ func TestSetupExeForPlatform(t *testing.T) {
 			},
 			executeCommand: ExecuteCommand,
 			want:           cmpopts.AnyError,
-			wantWindows:    nil,
+			wantWindows:    cmpopts.AnyError,
 		},
 		{
 			name: "UserFailedToParse",
@@ -428,7 +430,7 @@ func TestSetupExeForPlatform(t *testing.T) {
 				return Result{}
 			},
 			want:        cmpopts.AnyError,
-			wantWindows: nil,
+			wantWindows: cmpopts.AnyError,
 		},
 		{
 			name: "UserFound",
@@ -439,13 +441,20 @@ func TestSetupExeForPlatform(t *testing.T) {
 				return Result{StdOut: "123"}
 			},
 			want:        nil,
-			wantWindows: nil,
+			wantWindows: cmpopts.AnyError,
 		},
+	}
+	// Without a user, the command runs as the current user, so when the test
+	// runs as root or elevated, the executable must be one that only trusted
+	// users can modify, such as a system command.
+	name := "echo"
+	if runtime.GOOS == "windows" {
+		name = "cmd"
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			setDefaults()
-			got := setupExeForPlatform(context.Background(), &exec.Cmd{}, test.params, test.executeCommand)
+			got := setupExeForPlatform(context.Background(), exec.Command(name), test.params, test.executeCommand)
 			want := test.want
 			if runtime.GOOS == "windows" {
 				want = test.wantWindows
@@ -596,6 +605,94 @@ func TestCheckRestrictedArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := checkRestrictedArgs(tt.args); got != tt.want {
 				t.Errorf("checkRestrictedArgs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsValidUsername(t *testing.T) {
+	tests := []struct {
+		username string
+		want     bool
+	}{
+		{username: "oracle", want: true},
+		{username: "sap_adm.1-x", want: true},
+		{username: "user@example.com", want: true},
+		{username: "MACHINE$", want: true},
+		{username: strings.Repeat("a", 256), want: true},
+		{username: "", want: false},
+		{username: "-oracle", want: false},
+		{username: "@oracle", want: false},
+		{username: "oracle root", want: false},
+		{username: "oracle;id", want: false},
+		{username: "$(id)", want: false},
+		{username: "ora$cle", want: false},
+		{username: `DOMAIN\user`, want: false},
+		{username: "oracle\n", want: false},
+		{username: strings.Repeat("a", 257), want: false},
+	}
+	for _, tc := range tests {
+		if got := IsValidUsername(tc.username); got != tc.want {
+			t.Errorf("IsValidUsername(%q) = %t, want %t", tc.username, got, tc.want)
+		}
+	}
+}
+
+func TestExecuteCommandDoesNotLogSecrets(t *testing.T) {
+	const secret = "hunter2"
+	tests := []struct {
+		name   string
+		runErr error
+	}{
+		{name: "success"},
+		{name: "error without exit status", runErr: errors.New("signal: killed")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Cleanup(setDefaults)
+			logs := logtest.CaptureDefault(t)
+			exists = func(string) bool { return true }
+			exitCode = func(error) int { return 1 }
+			exeForPlatform = func(exe *exec.Cmd, params Params) error {
+				fmt.Fprintf(exe.Stdout, "password=%s\n", secret)
+				fmt.Fprintf(exe.Stderr, "token=%s\n", secret)
+				return nil
+			}
+			run = func() error { return test.runErr }
+
+			result := ExecuteCommand(t.Context(), Params{
+				Executable: "workload",
+				Args:       []string{"--version"},
+				Env:        []string{"DB_PASSWORD=" + secret},
+			})
+			if !strings.Contains(result.StdOut, secret) || !strings.Contains(result.StdErr, secret) {
+				t.Errorf("ExecuteCommand() = %+v, want the command output returned to the caller", result)
+			}
+			got := logs.String()
+			if strings.Contains(got, secret) {
+				t.Errorf("ExecuteCommand() logged a secret:\n%s", got)
+			}
+			if !strings.Contains(got, "DB_PASSWORD") {
+				t.Errorf("ExecuteCommand() didn't log environment variable names:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestEnvNames(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{name: "nil", env: nil, want: []string{}},
+		{name: "values are dropped", env: []string{"A=1", "B=x=y", "C="}, want: []string{"A", "B", "C"}},
+		{name: "entry without separator", env: []string{"D"}, want: []string{"D"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if diff := cmp.Diff(test.want, envNames(test.env)); diff != "" {
+				t.Errorf("envNames(%q) returned unexpected diff (-want +got):\n%s", test.env, diff)
 			}
 		})
 	}

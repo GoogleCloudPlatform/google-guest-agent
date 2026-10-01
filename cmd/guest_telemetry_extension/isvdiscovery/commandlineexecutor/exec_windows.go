@@ -20,10 +20,34 @@ package commandlineexecutor
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os/exec"
+
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/trustedfile"
+	"golang.org/x/sys/windows"
 )
 
-// setupExeForPlatform is not implemented for windows.
+// These are variables so that tests can simulate running elevated.
+var (
+	isElevated       = func() bool { return windows.GetCurrentProcessToken().IsElevated() }
+	checkTrustedPath = trustedfile.CheckPath
+)
+
+// setupExeForPlatform returns an error if params.User is set, because running a
+// command as another user isn't supported on Windows. When the process runs
+// elevated, as the extension does as LocalSystem, it only runs executables that
+// only trusted principals can modify.
 func setupExeForPlatform(ctx context.Context, exe *exec.Cmd, params Params, executeCommand Execute) error {
+	if params.User != "" {
+		return errors.New("running a command as another user isn't supported on Windows")
+	}
+	if isElevated() {
+		path, err := checkTrustedPath(exe.Path)
+		if err != nil {
+			return fmt.Errorf("refusing to run %q elevated: %w", exe.Path, err)
+		}
+		exe.Path = path
+	}
 	return nil
 }

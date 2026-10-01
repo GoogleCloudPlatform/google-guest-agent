@@ -23,13 +23,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/pluginserver"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/privatefile"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/service"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pluginpb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 )
@@ -55,6 +59,11 @@ type module interface {
 	Run(ctx context.Context) error
 }
 
+// newModules returns the modules that the extension runs. Tests replace it.
+var newModules = func(errorLogger *slog.Logger) []module {
+	return []module{discovery.New(errorLogger)}
+}
+
 type statusCode int32
 
 const (
@@ -66,6 +75,9 @@ const (
 
 // Extension is a struct that implements the Guest Agent Plugin Server interface.
 type Extension struct {
+	// mu guards cancel and ctx, because the gRPC server can handle calls
+	// concurrently.
+	mu          sync.Mutex
 	cancel      context.CancelFunc
 	ctx         context.Context
 	errorLogger *slog.Logger
@@ -75,6 +87,8 @@ type Extension struct {
 
 // Start begins the extension execution. If the extension is already running, this is a no-op.
 func (e *Extension) Start(ctx context.Context, msg *pluginpb.StartRequest) (*pluginpb.StartResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.cancel != nil {
 		slog.Warn("Start called when extension is already running")
 		return &pluginpb.StartResponse{}, nil
@@ -82,8 +96,10 @@ func (e *Extension) Start(ctx context.Context, msg *pluginpb.StartRequest) (*plu
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	// Referencing grpcServer to satisfy gounused checks.
 	slog.Info(fmt.Sprintf("Starting extension with parameters protocol=%s address=%s errorlogfile=%s grpcServer=%v", *protocol, *address, *errorlogfile, e.grpcServer))
+	// The goroutine can't read e.ctx without holding e.mu.
+	runCtx := e.ctx
 	go func() {
-		ec := e.coreLoop()
+		ec := e.coreLoop(runCtx)
 		slog.Info(fmt.Sprintf("Extension finished. Exit code: %v", ec))
 	}()
 	return &pluginpb.StartResponse{}, nil
@@ -91,6 +107,8 @@ func (e *Extension) Start(ctx context.Context, msg *pluginpb.StartRequest) (*plu
 
 // Stop halts the extension and puts it into a stopped state. If the extension is not running, this is a no-op.
 func (e *Extension) Stop(ctx context.Context, msg *pluginpb.StopRequest) (*pluginpb.StopResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.cancel == nil {
 		slog.Warn("Stop called when extension is not running")
 		return &pluginpb.StopResponse{}, nil
@@ -112,6 +130,13 @@ func (e *Extension) Stop(ctx context.Context, msg *pluginpb.StopRequest) (*plugi
 
 // GetStatus is the health check the guest agent would perform to make sure plugin process is alive.
 func (e *Extension) GetStatus(ctx context.Context, msg *pluginpb.GetStatusRequest) (*pluginpb.Status, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.ctx == nil {
+		// The error makes the guest agent treat the extension as not running and
+		// relaunch it.
+		return nil, status.Error(codes.FailedPrecondition, "the extension hasn't started")
+	}
 	if err := e.ctx.Err(); err != nil {
 		return &pluginpb.Status{Code: int32(unhealthy), Results: []string{err.Error()}}, err
 	}
@@ -166,10 +191,10 @@ func main() {
 			e.ctx, e.cancel = context.WithCancel(context.Background())
 		}
 		defer e.cancel()
-		ec := e.coreLoop()
+		ec := e.coreLoop(e.ctx)
 		os.Exit(int(ec))
 	}
-	listener, err := net.Listen(*protocol, *address)
+	listener, err := pluginserver.Listen(*protocol, *address)
 	if err != nil {
 		errorLogger.Error(fmt.Sprintf("failed to start listening on %q using %q: %v", *address, *protocol, err))
 		os.Exit(1)
@@ -190,21 +215,18 @@ func main() {
 	}
 }
 
-func (e *Extension) coreLoop() statusCode {
-	isvDiscovery := discovery.New(e.errorLogger)
-	modules := []module{
-		isvDiscovery,
-	}
+func (e *Extension) coreLoop(ctx context.Context) statusCode {
+	modules := newModules(e.errorLogger)
 	slog.Info("Running modules")
 	for _, m := range modules {
 		go func(mod module) {
-			if err := mod.Run(e.ctx); err != nil {
+			if err := mod.Run(ctx); err != nil {
 				slog.Error(fmt.Sprintf("Module failed: %v", err))
 			}
 		}(m)
 	}
 	select {
-	case <-e.ctx.Done():
+	case <-ctx.Done():
 		msg := "Guest Telemetry Extension exiting due to context cancellation"
 		slog.Info(msg)
 		e.errorLogger.Error(msg)
@@ -220,7 +242,8 @@ func setupDebugLogging() *os.File {
 		// If no debug log file is specified, we want log statements to be no-ops.
 		handler = slog.NewTextHandler(io.Discard, nil)
 	} else {
-		file, err := os.OpenFile(debugLogFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		var err error
+		file, err = privatefile.Open(debugLogFile, os.O_WRONLY|os.O_TRUNC)
 		if err != nil {
 			slog.Error(fmt.Sprintf("Failed to open debug log file: %v", err))
 			os.Exit(1)
@@ -238,7 +261,7 @@ type logWriter struct {
 
 // Write opens the log file, writes the given byte slice to the log file, and then closes the file.
 func (w *logWriter) Write(p []byte) (int, error) {
-	f, err := os.OpenFile(w.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := privatefile.Open(w.filename, os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return 0, err
 	}
@@ -258,7 +281,7 @@ func errorLogger(errorLogFile string) *slog.Logger {
 		fmt.Fprintln(os.Stderr, "No error log file specified, exiting with an error.")
 		os.Exit(1)
 	} else {
-		file, err := os.OpenFile(errorLogFile, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		file, err := privatefile.Open(errorLogFile, os.O_WRONLY|os.O_TRUNC)
 		if err != nil {
 			slog.Error(fmt.Sprintf("Failed to open error log file: %v", err))
 			os.Exit(1)
