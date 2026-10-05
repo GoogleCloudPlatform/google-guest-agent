@@ -19,6 +19,19 @@ functional version detection for certain workloads. Additionally,
 some of the commands used are not what would be preferred without these
 restrictions.
 - Some of the version commands will need to be in the global PATH in order to work.
+- Several products embed a complete OpenSearch node and launch it with the
+stock `org.opensearch.bootstrap.OpenSearch` bootstrap class, among them the
+Wazuh indexer, Graylog Data Node and Atlassian Bitbucket Server. We report
+these as OpenSearch, because an OpenSearch node really is running on the VM. It
+would be valuable to add detectors for these specific products in the future to
+add clarity about when OpenSearch is running standalone versus when it is
+running as a component of another product.
+- OpenSearch installed as a Windows service runs under the Apache Commons
+Daemon host process, which loads the JVM in-process, so the bootstrap class
+never appears in the command line. We detect that case by the service
+executable name instead, and we do not report a version for it.
+- We do not report an OpenSearch version when the node runs in a container,
+because the agent cannot read files from the container's filesystem.
 - We originally planned to detect SAP System and SAP Web AS as two separate
 workloads. However, SAP System is a cluster made up of several instances
 running various workloads. To identify it, we'd really just be looking for the

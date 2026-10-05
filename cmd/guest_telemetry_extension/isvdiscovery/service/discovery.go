@@ -27,6 +27,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/compute/metadata"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/acsendpoint"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/privatefile"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/trustedfile"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/communication"
 	defpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/definition/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/engine"
@@ -100,13 +103,13 @@ func (p gopsProcess) Environ() ([]string, error) {
 	return p.process.Environ()
 }
 
-// String returns the string representation of the process.
+// String returns the string representation of the process. It omits command line arguments,
+// which can contain credentials.
 func (p gopsProcess) String() string {
-	username, _ := p.Username()
+	username := ignoreError(p.Username)
 	pid := p.Pid()
-	name, _ := p.Name()
-	args, _ := p.CmdlineSlice()
-	return fmt.Sprintf("process{username: %s, pid: %d, name: %s, args: %+v}", username, pid, name, args)
+	name := ignoreError(p.Name)
+	return fmt.Sprintf("process{username: %s, pid: %d, name: %s}", username, pid, name)
 }
 
 var procs processLister = DefaultProcessLister{}
@@ -176,6 +179,7 @@ func vmInfo() (*engine.VMInfo, error) {
 		vmInfo.ProcessArgs = append(vmInfo.ProcessArgs, processArgs(p))
 		vmInfo.ProcessEnvVars = append(vmInfo.ProcessEnvVars, strings.Join(processEnvVars(p), "\n"))
 		vmInfo.Usernames = append(vmInfo.Usernames, processUsername(p))
+		vmInfo.PIDs = append(vmInfo.PIDs, p.Pid())
 	}
 	return vmInfo, nil
 }
@@ -187,7 +191,8 @@ func RunEngine(ctx context.Context, req *defpb.DiscoveryRules) (*defpb.Discovery
 	if err != nil {
 		return nil, err
 	}
-	slog.Info(fmt.Sprintf("Discovered VM info: %+v", vmInfo))
+	// Don't log process details: command lines and environments can contain credentials.
+	slog.Info("Discovered VM info", "processCount", len(vmInfo.ProcessNames), "osName", vmInfo.OSName)
 	return engine.ExecuteRules(ctx, req, vmInfo), nil
 }
 
@@ -247,6 +252,14 @@ func New(errorLogger *slog.Logger) *ISVDiscovery {
 	return d
 }
 
+// logError logs msg to the debug log and, if one is set, the error log.
+func (d *ISVDiscovery) logError(msg string) {
+	slog.Error(msg)
+	if d.ErrorLogger != nil {
+		d.ErrorLogger.Error(msg)
+	}
+}
+
 func (d *ISVDiscovery) parseEnvVars() {
 	// Parse environment variables.
 	d.channel = os.Getenv("GUEST_TEL_ISV_CHANNEL")
@@ -254,6 +267,12 @@ func (d *ISVDiscovery) parseEnvVars() {
 		d.channel = "compute.googleapis.com/isv-discovery"
 	}
 	d.endpoint = os.Getenv("GUEST_TEL_ISV_ENDPOINT")
+	if d.endpoint != "" {
+		if err := acsendpoint.Validate(d.endpoint); err != nil {
+			d.logError(fmt.Sprintf("Ignoring GUEST_TEL_ISV_ENDPOINT and using the default ACS endpoint: %v", err))
+			d.endpoint = ""
+		}
+	}
 	d.dataFile = os.Getenv("GUEST_TEL_ISV_DATA_FILE")
 	d.definitionFile = os.Getenv("GUEST_TEL_ISV_DEFINITION_FILE")
 
@@ -455,8 +474,9 @@ func (d *ISVDiscovery) pollAndScan(ctx context.Context) {
 }
 
 func (d *ISVDiscovery) runDiscoveryFromFile(ctx context.Context, errorLogger *slog.Logger) error {
-	// Read the definitions from the definition file.
-	definitionFileBytes, err := os.ReadFile(d.definitionFile)
+	// Read the definitions from the definition file. The definitions include
+	// commands to run, so the file must not be modifiable by other users.
+	definitionFileBytes, err := trustedfile.ReadFile(d.definitionFile)
 	if err != nil {
 		slog.Error(fmt.Sprintf("Failed to read definition file: %v", err))
 		errorLogger.Error(fmt.Sprintf("Failed to read definition file: %v", err))
@@ -496,7 +516,7 @@ func (d *ISVDiscovery) runDiscoveryFromFile(ctx context.Context, errorLogger *sl
 		return err
 	}
 	slog.Info("Marshalled discovered data successfully")
-	if err := os.WriteFile(d.dataFile, bytes, 0644); err != nil {
+	if err := privatefile.WriteFile(d.dataFile, bytes); err != nil {
 		slog.Error(fmt.Sprintf("Failed to write data file: %v", err))
 		errorLogger.Error(fmt.Sprintf("Failed to write data file: %v", err))
 		return err

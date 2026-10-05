@@ -23,6 +23,7 @@ import (
 	"log/slog"
 
 	"github.com/GoogleCloudPlatform/agentcommunication_client"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/acsendpoint"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/encoding/prototext"
 
@@ -34,6 +35,10 @@ import (
 var sendAgentMessage = func(ctx context.Context, channelID string, acsClient *agentcommunication.Client, msg *acpb.MessageBody) (*acpb.SendAgentMessageResponse, error) {
 	return client.SendAgentMessage(ctx, channelID, acsClient, msg)
 }
+
+// newClient is a variable so that tests can check client creation without
+// connecting to ACS.
+var newClient = client.NewClient
 
 // SendDiscoveryDefinitionRequest sends a message to ACS to request the discovery definition.
 func SendDiscoveryDefinitionRequest(ctx context.Context, channelID string, acsClient *agentcommunication.Client) (*acpb.SendAgentMessageResponse, error) {
@@ -60,10 +65,14 @@ func SendDiscoveryResult(ctx context.Context, channelID string, acsClient *agent
 	return sendAgentMessage(ctx, channelID, acsClient, msg)
 }
 
-// CreateClient creates a new ACS client.
+// CreateClient creates a new ACS client. A non-empty endpoint overrides the
+// default ACS endpoint and must be valid according to acsendpoint.Validate.
 func CreateClient(ctx context.Context, endpoint string) (*agentcommunication.Client, error) {
 	if endpoint == "" {
-		return client.NewClient(ctx, false)
+		return newClient(ctx, false)
 	}
-	return client.NewClient(ctx, false, option.WithEndpoint(endpoint))
+	if err := acsendpoint.Validate(endpoint); err != nil {
+		return nil, err
+	}
+	return newClient(ctx, false, option.WithEndpoint(endpoint))
 }

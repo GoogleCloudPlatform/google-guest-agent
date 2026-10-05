@@ -175,7 +175,7 @@ func ExecuteCommand(ctx context.Context, params Params) Result {
 	}
 
 	slog.DebugContext(ctx, "Executing command", "executable", params.Executable, "args", args,
-		"timeout", timeout, "user", params.User, "env", params.Env)
+		"timeout", timeout, "user", params.User, "envNames", envNames(params.Env))
 
 	if run != nil {
 		err = run()
@@ -199,16 +199,26 @@ func ExecuteCommand(ctx context.Context, params Params) Result {
 			}
 		} else {
 			slog.DebugContext(ctx, "Error encountered when executing command", "executable", params.Executable,
-				"args", args, "exitcode", exitCode, "error", err, "stdout", stdout.String(),
-				"stderr", stderr.String())
+				"args", args, "exitcode", exitCode, "error", err, "stdoutBytes", stdout.Len(),
+				"stderrBytes", stderr.Len())
 		}
 		return Result{stdout.String(), stderr.String(), exitCode, err, true, exitStatusParsed}
 	}
 
 	// Exit code can assumed to be 0
 	slog.DebugContext(ctx, "Successfully executed command", "executable", params.Executable, "args", args,
-		"stdout", stdout.String(), "stderr", stderr.String())
+		"stdoutBytes", stdout.Len(), "stderrBytes", stderr.Len())
 	return Result{stdout.String(), stderr.String(), 0, nil, true, false}
+}
+
+// envNames returns the variable names from env, a list of "key=value" entries,
+// so that callers can log which variables are set without logging their values.
+func envNames(env []string) []string {
+	names := make([]string, len(env))
+	for i, kv := range env {
+		names[i], _, _ = strings.Cut(kv, "=")
+	}
+	return names
 }
 
 /*
@@ -227,6 +237,17 @@ func checkRestrictedArgs(args []string) string {
 		}
 	}
 	return ""
+}
+
+// usernamePattern matches letters, digits, '_', '.', '-' and '@', not starting
+// with '-' or '@', and an optional trailing '$' as used by machine accounts.
+var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_.@-]*\$?$`)
+
+// IsValidUsername reports whether name is a user name that is safe to pass as
+// an argument to commands such as su and id: it can't be mistaken for an option
+// and contains only characters that user names commonly use.
+func IsValidUsername(name string) bool {
+	return len(name) <= 256 && usernamePattern.MatchString(name)
 }
 
 /*

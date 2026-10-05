@@ -19,15 +19,19 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/commandlineexecutor"
 	defpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/definition/proto"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/engine/versioncommands"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/wincommands"
 )
 
 // VMInfo contains discovered information about the VM to be used for rule evaluation.
@@ -37,6 +41,7 @@ type VMInfo struct {
 	ProcessArgs    []string
 	ProcessEnvVars []string
 	Usernames      []string
+	PIDs           []int32
 	OSName         string
 }
 
@@ -47,6 +52,7 @@ type ProcessInfo struct {
 	Arg      string
 	EnvVar   string
 	Username string
+	PID      int32
 	OSName   string
 }
 
@@ -54,6 +60,10 @@ var versionNumberRegex = regexp.MustCompile(`\.?\d+(\.\d+)*`)
 var envVarRegex = regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*|\{([a-zA-Z_][a-zA-Z0-9_]*)\})`)
 var safeShellCharsRegex = regexp.MustCompile(`^[a-zA-Z0-9_./=-]+$`)
 var executeCommand = commandlineexecutor.ExecuteCommand
+
+// runNative runs the PowerShell cmdlets that version rules use on Windows,
+// which aren't executables.
+var runNative = wincommands.Run
 
 // ExecuteRules executes the discovery rules against the VM info and returns the discovery result.
 func ExecuteRules(ctx context.Context, req *defpb.DiscoveryRules, vmInfo *VMInfo) *defpb.DiscoveryResult {
@@ -133,31 +143,69 @@ func executeRule(rule *defpb.DiscoveryRule, vmInfo *VMInfo) (bool, *ProcessInfo)
 	}
 }
 
-func resolveCommand(command defpb.VersionCommand, extendedCommand defpb.ExtendedVersionCommand, processInfo *ProcessInfo) (string, bool) {
+// resolvedCommand is a version command resolved for a discovered process. It
+// records which parts come from the process, because the process owner controls
+// them.
+type resolvedCommand struct {
+	executable string
+	args       []string
+	// processExe is true if executable is the path of the process's executable.
+	processExe bool
+	// envExecutable is true if executable contains values from the process's
+	// environment.
+	envExecutable bool
+	// envArgs[i] is true if args[i] contains values from the process's
+	// environment.
+	envArgs []bool
+}
+
+// fromProcess reports whether any part of the command comes from the process.
+func (c resolvedCommand) fromProcess() bool {
+	return c.processExe || c.envExecutable || slices.Contains(c.envArgs, true)
+}
+
+// resolveCommand returns the allowlisted command for a version command or, if
+// that is unspecified, an extended version command, with the path of the
+// process's executable and environment variables substituted. It returns false
+// if the command is unknown, or if it runs the process's executable and the
+// path is unknown.
+func resolveCommand(command defpb.VersionCommand, extendedCommand defpb.ExtendedVersionCommand, args []string, processInfo *ProcessInfo) (resolvedCommand, bool) {
 	var cmd string
 	if command == defpb.VersionCommand_VERSION_COMMAND_UNSPECIFIED {
 		if extendedCommand == defpb.ExtendedVersionCommand_EXTENDED_VERSION_COMMAND_UNSPECIFIED {
 			slog.Debug("Version command is unspecified")
-			return "", false
+			return resolvedCommand{}, false
 		}
 		if int(extendedCommand) < 0 || int(extendedCommand) >= len(versioncommands.Commands.ExtendedCmd) {
 			slog.Debug("Received unknown ExtendedVersionCommand", "command", extendedCommand)
-			return "", false
+			return resolvedCommand{}, false
 		}
 		cmd = versioncommands.Commands.ExtendedCmd[extendedCommand]
 	} else {
 		if int(command) < 0 || int(command) >= len(versioncommands.Commands.Cmd) {
 			slog.Debug("Received unknown VersionCommand", "command", command)
-			return "", false
+			return resolvedCommand{}, false
 		}
 		cmd = versioncommands.Commands.Cmd[command]
 	}
+	var c resolvedCommand
 	if cmd == "USE_DISCOVERED_PROCESS_PATH" {
-		if processInfo != nil && processInfo.Path != "" {
-			cmd = processInfo.Path
+		if processInfo == nil || processInfo.Path == "" {
+			slog.Debug("Path of the discovered process is unknown")
+			return resolvedCommand{}, false
+		}
+		cmd = processInfo.Path
+		c.processExe = true
+	}
+	c.executable, c.envExecutable = resolveEnvVars(cmd, processInfo)
+	if len(args) > 0 {
+		c.args = make([]string, len(args))
+		c.envArgs = make([]bool, len(args))
+		for i, arg := range args {
+			c.args[i], c.envArgs[i] = resolveEnvVars(arg, processInfo)
 		}
 	}
-	return cmd, true
+	return c, true
 }
 
 // shellQuote safely quotes a string for use as a command-line argument in a shell execution.
@@ -204,29 +252,42 @@ func shellQuoteSlice(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-func buildCommandParams(cmd string, args []string, runAsUser bool, processInfo *ProcessInfo) commandlineexecutor.Params {
-	return buildCommandParamsForOS(cmd, args, runAsUser, processInfo, runtime.GOOS)
+func buildCommandParams(c resolvedCommand, runAsUser bool, processInfo *ProcessInfo) (commandlineexecutor.Params, error) {
+	return buildCommandParamsForOS(c, runAsUser, processInfo, runtime.GOOS)
 }
 
-func buildCommandParamsForOS(cmd string, args []string, runAsUser bool, processInfo *ProcessInfo, goos string) commandlineexecutor.Params {
-	shouldRunAsUser := runAsUser && processInfo != nil && processInfo.Username != ""
-	if !shouldRunAsUser {
+// buildCommandParamsForOS returns the parameters to run c on the named OS. The
+// command runs as the discovered process user if runAsUser is true or if it
+// uses data from the process, which the process owner controls. It returns an
+// error if the command must not run.
+func buildCommandParamsForOS(c resolvedCommand, runAsUser bool, processInfo *ProcessInfo, goos string) (commandlineexecutor.Params, error) {
+	if !runAsUser && !c.fromProcess() {
 		return commandlineexecutor.Params{
-			Executable: cmd,
-			Args:       args,
-		}
+			Executable: c.executable,
+			Args:       c.args,
+		}, nil
+	}
+	if processInfo == nil || processInfo.Username == "" {
+		return commandlineexecutor.Params{}, errors.New("the discovered process user is unknown")
 	}
 	if goos == "windows" {
-		// On Windows (where 'su' is not available), populate the User field on Params
-		// to convey the target process user context to the commandlineexecutor.
-		return commandlineexecutor.Params{
-			Executable: cmd,
-			Args:       args,
-			User:       processInfo.Username,
-		}
+		// Windows has no su, and the commandlineexecutor can't run commands as
+		// another user there.
+		return commandlineexecutor.Params{}, errors.New("running as the discovered process user isn't supported on Windows")
 	}
-	fullCmd := shellQuote(cmd)
-	cmdArgs := shellQuoteSlice(args)
+	username := processInfo.Username
+	if !commandlineexecutor.IsValidUsername(username) {
+		return commandlineexecutor.Params{}, fmt.Errorf("invalid user name %q", username)
+	}
+	uid, err := lookupUID(username)
+	if err != nil {
+		return commandlineexecutor.Params{}, err
+	}
+	if uid == "0" {
+		return rootCommandParams(c, processInfo.PID)
+	}
+	fullCmd := shellQuote(c.executable)
+	cmdArgs := shellQuoteSlice(c.args)
 	if cmdArgs != "" {
 		fullCmd = fullCmd + " " + cmdArgs
 	}
@@ -234,19 +295,21 @@ func buildCommandParamsForOS(cmd string, args []string, runAsUser bool, processI
 	// "su" must be launched as root so it can switch process credentials to processInfo.Username.
 	// We pass -s /bin/sh to override disabled shells (like /sbin/nologin) for service accounts,
 	// and -l to run as a login shell so profile environment variables are sourced.
+	// "--" ends the options, so that the user name can't be read as one.
 	return commandlineexecutor.Params{
 		Executable: "su",
-		Args:       []string{"-s", "/bin/sh", "-l", processInfo.Username, "-c", fullCmd},
-	}
+		Args:       []string{"-s", "/bin/sh", "-l", "-c", fullCmd, "--", username},
+	}, nil
 }
 
 // resolveEnvVars expands environment variables (e.g., $SPARK_HOME or $ORACLE_HOME) in string s
 // using the captured environment block of the discovered process. If a variable is not present
 // in processInfo, it falls back to the host operating system environment. If still unpopulated,
 // the literal variable token (e.g., "$VAR" or "${VAR}") is preserved so subsequent shell executions (via su) can resolve it.
-func resolveEnvVars(s string, processInfo *ProcessInfo) string {
+// It also reports whether any value came from the environment of the discovered process.
+func resolveEnvVars(s string, processInfo *ProcessInfo) (string, bool) {
 	if !strings.Contains(s, "$") {
-		return s
+		return s, false
 	}
 	envMap := make(map[string]string)
 	if processInfo != nil && processInfo.EnvVar != "" {
@@ -260,9 +323,11 @@ func resolveEnvVars(s string, processInfo *ProcessInfo) string {
 			}
 		}
 	}
-	return envVarRegex.ReplaceAllStringFunc(s, func(match string) string {
+	fromProcess := false
+	resolved := envVarRegex.ReplaceAllStringFunc(s, func(match string) string {
 		name := strings.Trim(match[1:], "{}")
 		if val, ok := envMap[name]; ok {
+			fromProcess = true
 			return val
 		}
 		if val, ok := os.LookupEnv(name); ok {
@@ -270,18 +335,7 @@ func resolveEnvVars(s string, processInfo *ProcessInfo) string {
 		}
 		return match
 	})
-}
-
-// resolveEnvVarsSlice expands environment variables across each element in a command argument slice.
-func resolveEnvVarsSlice(args []string, processInfo *ProcessInfo) []string {
-	if len(args) == 0 {
-		return args
-	}
-	res := make([]string, len(args))
-	for i, arg := range args {
-		res[i] = resolveEnvVars(arg, processInfo)
-	}
-	return res
+	return resolved, fromProcess
 }
 
 func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, processInfo *ProcessInfo) string {
@@ -299,23 +353,20 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 					break
 				}
 				versionRegex = step.GetRegexMatch()
-				cmd, ok := resolveCommand(step.GetCommand(), step.GetExtendedCommand(), processInfo)
+				c, ok := resolveCommand(step.GetCommand(), step.GetExtendedCommand(), step.GetCommandArgs(), processInfo)
 				if !ok {
 					slog.Debug("Unable to resolve command", "command", step.GetCommand(), "extendedCommand", step.GetExtendedCommand())
 					break
 				}
-				cmd = resolveEnvVars(cmd, processInfo)
-				args := resolveEnvVarsSlice(step.GetCommandArgs(), processInfo)
-				if step.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH && (processInfo == nil || processInfo.Username == "") {
-					slog.Debug("Skipping USE_DISCOVERED_PROCESS_PATH execution: process username is missing", "command", cmd)
+				params, err := buildCommandParams(c, step.GetRunAsDiscoveredProcessUser(), processInfo)
+				if err != nil {
+					slog.Debug("Skipping step command", "executable", c.executable, "error", err)
 					break
 				}
-				runAsUser := step.GetRunAsDiscoveredProcessUser() || step.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH
-				params := buildCommandParams(cmd, args, runAsUser, processInfo)
 				if step.GetUsePreviousOutputAsStdin() {
 					params.Stdin = prevOutput
 				}
-				res := executeCommand(ctx, params)
+				res := runVersionCommand(ctx, params)
 				if res.Error != nil || res.ExitCode != 0 || !res.ExecutableFound {
 					slog.Debug("Step command failed", "executable", params.Executable, "args", params.Args, "error", res.Error,
 						"exitCode", res.ExitCode, "executableFound", res.ExecutableFound)
@@ -335,7 +386,8 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 				}
 				// If we didn't get valid output, try the next version rule.
 				if prevOutput == "" {
-					slog.Debug("Step command did not produce valid output", "executable", params.Executable, "args", params.Args, "stdout", res.StdOut, "stderr", res.StdErr)
+					slog.Debug("Step command did not produce valid output", "executable", params.Executable, "args", params.Args,
+						"stdoutBytes", len(res.StdOut), "stderrBytes", len(res.StdErr))
 					break
 				}
 			}
@@ -346,19 +398,16 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 			continue
 		}
 
-		cmd, ok := resolveCommand(versionRule.GetCommand(), versionRule.GetExtendedCommand(), processInfo)
+		c, ok := resolveCommand(versionRule.GetCommand(), versionRule.GetExtendedCommand(), versionRule.GetCommandArgs(), processInfo)
 		if !ok {
 			continue
 		}
-		cmd = resolveEnvVars(cmd, processInfo)
-		args := resolveEnvVarsSlice(versionRule.GetCommandArgs(), processInfo)
-		if versionRule.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH && (processInfo == nil || processInfo.Username == "") {
-			slog.Debug("Skipping USE_DISCOVERED_PROCESS_PATH execution: process username is missing", "command", cmd)
+		params, err := buildCommandParams(c, versionRule.GetRunAsDiscoveredProcessUser(), processInfo)
+		if err != nil {
+			slog.Debug("Skipping command", "executable", c.executable, "error", err)
 			continue
 		}
-		runAsUser := versionRule.GetRunAsDiscoveredProcessUser() || versionRule.GetCommand() == defpb.VersionCommand_USE_DISCOVERED_PROCESS_PATH
-		params := buildCommandParams(cmd, args, runAsUser, processInfo)
-		res := executeCommand(ctx, params)
+		res := runVersionCommand(ctx, params)
 
 		if res.Error != nil || res.ExitCode != 0 || !res.ExecutableFound {
 			slog.Debug("Command failed", "executable", params.Executable, "args", params.Args, "error", res.Error,
@@ -374,6 +423,17 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 	}
 
 	return ""
+}
+
+// runVersionCommand runs a version command. The PowerShell cmdlets that
+// wincommands implements run in this process, so no program is started for
+// them; they fail on platforms other than Windows.
+func runVersionCommand(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+	if !wincommands.Implements(params.Executable) {
+		return executeCommand(ctx, params)
+	}
+	out, err := runNative(params.Executable, params.Args)
+	return commandlineexecutor.Result{StdOut: out, Error: err, ExecutableFound: true}
 }
 
 func extractVersionFromOutput(output, versionRegex, versionExtractPattern string) (string, bool) {
@@ -460,6 +520,7 @@ func checkStringMatch(pattern string, values []string, vmInfo *VMInfo, isProcess
 					Arg:      safeGet(vmInfo.ProcessArgs, i),
 					EnvVar:   safeGet(vmInfo.ProcessEnvVars, i),
 					Username: safeGet(vmInfo.Usernames, i),
+					PID:      safeGet(vmInfo.PIDs, i),
 					OSName:   vmInfo.OSName,
 				}
 			}
@@ -472,9 +533,10 @@ func checkStringMatch(pattern string, values []string, vmInfo *VMInfo, isProcess
 	return false, nil
 }
 
-func safeGet(s []string, i int) string {
+func safeGet[T any](s []T, i int) T {
 	if i < len(s) {
 		return s[i]
 	}
-	return ""
+	var zero T
+	return zero
 }
