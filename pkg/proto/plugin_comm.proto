@@ -115,14 +115,19 @@ message Status {
 // Request sent to plugins to stop and exit the process.
 // Plugins processes are killed immediately after this request returns.
 message StopRequest {
-  // Cleanup is set to true to notify plugins to remove any state stored on
-  // disk. Stop request can be sent as part of plugin restart which does not
-  // require cleanup whereas plugin remove does require.
-  bool cleanup = 1;
+  // Deprecated: Use remove_state instead. Previously, cleanup was set to true
+  // during both plugin revision changes (upgrades/downgrades) and plugin
+  // removals, making it impossible for plugins to distinguish between the two.
+  bool cleanup = 1 [deprecated = true];
   // Guest Agent will wait for this deadline, if the plugin gracefully
   // exits, guest agent will do nothing. If the plugin process is still
   // running, then it is killed.
   google.protobuf.Duration deadline = 2;
+  // RemoveState is set to true to notify plugins to remove any persistent state
+  // stored on disk because the plugin is being removed. It is set to false when
+  // the stop request is sent as part of a plugin restart or a plugin revision
+  // change (upgrade or downgrade), where persistent state should be retained.
+  bool remove_state = 3;
 }
 
 // Response from plugins for stop request.

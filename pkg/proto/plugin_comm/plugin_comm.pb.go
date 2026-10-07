@@ -422,14 +422,21 @@ func (x *Status) GetResults() []string {
 // Plugins processes are killed immediately after this request returns.
 type StopRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Cleanup is set to true to notify plugins to remove any state stored on
-	// disk. Stop request can be sent as part of plugin restart which does not
-	// require cleanup whereas plugin remove does require.
+	// Deprecated: Use remove_state instead. Previously, cleanup was set to true
+	// during both plugin revision changes (upgrades/downgrades) and plugin
+	// removals, making it impossible for plugins to distinguish between the two.
+	//
+	// Deprecated: Marked as deprecated in plugin_comm.proto.
 	Cleanup bool `protobuf:"varint,1,opt,name=cleanup,proto3" json:"cleanup,omitempty"`
 	// Guest Agent will wait for this deadline, if the plugin gracefully
 	// exits, guest agent will do nothing. If the plugin process is still
 	// running, then it is killed.
-	Deadline      *durationpb.Duration `protobuf:"bytes,2,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	Deadline *durationpb.Duration `protobuf:"bytes,2,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	// RemoveState is set to true to notify plugins to remove any persistent state
+	// stored on disk because the plugin is being removed. It is set to false when
+	// the stop request is sent as part of a plugin restart or a plugin revision
+	// change (upgrade or downgrade), where persistent state should be retained.
+	RemoveState   bool `protobuf:"varint,3,opt,name=remove_state,json=removeState,proto3" json:"remove_state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -464,6 +471,7 @@ func (*StopRequest) Descriptor() ([]byte, []int) {
 	return file_plugin_comm_proto_rawDescGZIP(), []int{6}
 }
 
+// Deprecated: Marked as deprecated in plugin_comm.proto.
 func (x *StopRequest) GetCleanup() bool {
 	if x != nil {
 		return x.Cleanup
@@ -476,6 +484,13 @@ func (x *StopRequest) GetDeadline() *durationpb.Duration {
 		return x.Deadline
 	}
 	return nil
+}
+
+func (x *StopRequest) GetRemoveState() bool {
+	if x != nil {
+		return x.RemoveState
+	}
+	return false
 }
 
 // Response from plugins for stop request.
@@ -586,10 +601,11 @@ const file_plugin_comm_proto_rawDesc = "" +
 	"\x05_data\"6\n" +
 	"\x06Status\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
-	"\aresults\x18\x02 \x03(\tR\aresults\"^\n" +
-	"\vStopRequest\x12\x18\n" +
-	"\acleanup\x18\x01 \x01(\bR\acleanup\x125\n" +
-	"\bdeadline\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\bdeadline\"\x0e\n" +
+	"\aresults\x18\x02 \x03(\tR\aresults\"\x85\x01\n" +
+	"\vStopRequest\x12\x1c\n" +
+	"\acleanup\x18\x01 \x01(\bB\x02\x18\x01R\acleanup\x125\n" +
+	"\bdeadline\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\bdeadline\x12!\n" +
+	"\fremove_state\x18\x03 \x01(\bR\vremoveState\"\x0e\n" +
 	"\fStopResponse2\x98\x02\n" +
 	"\x10GuestAgentPlugin\x12@\n" +
 	"\x05Start\x12\x19.plugin_comm.StartRequest\x1a\x1a.plugin_comm.StartResponse\"\x00\x12=\n" +
