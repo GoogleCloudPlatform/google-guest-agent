@@ -913,6 +913,7 @@ func TestUpgradePlugin(t *testing.T) {
 	if !ps1.stopCalled {
 		t.Errorf("installPlugin(ctx, %+v) did not call stop RPC on old plugin %q", req, plugin.Name)
 	}
+	verifyStopRequest(t, ps1.seenStopReq, true, false)
 
 	if file.Exists(addr1, file.TypeFile) {
 		t.Errorf("installPlugin(ctx, %+v) did not cleanup previous state, file %q still exists", req, addr1)
@@ -965,8 +966,9 @@ func TestRemovePlugin(t *testing.T) {
 
 	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
 	createTestFile(t, entryPoint)
+	setupMockPsClient(t, &mockPsClient{alive: true, exe: entryPoint})
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: entryPoint, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}
@@ -991,7 +993,143 @@ func TestRemovePlugin(t *testing.T) {
 		t.Fatalf("removePlugin(ctx, %+v) failed unexpectedly with error: %v", req, err)
 	}
 
+	if !ps.stopCalled {
+		t.Errorf("removePlugin(ctx, %+v) did not call stop RPC on plugin %q", req, plugin.Name)
+	}
+	verifyStopRequest(t, ps.seenStopReq, true, true)
+
 	validatePluginRemoved(t, plugin, pm, ctc)
+}
+
+func TestRemovePluginFallback(t *testing.T) {
+	tests := []struct {
+		name            string
+		hasLocalPlugin  bool
+		wantCleanup     bool
+		wantRemoveState bool
+	}{
+		{
+			name:            "without_local_plugin",
+			hasLocalPlugin:  false,
+			wantCleanup:     true,
+			wantRemoveState: true,
+		},
+		{
+			name:            "with_local_plugin_fallback",
+			hasLocalPlugin:  true,
+			wantCleanup:     true,
+			wantRemoveState: false,
+		},
+	}
+
+	for _, tc := range tests {
+		// Create the socket connections directory on the parent test so the full
+		// Unix domain socket path stays within the 108-byte limit on Windows.
+		connections := t.TempDir()
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+			state := t.TempDir()
+			localDir := t.TempDir()
+			setBaseStateDir(t, state)
+			setupConstraintTestClient(t)
+			cfg.Retrieve().Plugin.SocketConnectionsDir = connections
+			cfg.Retrieve().Plugin.LocalPluginDir = localDir
+			cfg.Retrieve().Core.ACSClient = false
+
+			entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
+			createTestFile(t, entryPoint)
+			setupMockPsClient(t, &mockPsClient{alive: true, exe: entryPoint})
+
+			addr1 := filepath.Join(connections, "PluginA_RevisionA.sock")
+			ps1 := &testPluginServer{ctrs: make(map[string]int)}
+			startTestServer(t, ps1, udsProtocol, addr1)
+
+			if tc.hasLocalPlugin {
+				addr2 := filepath.Join(connections, "PluginA_RevisionB.sock")
+				ps2 := &testPluginServer{ctrs: make(map[string]int)}
+				server, hash, _, _ := installSetup(t, ps2, addr2)
+				defer server.Close()
+
+				if err := os.MkdirAll(filepath.Join(localDir, "PluginA"), 0755); err != nil {
+					t.Fatalf("os.MkdirAll() failed unexpectedly: %v", err)
+				}
+				localReq := &acpb.ConfigurePluginStates_ConfigurePlugin{
+					Action: acpb.ConfigurePluginStates_INSTALL,
+					Plugin: &acpb.ConfigurePluginStates_Plugin{
+						Name:         "PluginA",
+						RevisionId:   "RevisionB",
+						EntryPoint:   "test-entry-point",
+						Checksum:     hash,
+						GcsSignedUrl: server.URL,
+					},
+					Manifest: &acpb.ConfigurePluginStates_Manifest{
+						StartTimeout:           &dpb.Duration{Seconds: 3},
+						StopTimeout:            &dpb.Duration{Seconds: 3},
+						StartAttemptCount:      1,
+						DownloadAttemptCount:   1,
+						DownloadTimeout:        &dpb.Duration{Seconds: 5},
+						PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
+					},
+				}
+				reqBytes, err := proto.Marshal(localReq)
+				if err != nil {
+					t.Fatalf("proto.Marshal() failed unexpectedly: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(localDir, "PluginA", manifestFile), reqBytes, 0644); err != nil {
+					t.Fatalf("os.WriteFile() failed unexpectedly: %v", err)
+				}
+			}
+
+			plugin := &Plugin{
+				Name:        "PluginA",
+				Revision:    "RevisionA",
+				Protocol:    udsProtocol,
+				Address:     addr1,
+				EntryPath:   entryPoint,
+				InstallPath: filepath.Dir(entryPoint),
+				RuntimeInfo: &RuntimeInfo{Pid: -5555},
+				Manifest:    &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION},
+			}
+			if err := plugin.Connect(ctx); err != nil {
+				t.Fatalf("plugin.Connect() failed unexpectedly: %v", err)
+			}
+
+			s := scheduler.Instance()
+			t.Cleanup(s.Stop)
+
+			orig := pluginManager
+			t.Cleanup(func() { pluginManager = orig })
+
+			pm := &PluginManager{
+				plugins:                  map[string]*Plugin{plugin.Name: plugin},
+				protocol:                 udsProtocol,
+				pluginMonitors:           make(map[string]string),
+				pluginMetricsMonitors:    make(map[string]string),
+				scheduler:                s,
+				inProgressPluginRequests: make(map[string]bool),
+				requestCount:             make(map[acpb.ConfigurePluginStates_Action]map[bool]int),
+			}
+			pluginManager = pm
+
+			req := &acpb.ConfigurePluginStates{
+				ConfigurePlugins: []*acpb.ConfigurePluginStates_ConfigurePlugin{
+					{
+						Action: acpb.ConfigurePluginStates_REMOVE,
+						Plugin: &acpb.ConfigurePluginStates_Plugin{
+							Name:       "PluginA",
+							RevisionId: "RevisionA",
+						},
+					},
+				},
+			}
+			pm.ConfigurePluginStates(ctx, req)
+
+			if !ps1.stopCalled {
+				t.Fatalf("ConfigurePluginStates(ctx, %+v) did not call Stop RPC on old plugin", req)
+			}
+			verifyStopRequest(t, ps1.seenStopReq, tc.wantCleanup, tc.wantRemoveState)
+		})
+	}
 }
 
 func TestMonitoring(t *testing.T) {
@@ -1397,9 +1535,10 @@ func TestRemoveAllDynamicPlugins(t *testing.T) {
 
 	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
 	createTestFile(t, entryPoint)
+	setupMockPsClient(t, &mockPsClient{alive: true, exe: entryPoint})
 
 	corePlugin := &Plugin{Name: "CorePlugin", Revision: "RevisionA", InstallPath: t.TempDir(), Manifest: &Manifest{PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION}}
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: entryPoint, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
 	}
@@ -1416,6 +1555,11 @@ func TestRemoveAllDynamicPlugins(t *testing.T) {
 	if err := pm.RemoveAllDynamicPlugins(ctx); err != nil {
 		t.Fatalf("RemoveAllDynamicPlugins(ctx) failed unexpectedly with error: %v", err)
 	}
+
+	if !ps.stopCalled {
+		t.Errorf("RemoveAllDynamicPlugins(ctx) did not call stop RPC on plugin %q", plugin.Name)
+	}
+	verifyStopRequest(t, ps.seenStopReq, true, true)
 
 	validatePluginRemoved(t, plugin, pm, ctc)
 
@@ -1487,8 +1631,9 @@ func TestAdHocStopPlugin(t *testing.T) {
 
 	entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
 	createTestFile(t, entryPoint)
+	setupMockPsClient(t, &mockPsClient{alive: true, exe: entryPoint})
 
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
+	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: entryPoint, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 	notRunningPlugin := &Plugin{Name: "PluginB", Revision: "RevisionB", Protocol: udsProtocol, Address: t.TempDir(), RuntimeInfo: &RuntimeInfo{Pid: -6666}, Manifest: &Manifest{StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
 
 	pm := &PluginManager{plugins: map[string]*Plugin{plugin.Name: plugin, notRunningPlugin.Name: notRunningPlugin}, protocol: udsProtocol, pluginMonitors: make(map[string]string)}
@@ -1496,6 +1641,11 @@ func TestAdHocStopPlugin(t *testing.T) {
 	if err := pm.StopPlugin(ctx, plugin.Name); err != nil {
 		t.Fatalf("StopPlugin(ctx, %s) failed unexpectedly with error: %v", plugin.Name, err)
 	}
+
+	if !ps.stopCalled {
+		t.Errorf("StopPlugin(ctx, %s) did not call stop RPC on plugin", plugin.Name)
+	}
+	verifyStopRequest(t, ps.seenStopReq, true, true)
 
 	validatePluginRemoved(t, plugin, pm, ctc)
 
@@ -1678,6 +1828,7 @@ func validatePluginRelaunched(t *testing.T, wantRelaunch bool, plugin *Plugin, t
 		if !ps.stopCalled {
 			t.Errorf("applyConfig for %s did not stop plugin", plugin.FullName())
 		}
+		verifyStopRequest(t, ps.seenStopReq, false, false)
 		startReq := ps.seenStartReq[plugin.Manifest.StartConfig.Simple]
 		if startReq == nil {
 			t.Errorf("applyConfig for %s did not start plugin with new config, got nil, want non-nil", plugin.FullName())

@@ -191,7 +191,7 @@ func (m *PluginManager) StopPlugin(ctx context.Context, name string) error {
 		galog.Infof("Failed to connect to plugin %q [err: %v], skipping graceful stop", plugin.FullName(), err)
 	}
 
-	return m.stopAndRemovePlugin(ctx, plugin)
+	return m.stopAndRemovePlugin(ctx, plugin, true)
 }
 
 // InitPluginManager initializes and returns a PluginManager instance.
@@ -754,9 +754,10 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 	}
 
 	// Previously installed plugin revision already exists, remove before
-	// installing a new one.
+	// installing a new one. Do not remove persistent plugin state across
+	// revision upgrades.
 	galog.Infof("Stopping and removing old plugin %q", currPlugin.FullName())
-	if err := m.stopAndRemovePlugin(ctx, currPlugin); err != nil {
+	if err := m.stopAndRemovePlugin(ctx, currPlugin, false); err != nil {
 		sendEvent(ctx, currPlugin, acpb.PluginEventMessage_PLUGIN_INSTALL_FAILED, fmt.Sprintf("Failed to remove plugin: %v", err))
 		return fmt.Errorf("failed to remove plugin: %w", err)
 	}
@@ -766,7 +767,7 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 
 // stopAndRemovePlugin stops the given plugin, all of its schedulers and removes
 // it from the manager.
-func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin) error {
+func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin, removeState bool) error {
 	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_REMOVE, "Received request to remove a plugin.")
 
 	// Stop all schedulers running on the plugin so it doesn't interfere with the
@@ -774,7 +775,7 @@ func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin) erro
 	m.stopMonitoring(p)
 	m.stopMetricsMonitoring(p)
 
-	if err := p.runSteps(ctx, []Step{&stopStep{cleanup: true}}); err != nil {
+	if err := p.runSteps(ctx, []Step{&stopStep{cleanup: true, removeState: removeState}}); err != nil {
 		sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_REMOVE_FAILED, fmt.Sprintf("Failed to remove plugin: %v", err))
 		return fmt.Errorf("unable to remove plugin %q: %w", p.FullName(), err)
 	}
@@ -857,7 +858,7 @@ func (m *PluginManager) removePlugin(ctx context.Context, req *acpb.ConfigurePlu
 		return fmt.Errorf("plugin %q not found", req.GetPlugin().GetName())
 	}
 
-	if err := m.stopAndRemovePlugin(ctx, p); err != nil {
+	if err := m.stopAndRemovePlugin(ctx, p, true); err != nil {
 		return fmt.Errorf("failed to remove plugin %q: %w", p.FullName(), err)
 	}
 
