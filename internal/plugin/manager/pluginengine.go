@@ -226,8 +226,9 @@ func (m *PluginManager) newLaunchStep(req *acmpb.ConfigurePluginStates_Configure
 // relaunchWorkflow generates the workflow for a re-launching a plugin.
 func relaunchWorkflow(ctx context.Context, p *Plugin) []Step {
 	// Run stop to make sure plugin process is not alive.
-	// Relaunch means we're not removing plugin, always set cleanup to false.
-	s := &stopStep{cleanup: false}
+	// Relaunch means we're not removing plugin, always set cleanup and
+	// removeState to false.
+	s := &stopStep{cleanup: false, removeState: false}
 
 	l := &launchStep{
 		entryPath:      p.EntryPath,

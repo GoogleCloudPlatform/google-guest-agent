@@ -33,10 +33,15 @@ import (
 
 // stopStep implements the plugin stop.
 type stopStep struct {
-	// Cleanup is set to true to notify plugins to remove any state stored on
-	// disk. Stop request can be sent as part of plugin restart which does not
-	// require cleanup whereas plugin remove does require.
+	// cleanup is set to true to clean up the agent-managed per-revision plugin
+	// installation files and state file on disk. It is also passed to the
+	// deprecated StopRequest.cleanup field for backward compatibility.
 	cleanup bool
+	// removeState is set to true to notify plugins via StopRequest.remove_state
+	// to remove any persistent state stored on disk because the plugin is being
+	// removed. It is set to false during plugin restarts or revision changes
+	// (upgrades/downgrades).
+	removeState bool
 }
 
 // Name returns the name of the step.
@@ -88,7 +93,7 @@ func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {
 
 	galog.Infof("Stopping %q plugin process (%d) running from %q", p.FullName(), pluginPid, proc.Exe)
 
-	if _, err := p.Stop(ctx, ss.cleanup); err != nil {
+	if _, err := p.Stop(ctx, ss.cleanup, ss.removeState); err != nil {
 		galog.Warnf("Stop %s plugin failed with error: %v", p.FullName(), err)
 	}
 
@@ -123,7 +128,7 @@ func (ss *stopStep) Run(ctx context.Context, p *Plugin) error {
 	p.setState(acmpb.CurrentPluginStates_STOPPED)
 	p.setPid(0)
 
-	// Cleanup is set to true only on plugin removal.
+	// Cleanup is set to true when the current plugin revision is being removed.
 	if ss.cleanup {
 		if err := cleanup(ctx, p); err != nil {
 			// Not a critical step in plugin removal, just log a message.

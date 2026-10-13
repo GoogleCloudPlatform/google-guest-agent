@@ -68,6 +68,7 @@ func TestStopPlugin(t *testing.T) {
 	tests := []struct {
 		name           string
 		stopCleanup    bool
+		removeState    bool
 		psClient       *mockPsClient
 		wantStopRPC    bool
 		reusePid       bool
@@ -75,16 +76,27 @@ func TestStopPlugin(t *testing.T) {
 		plugin         *Plugin
 	}{
 		{
-			name:           "stop_cleanup_true",
+			name:           "stop_remove_plugin",
 			stopCleanup:    true,
+			removeState:    true,
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
 			installCleanup: true,
 			plugin:         &Plugin{Name: "testplugin1", EntryPath: "testplugin1", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3, PluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION}, RuntimeInfo: &RuntimeInfo{Pid: -5555}},
 		},
 		{
+			name:           "stop_upgrade_plugin",
+			stopCleanup:    true,
+			removeState:    false,
+			psClient:       &mockPsClient{alive: true},
+			wantStopRPC:    true,
+			installCleanup: true,
+			plugin:         &Plugin{Name: "testplugin1_upgrade", EntryPath: "testplugin1_upgrade", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StartAttempts: 3, StopTimeout: time.Second * 3, PluginInstallationType: acmpb.PluginInstallationType_DYNAMIC_INSTALLATION}, RuntimeInfo: &RuntimeInfo{Pid: -5555}},
+		},
+		{
 			name:           "stop_cleanup_false",
 			stopCleanup:    false,
+			removeState:    false,
 			installCleanup: false,
 			psClient:       &mockPsClient{alive: false},
 			wantStopRPC:    false,
@@ -93,6 +105,7 @@ func TestStopPlugin(t *testing.T) {
 		{
 			name:           "core_stop_cleanup_true",
 			stopCleanup:    true,
+			removeState:    true,
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
 			installCleanup: false,
@@ -101,6 +114,7 @@ func TestStopPlugin(t *testing.T) {
 		{
 			name:           "core_stop_cleanup_false",
 			stopCleanup:    false,
+			removeState:    false,
 			installCleanup: false,
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    true,
@@ -109,6 +123,7 @@ func TestStopPlugin(t *testing.T) {
 		{
 			name:           "nokill_cleanup_true",
 			stopCleanup:    true,
+			removeState:    true,
 			psClient:       &mockPsClient{alive: true},
 			wantStopRPC:    false,
 			reusePid:       true,
@@ -121,7 +136,7 @@ func TestStopPlugin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 			ts := &testPluginServer{}
-			step := &stopStep{cleanup: tc.stopCleanup}
+			step := &stopStep{cleanup: tc.stopCleanup, removeState: tc.removeState}
 			// Use invalid PID to avoid killing some process unknowingly.
 			plugin := tc.plugin
 			setupPlugin(ctx, t, plugin, ts)
@@ -142,6 +157,9 @@ func TestStopPlugin(t *testing.T) {
 
 			if ts.stopCalled != tc.wantStopRPC {
 				t.Errorf("stopStep.Run(ctx, %+v) called stop plugin RPC: %t, want: %t", plugin, ts.stopCalled, tc.wantStopRPC)
+			}
+			if tc.wantStopRPC {
+				verifyStopRequest(t, ts.seenStopReq, tc.stopCleanup, tc.removeState)
 			}
 			if plugin.RuntimeInfo.Pid != 0 {
 				t.Errorf("stopStep.Run(ctx, %+v) did not reset the plugin PID", plugin)

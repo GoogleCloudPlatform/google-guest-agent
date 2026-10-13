@@ -470,7 +470,7 @@ func TestRelaunchWorkflow(t *testing.T) {
 		Protocol:  udsProtocol,
 	}
 	want := []Step{
-		&stopStep{cleanup: false},
+		&stopStep{cleanup: false, removeState: false},
 		&launchStep{entryPath: p.EntryPath, maxMemoryUsage: p.Manifest.MaxMemoryUsage, startAttempts: p.Manifest.StartAttempts, protocol: p.Protocol},
 	}
 

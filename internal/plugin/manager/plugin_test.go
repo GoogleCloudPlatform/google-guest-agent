@@ -75,6 +75,7 @@ type testPluginServer struct {
 	mu           sync.Mutex
 	code         int32
 	stopCalled   bool
+	seenStopReq  *pb.StopRequest
 	statusCalled bool
 	applyCalled  bool
 	applyFail    bool
@@ -120,6 +121,7 @@ func (ts *testPluginServer) Start(ctx context.Context, msg *pb.StartRequest) (*p
 func (ts *testPluginServer) Stop(ctx context.Context, msg *pb.StopRequest) (*pb.StopResponse, error) {
 	ts.mu.Lock()
 	ts.stopCalled = true
+	ts.seenStopReq = msg
 	ts.mu.Unlock()
 	switch msg.GetDeadline().GetSeconds() {
 	case 1:
@@ -260,10 +262,22 @@ func TestStart(t *testing.T) {
 	}
 }
 
+func verifyStopRequest(t *testing.T, got *pb.StopRequest, wantCleanup, wantRemoveState bool) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("StopRequest was not received, want {Cleanup: %t, RemoveState: %t}", wantCleanup, wantRemoveState)
+	}
+	gotCleanup := got.GetCleanup()
+	if gotCleanup != wantCleanup || got.GetRemoveState() != wantRemoveState {
+		t.Errorf("StopRequest = {Cleanup: %t, RemoveState: %t}, want {Cleanup: %t, RemoveState: %t}", gotCleanup, got.GetRemoveState(), wantCleanup, wantRemoveState)
+	}
+}
+
 func TestStop(t *testing.T) {
 	ctx := context.Background()
 	addr := filepath.Join(t.TempDir(), "pluginA_revisionA.sock")
-	startTestServer(t, &testPluginServer{}, "unix", addr)
+	ts := &testPluginServer{}
+	startTestServer(t, ts, "unix", addr)
 	plugin := &Plugin{Name: "testplugin", Revision: "1", Protocol: "unix", Address: addr, Manifest: &Manifest{StopTimeout: time.Second / 2}}
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect(ctx) failed unexpectedly: %v", err)
@@ -271,11 +285,27 @@ func TestStop(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		cleanup     bool
+		removeState bool
 		reqDeadline int64
 		wantErr     string
 	}{
 		{
-			name:        "success",
+			name:        "success_no_cleanup_no_remove_state",
+			cleanup:     false,
+			removeState: false,
+			reqDeadline: 5,
+		},
+		{
+			name:        "success_cleanup_only",
+			cleanup:     true,
+			removeState: false,
+			reqDeadline: 5,
+		},
+		{
+			name:        "success_cleanup_and_remove_state",
+			cleanup:     true,
+			removeState: true,
 			reqDeadline: 5,
 		},
 		{
@@ -292,10 +322,19 @@ func TestStop(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			ts.mu.Lock()
+			ts.seenStopReq = nil
+			ts.mu.Unlock()
 			plugin.Manifest.StopTimeout = time.Duration(test.reqDeadline) * time.Second
-			_, err := plugin.Stop(ctx, false)
+			_, err := plugin.Stop(ctx, test.cleanup, test.removeState)
 			if err.Message() != test.wantErr {
-				t.Errorf("plugin.Stop(ctx, false) = error: %v, want error: %v", err, test.wantErr)
+				t.Errorf("plugin.Stop(ctx, %t, %t) = error: %v, want error: %v", test.cleanup, test.removeState, err, test.wantErr)
+			}
+			if test.wantErr == "" {
+				ts.mu.Lock()
+				gotReq := ts.seenStopReq
+				ts.mu.Unlock()
+				verifyStopRequest(t, gotReq, test.cleanup, test.removeState)
 			}
 		})
 	}
@@ -303,9 +342,9 @@ func TestStop(t *testing.T) {
 	// No connection, skip stop.
 	plugin.client = nil
 	msg := `plugin "testplugin_1" is not connected`
-	_, err := plugin.Stop(ctx, false)
+	_, err := plugin.Stop(ctx, false, false)
 	if err == nil || !strings.Contains(err.Message(), msg) {
-		t.Errorf("plugin.Stop(ctx, false) = error: %v, want error containing: %v", err.Message(), msg)
+		t.Errorf("plugin.Stop(ctx, false, false) = error: %v, want error containing: %v", err.Message(), msg)
 	}
 }
 

@@ -407,7 +407,7 @@ func (p *Plugin) Start(ctx context.Context) (*pb.StartResponse, *status.Status) 
 }
 
 // Stop makes plugin RPC stop request.
-func (p *Plugin) Stop(ctx context.Context, cleanup bool) (*pb.StopResponse, *status.Status) {
+func (p *Plugin) Stop(ctx context.Context, cleanup bool, removeState bool) (*pb.StopResponse, *status.Status) {
 	galog.Debugf("Executing stop request on plugin %q", p.FullName())
 
 	svc, err := p.PluginService()
@@ -416,8 +416,10 @@ func (p *Plugin) Stop(ctx context.Context, cleanup bool) (*pb.StopResponse, *sta
 	}
 
 	req := &pb.StopRequest{
-		Cleanup:  cleanup,
-		Deadline: &dpb.Duration{Seconds: int64(p.Manifest.StopTimeout.Seconds())},
+		// Populate the deprecated Cleanup field for backward compatibility.
+		Cleanup:     cleanup,
+		RemoveState: removeState,
+		Deadline:    &dpb.Duration{Seconds: int64(p.Manifest.StopTimeout.Seconds())},
 	}
 	tCtx, cancel := context.WithTimeout(ctx, p.Manifest.StopTimeout)
 	defer cancel()
