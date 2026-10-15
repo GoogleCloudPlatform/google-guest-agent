@@ -645,6 +645,164 @@ func TestEnableDisable(t *testing.T) {
 	}
 }
 
+func TestDisableOnStartupWhenConfiguredOnDisk(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// First enable OS Login on disk using an initial module instance.
+	initialModule := createTestModule(t)
+	createTestFiles(t, initialModule, osloginTestFileOpts{
+		testSSHD:     true,
+		testNSSwitch: true,
+		testPAM:      true,
+		testGroup:    true,
+	})
+	_ = setupTestRunner(t, false)
+
+	enabledMDSJSON := `
+	{
+		"instance":  {
+			"attributes": {
+				"enable-oslogin": "true"
+			}
+		}
+	}`
+	enabledDesc, err := metadata.UnmarshalDescriptor(enabledMDSJSON)
+	if err != nil {
+		t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", enabledMDSJSON, err)
+	}
+
+	ctx := context.Background()
+	if _, _, err := initialModule.osloginSetup(ctx, enabledDesc); err != nil {
+		t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", enabledDesc, err)
+	}
+	if !initialModule.isOSLoginConfiguredOnDisk() {
+		t.Fatalf("isOSLoginConfiguredOnDisk() = false after enabling OS Login, want true")
+	}
+
+	// Simulate a fresh agent startup (or booting an image captured while OS Login
+	// was enabled) where enabled is false in memory and pipe handlers are nil,
+	// but metadata has enable-oslogin=false.
+	freshModule := &osloginModule{
+		sshdConfigPath:               initialModule.sshdConfigPath,
+		nsswitchConfigPath:           initialModule.nsswitchConfigPath,
+		pamConfigPath:                initialModule.pamConfigPath,
+		groupConfigPath:              initialModule.groupConfigPath,
+		authorizedKeysCommandPaths:   initialModule.authorizedKeysCommandPaths,
+		authorizedKeysCommandSKPaths: initialModule.authorizedKeysCommandSKPaths,
+		osloginDirs:                  initialModule.osloginDirs,
+		sudoers:                      initialModule.sudoers,
+		deprecatedEntries:            initialModule.deprecatedEntries,
+	}
+
+	disabledMDSJSON := `
+	{
+		"instance":  {
+			"attributes": {
+				"enable-oslogin": "false"
+			}
+		}
+	}`
+	disabledDesc, err := metadata.UnmarshalDescriptor(disabledMDSJSON)
+	if err != nil {
+		t.Fatalf("metadata.UnmarshalDescriptor(%q) = %v, want nil", disabledMDSJSON, err)
+	}
+
+	got, noop, err := freshModule.osloginSetup(ctx, disabledDesc)
+	if err != nil {
+		t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", disabledDesc, err)
+	}
+	if noop {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want noop to be false", disabledDesc, noop)
+	}
+	if !got {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want %t", disabledDesc, got, true)
+	}
+	if freshModule.isOSLoginConfiguredOnDisk() {
+		t.Errorf("isOSLoginConfiguredOnDisk() = true after disabling OS Login, want false")
+	}
+
+	checkTestFile(t, freshModule.sshdConfigPath, []string{})
+	checkTestFile(t, freshModule.nsswitchConfigPath, []string{
+		"passwd: files",
+		"group: files",
+	})
+	checkTestFile(t, freshModule.pamConfigPath, []string{})
+	checkTestFile(t, freshModule.groupConfigPath, []string{})
+
+	// A subsequent setup call with OS Login already disabled on disk and in
+	// memory should be a no-op.
+	freshModule.prevMetadata = nil
+	got, noop, err = freshModule.osloginSetup(ctx, disabledDesc)
+	if err != nil {
+		t.Fatalf("osloginSetup(ctx, %v) = %v, want nil", disabledDesc, err)
+	}
+	if !noop {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want noop to be true", disabledDesc, noop)
+	}
+	if !got {
+		t.Errorf("osloginSetup(ctx, %v) = %t, want %t", disabledDesc, got, true)
+	}
+}
+
+func TestIsOSLoginConfiguredOnDisk(t *testing.T) {
+	tests := []struct {
+		name     string
+		nsswitch string
+		want     bool
+	}{
+		{
+			name:     "not-configured",
+			nsswitch: "passwd: files\ngroup: files\n",
+			want:     false,
+		},
+		{
+			name:     "configured",
+			nsswitch: "passwd: files cache_oslogin oslogin\ngroup: files cache_oslogin oslogin\n",
+			want:     true,
+		},
+		{
+			name:     "configured-without-cache",
+			nsswitch: "passwd: files oslogin\ngroup: files oslogin\n",
+			want:     true,
+		},
+		{
+			name:     "commented-out-entry",
+			nsswitch: "#passwd: files cache_oslogin oslogin\npasswd: files\ngroup: files\n",
+			want:     false,
+		},
+		{
+			name:     "trailing-comment",
+			nsswitch: "passwd: files # so done with oslogin\ngroup: files # oslogin\n",
+			want:     false,
+		},
+		{
+			name:     "configured-with-trailing-comment",
+			nsswitch: "passwd: files oslogin # keep\ngroup: files\n",
+			want:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			module := createTestModule(t)
+			createTestFiles(t, module, osloginTestFileOpts{
+				testSSHD:  true,
+				testPAM:   true,
+				testGroup: true,
+			})
+			if err := os.WriteFile(module.nsswitchConfigPath, []byte(tc.nsswitch), osloginConfigMode); err != nil {
+				t.Fatalf("failed to setup test nsswitch.conf file: %v", err)
+			}
+
+			if got := module.isOSLoginConfiguredOnDisk(); got != tc.want {
+				t.Errorf("isOSLoginConfiguredOnDisk() = %t, want %t for nsswitch.conf %q", got, tc.want, tc.nsswitch)
+			}
+		})
+	}
+}
+
 func TestDisableOSLoginErrors(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("Failed to load config: %v", err)

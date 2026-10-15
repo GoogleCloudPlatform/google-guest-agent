@@ -382,7 +382,7 @@ func (mod *osloginModule) osloginSetup(ctx context.Context, desc *metadata.Descr
 	if !desc.OSLoginEnabled() {
 		defer func() { mod.enabled.Store(false) }()
 
-		if !mod.enabled.Load() {
+		if !mod.enabled.Load() && !mod.isOSLoginConfiguredOnDisk() {
 			return true, true, nil
 		}
 		// If the module is disabled now but was previously enabled do the
@@ -660,17 +660,48 @@ func (mod *osloginModule) removeDeprecatedEntries() error {
 	return nil
 }
 
+// isOSLoginConfiguredOnDisk checks if OS Login configuration is present in the
+// system configuration files on disk.
+func (mod *osloginModule) isOSLoginConfiguredOnDisk() bool {
+	if nsswitch, err := os.ReadFile(mod.nsswitchConfigPath); err == nil {
+		for _, line := range strings.Split(string(nsswitch), "\n") {
+			// Ignore comments, so that e.g. "passwd: files # oslogin" is not
+			// mistaken for an active OS Login configuration.
+			line, _, _ = strings.Cut(line, "#")
+			if (strings.HasPrefix(line, "passwd:") || strings.HasPrefix(line, "group:")) && strings.Contains(line, "oslogin") {
+				return true
+			}
+		}
+	}
+
+	for _, cfgPath := range []string{mod.sshdConfigPath, mod.pamConfigPath, mod.groupConfigPath} {
+		if data, err := os.ReadFile(cfgPath); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.TrimSpace(line) == osloginConfigOpts.Delimiters.Start {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // disableOSLogin stop internal "services" and rollback user's configuration.
 func (mod *osloginModule) disableOSLogin(ctx context.Context, evManager *events.Manager) error {
 	galog.Infof("Disabling OS Login.")
 	// Make sure we only stop responding to requests to the ssh trusted ca pipe
 	// when all user's configuration is rolled back.
 	defer func() {
-		mod.pipeEventHandler.Close()
-		mod.pipeEventHandler = nil
+		if mod.pipeEventHandler != nil {
+			mod.pipeEventHandler.Close()
+			mod.pipeEventHandler = nil
+		}
 
-		evManager.RemoveWatcher(ctx, mod.pipeEventWatcher)
-		mod.pipeEventWatcher = nil
+		if mod.pipeEventWatcher != nil {
+			evManager.RemoveWatcher(ctx, mod.pipeEventWatcher)
+			mod.pipeEventWatcher = nil
+		}
 	}()
 
 	// Rollback all the configuration.
