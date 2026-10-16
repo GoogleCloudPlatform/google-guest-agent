@@ -345,6 +345,20 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 			return ""
 		}
 		var versionRegex string
+		if field := versionRule.GetProcessField(); field != defpb.StringMatchCondition_VM_FIELD_UNSPECIFIED {
+			// Don't log the field: command lines and environments can contain
+			// credentials.
+			value, ok := processField(field, processInfo)
+			if !ok {
+				slog.Debug("Process field is unavailable", "field", field)
+				continue
+			}
+			if version, found := versionFromProcessField(value, versionRule.GetRegexMatch(), versionRule.GetVersionExtractPattern()); found {
+				return version
+			}
+			slog.Debug("Process field did not contain a version", "field", field)
+			continue
+		}
 		if len(versionRule.GetSteps()) > 0 {
 			var prevOutput string
 			for _, step := range versionRule.GetSteps() {
@@ -423,6 +437,56 @@ func executeVersionRules(ctx context.Context, rule *defpb.DiscoveryRule, process
 	}
 
 	return ""
+}
+
+// processField returns the named field of the discovered process. It returns
+// false if the process is unknown or the field isn't a field of the process.
+func processField(field defpb.StringMatchCondition_VmField, processInfo *ProcessInfo) (string, bool) {
+	if processInfo == nil {
+		return "", false
+	}
+	switch field {
+	case defpb.StringMatchCondition_VM_PROCESS_NAME:
+		return processInfo.Name, true
+	case defpb.StringMatchCondition_VM_PROCESS_PATH:
+		return processInfo.Path, true
+	case defpb.StringMatchCondition_VM_CLI_ARGS:
+		return processInfo.Arg, true
+	case defpb.StringMatchCondition_VM_ENV_VARS:
+		return processInfo.EnvVar, true
+	default:
+		return "", false
+	}
+}
+
+// versionFromProcessField returns the first group that versionExtractPattern
+// captures in a line of value that matches versionRegex. Unlike command output,
+// there's no fallback to the first number in the line, which in a command line
+// is often unrelated, like a heap size.
+func versionFromProcessField(value, versionRegex, versionExtractPattern string) (string, bool) {
+	if versionExtractPattern == "" {
+		slog.Debug("Version rule with process_field has no version_extract_pattern")
+		return "", false
+	}
+	re, err := regexp.Compile(versionRegex)
+	if err != nil {
+		slog.Debug("Failed to compile version regex", "regex", versionRegex, "error", err)
+		return "", false
+	}
+	extractRe, err := regexp.Compile(versionExtractPattern)
+	if err != nil {
+		slog.Debug("Failed to compile version extract regex", "pattern", versionExtractPattern, "error", err)
+		return "", false
+	}
+	for _, line := range strings.Split(value, "\n") {
+		if !re.MatchString(line) {
+			continue
+		}
+		if sub := extractRe.FindStringSubmatch(line); len(sub) > 1 && sub[1] != "" {
+			return sub[1], true
+		}
+	}
+	return "", false
 }
 
 // runVersionCommand runs a version command. The PowerShell cmdlets that

@@ -1664,6 +1664,165 @@ func TestExecuteVersionRules_ExtendedCommandUnspecified(t *testing.T) {
 	}
 }
 
+func TestExecuteVersionRulesProcessField(t *testing.T) {
+	const secret = "hunter2"
+	kafka := &ProcessInfo{
+		Name:     "java",
+		Path:     "/usr/lib/jvm/java-17/bin/java",
+		Arg:      "java -Dpassword=" + secret + " -cp /opt/kafka_2.13-3.7.0/bin/../libs/kafka_2.13-3.7.0.jar kafka.Kafka server.properties",
+		EnvVar:   "HOME=/home/kafka\nAPP_VERSION=3.7.1\nTOKEN=" + secret,
+		Username: "kafka",
+	}
+	fieldRule := func(field defpb.StringMatchCondition_VmField, regex, extract string) *defpb.DiscoveryVersionRule {
+		return defpb.DiscoveryVersionRule_builder{
+			ProcessField:          field,
+			RegexMatch:            regex,
+			VersionExtractPattern: extract,
+		}.Build()
+	}
+	jarRule := fieldRule(defpb.StringMatchCondition_VM_CLI_ARGS, `/libs/kafka_\d+\.\d+-\d+\.\d+\.\d+\.jar`, `/libs/kafka_\d+\.\d+-(\d+\.\d+\.\d+)\.jar`)
+	commandRule := defpb.DiscoveryVersionRule_builder{
+		Command:     defpb.VersionCommand_CAT,
+		CommandArgs: []string{"/opt/version"},
+		RegexMatch:  `\d+\.\d+`,
+	}.Build()
+	tests := []struct {
+		name        string
+		rules       []*defpb.DiscoveryVersionRule
+		processInfo *ProcessInfo
+		want        string
+		wantCommand bool
+	}{
+		{
+			name:        "cli_args",
+			rules:       []*defpb.DiscoveryVersionRule{jarRule, commandRule},
+			processInfo: kafka,
+			want:        "3.7.0",
+		},
+		{
+			name:        "env_vars_line_by_line",
+			rules:       []*defpb.DiscoveryVersionRule{fieldRule(defpb.StringMatchCondition_VM_ENV_VARS, `^APP_VERSION=\d`, `^APP_VERSION=(\d+(?:\.\d+)+)$`)},
+			processInfo: kafka,
+			want:        "3.7.1",
+		},
+		{
+			name:        "process_path",
+			rules:       []*defpb.DiscoveryVersionRule{fieldRule(defpb.StringMatchCondition_VM_PROCESS_PATH, `java-\d+`, `java-(\d+)/`)},
+			processInfo: kafka,
+			want:        "17",
+		},
+		{
+			name:        "process_name",
+			rules:       []*defpb.DiscoveryVersionRule{fieldRule(defpb.StringMatchCondition_VM_PROCESS_NAME, `^app\d`, `^app(\d+)$`)},
+			processInfo: &ProcessInfo{Name: "app12"},
+			want:        "12",
+		},
+		{
+			name:        "no_match_falls_through",
+			rules:       []*defpb.DiscoveryVersionRule{fieldRule(defpb.StringMatchCondition_VM_CLI_ARGS, `confluent-\d`, `confluent-(\d+\.\d+\.\d+)`), commandRule},
+			processInfo: kafka,
+			want:        "9.9",
+			wantCommand: true,
+		},
+		{
+			name:        "unknown_process_falls_through",
+			rules:       []*defpb.DiscoveryVersionRule{jarRule, commandRule},
+			want:        "9.9",
+			wantCommand: true,
+		},
+		{
+			name: "no_fallback_to_first_number",
+			rules: []*defpb.DiscoveryVersionRule{
+				fieldRule(defpb.StringMatchCondition_VM_CLI_ARGS, `kafka\.Kafka`, `kafka_\d+\.\d+-(\d+\.\d+\.\d+)-ce\.jar`),
+			},
+			processInfo: kafka,
+		},
+		{
+			name:        "requires_extract_pattern",
+			rules:       []*defpb.DiscoveryVersionRule{fieldRule(defpb.StringMatchCondition_VM_CLI_ARGS, `kafka_\d`, "")},
+			processInfo: kafka,
+		},
+		{
+			name:        "os_name_is_skipped",
+			rules:       []*defpb.DiscoveryVersionRule{fieldRule(defpb.StringMatchCondition_VM_OS_NAME, `.`, `(.*)`)},
+			processInfo: &ProcessInfo{OSName: "linux", Name: "linux1"},
+		},
+		{
+			name: "takes_precedence_over_command",
+			rules: []*defpb.DiscoveryVersionRule{defpb.DiscoveryVersionRule_builder{
+				ProcessField:          defpb.StringMatchCondition_VM_CLI_ARGS,
+				Command:               defpb.VersionCommand_CAT,
+				CommandArgs:           []string{"/opt/version"},
+				RegexMatch:            `confluent-\d`,
+				VersionExtractPattern: `confluent-(\d+\.\d+\.\d+)`,
+			}.Build()},
+			processInfo: kafka,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var ranCommand bool
+			originalExec := executeCommand
+			executeCommand = func(ctx context.Context, params commandlineexecutor.Params) commandlineexecutor.Result {
+				ranCommand = true
+				return commandlineexecutor.Result{StdOut: "9.9", ExecutableFound: true}
+			}
+			defer func() { executeCommand = originalExec }()
+			logs := logtest.CaptureDefault(t)
+
+			rule := defpb.DiscoveryRule_builder{VersionRules: tc.rules}.Build()
+			if got := executeVersionRules(context.Background(), rule, tc.processInfo); got != tc.want {
+				t.Errorf("executeVersionRules() = %q, want %q", got, tc.want)
+			}
+			if ranCommand != tc.wantCommand {
+				t.Errorf("executeVersionRules() ran a command = %v, want %v", ranCommand, tc.wantCommand)
+			}
+			if strings.Contains(logs.String(), secret) {
+				t.Errorf("executeVersionRules() logged process data containing a secret:\n%s", logs)
+			}
+		})
+	}
+}
+
+func TestExecuteRulesProcessFieldUsesMatchedProcess(t *testing.T) {
+	vmInfo := &VMInfo{
+		ProcessNames: []string{"java", "java"},
+		ProcessPaths: []string{"/usr/bin/java", "/usr/bin/java"},
+		ProcessArgs: []string{
+			"java -cp /opt/app/libs/kafka-clients-2.0.0.jar com.example.App",
+			"java -cp /opt/kafka/libs/kafka_2.13-3.7.0.jar kafka.Kafka server.properties",
+		},
+		ProcessEnvVars: []string{"", ""},
+		Usernames:      []string{"app", "kafka"},
+		PIDs:           []int32{10, 20},
+		OSName:         "linux",
+	}
+	rules := defpb.DiscoveryRules_builder{
+		Rules: []*defpb.DiscoveryRule{defpb.DiscoveryRule_builder{
+			DiscoveredWorkloadName: "apachekafka",
+			Condition: defpb.Condition_builder{
+				StringMatch: defpb.StringMatchCondition_builder{
+					VmField:    defpb.StringMatchCondition_VM_CLI_ARGS.Enum(),
+					RegexMatch: `\skafka\.Kafka\s`,
+				}.Build(),
+			}.Build(),
+			VersionRules: []*defpb.DiscoveryVersionRule{defpb.DiscoveryVersionRule_builder{
+				ProcessField:          defpb.StringMatchCondition_VM_CLI_ARGS,
+				RegexMatch:            `/libs/kafka_\d+\.\d+-\d+\.\d+\.\d+\.jar`,
+				VersionExtractPattern: `/libs/kafka_\d+\.\d+-(\d+\.\d+\.\d+)\.jar`,
+			}.Build()},
+		}.Build()},
+	}.Build()
+
+	got := ExecuteRules(context.Background(), rules, vmInfo)
+	want := defpb.DiscoveryResult_builder{
+		DetectedData: []*defpb.DetectedData{defpb.DetectedData_builder{Name: "apachekafka", Version: "3.7.0"}.Build()},
+	}.Build()
+	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
+		t.Errorf("ExecuteRules() returned diff (-want +got):\n%s", diff)
+	}
+}
+
 func TestExecuteVersionRules_PreserveUnresolvedEnvVars(t *testing.T) {
 	ruleMock := defpb.DiscoveryRule_builder{
 		VersionRules: []*defpb.DiscoveryVersionRule{

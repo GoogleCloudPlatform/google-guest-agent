@@ -1422,14 +1422,15 @@ func (b0 VersionCommandStep_builder) Build() *VersionCommandStep {
 // Each version rule command will be run in order until one of them gives back a
 // string that contains a regex match defined by the rule.
 type DiscoveryVersionRule struct {
-	state                                 protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Command                    VersionCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=guesttelemetryextension.isvdiscovery.VersionCommand"`
-	xxx_hidden_CommandArgs                []string               `protobuf:"bytes,2,rep,name=command_args,json=commandArgs,proto3"`
-	xxx_hidden_RegexMatch                 string                 `protobuf:"bytes,3,opt,name=regex_match,json=regexMatch,proto3"`
-	xxx_hidden_RunAsDiscoveredProcessUser bool                   `protobuf:"varint,4,opt,name=run_as_discovered_process_user,json=runAsDiscoveredProcessUser,proto3"`
-	xxx_hidden_ExtendedCommand            ExtendedVersionCommand `protobuf:"varint,5,opt,name=extended_command,json=extendedCommand,proto3,enum=guesttelemetryextension.isvdiscovery.ExtendedVersionCommand"`
-	xxx_hidden_Steps                      *[]*VersionCommandStep `protobuf:"bytes,6,rep,name=steps,proto3"`
-	xxx_hidden_VersionExtractPattern      string                 `protobuf:"bytes,7,opt,name=version_extract_pattern,json=versionExtractPattern,proto3"`
+	state                                 protoimpl.MessageState       `protogen:"opaque.v1"`
+	xxx_hidden_Command                    VersionCommand               `protobuf:"varint,1,opt,name=command,proto3,enum=guesttelemetryextension.isvdiscovery.VersionCommand"`
+	xxx_hidden_CommandArgs                []string                     `protobuf:"bytes,2,rep,name=command_args,json=commandArgs,proto3"`
+	xxx_hidden_RegexMatch                 string                       `protobuf:"bytes,3,opt,name=regex_match,json=regexMatch,proto3"`
+	xxx_hidden_RunAsDiscoveredProcessUser bool                         `protobuf:"varint,4,opt,name=run_as_discovered_process_user,json=runAsDiscoveredProcessUser,proto3"`
+	xxx_hidden_ExtendedCommand            ExtendedVersionCommand       `protobuf:"varint,5,opt,name=extended_command,json=extendedCommand,proto3,enum=guesttelemetryextension.isvdiscovery.ExtendedVersionCommand"`
+	xxx_hidden_Steps                      *[]*VersionCommandStep       `protobuf:"bytes,6,rep,name=steps,proto3"`
+	xxx_hidden_VersionExtractPattern      string                       `protobuf:"bytes,7,opt,name=version_extract_pattern,json=versionExtractPattern,proto3"`
+	xxx_hidden_ProcessField               StringMatchCondition_VmField `protobuf:"varint,8,opt,name=process_field,json=processField,proto3,enum=guesttelemetryextension.isvdiscovery.StringMatchCondition_VmField"`
 	unknownFields                         protoimpl.UnknownFields
 	sizeCache                             protoimpl.SizeCache
 }
@@ -1510,6 +1511,13 @@ func (x *DiscoveryVersionRule) GetVersionExtractPattern() string {
 	return ""
 }
 
+func (x *DiscoveryVersionRule) GetProcessField() StringMatchCondition_VmField {
+	if x != nil {
+		return x.xxx_hidden_ProcessField
+	}
+	return StringMatchCondition_VM_FIELD_UNSPECIFIED
+}
+
 func (x *DiscoveryVersionRule) SetCommand(v VersionCommand) {
 	x.xxx_hidden_Command = v
 }
@@ -1536,6 +1544,10 @@ func (x *DiscoveryVersionRule) SetSteps(v []*VersionCommandStep) {
 
 func (x *DiscoveryVersionRule) SetVersionExtractPattern(v string) {
 	x.xxx_hidden_VersionExtractPattern = v
+}
+
+func (x *DiscoveryVersionRule) SetProcessField(v StringMatchCondition_VmField) {
+	x.xxx_hidden_ProcessField = v
 }
 
 type DiscoveryVersionRule_builder struct {
@@ -1571,6 +1583,13 @@ type DiscoveryVersionRule_builder struct {
 	// A regular expression with exactly one capturing group used to extract the
 	// version. If provided, this overrides the default extracting logic.
 	VersionExtractPattern string
+	// If set, the version is extracted from this field of the discovered process
+	// and no command runs: it's the group that version_extract_pattern, which is
+	// required, captures in the first line that matches regex_match. This takes
+	// precedence over steps, command and extended_command. Older extensions skip
+	// the rule, because it has no command for them.
+	// VM_OS_NAME isn't a field of the process, so rules that use it are skipped.
+	ProcessField StringMatchCondition_VmField
 }
 
 func (b0 DiscoveryVersionRule_builder) Build() *DiscoveryVersionRule {
@@ -1584,6 +1603,7 @@ func (b0 DiscoveryVersionRule_builder) Build() *DiscoveryVersionRule {
 	x.xxx_hidden_ExtendedCommand = b.ExtendedCommand
 	x.xxx_hidden_Steps = &b.Steps
 	x.xxx_hidden_VersionExtractPattern = b.VersionExtractPattern
+	x.xxx_hidden_ProcessField = b.ProcessField
 	return m0
 }
 
@@ -1777,7 +1797,7 @@ const file_isvdiscovery_definition_definition_proto_rawDesc = "" +
 	"regexMatch\x12B\n" +
 	"\x1erun_as_discovered_process_user\x18\x04 \x01(\bR\x1arunAsDiscoveredProcessUser\x12g\n" +
 	"\x10extended_command\x18\x05 \x01(\x0e2<.guesttelemetryextension.isvdiscovery.ExtendedVersionCommandR\x0fextendedCommand\x12>\n" +
-	"\x1cuse_previous_output_as_stdin\x18\x06 \x01(\bR\x18usePreviousOutputAsStdin\"\xdf\x03\n" +
+	"\x1cuse_previous_output_as_stdin\x18\x06 \x01(\bR\x18usePreviousOutputAsStdin\"\xc8\x04\n" +
 	"\x14DiscoveryVersionRule\x12N\n" +
 	"\acommand\x18\x01 \x01(\x0e24.guesttelemetryextension.isvdiscovery.VersionCommandR\acommand\x12!\n" +
 	"\fcommand_args\x18\x02 \x03(\tR\vcommandArgs\x12\x1f\n" +
@@ -1786,7 +1806,8 @@ const file_isvdiscovery_definition_definition_proto_rawDesc = "" +
 	"\x1erun_as_discovered_process_user\x18\x04 \x01(\bR\x1arunAsDiscoveredProcessUser\x12g\n" +
 	"\x10extended_command\x18\x05 \x01(\x0e2<.guesttelemetryextension.isvdiscovery.ExtendedVersionCommandR\x0fextendedCommand\x12N\n" +
 	"\x05steps\x18\x06 \x03(\v28.guesttelemetryextension.isvdiscovery.VersionCommandStepR\x05steps\x126\n" +
-	"\x17version_extract_pattern\x18\a \x01(\tR\x15versionExtractPattern\"j\n" +
+	"\x17version_extract_pattern\x18\a \x01(\tR\x15versionExtractPattern\x12g\n" +
+	"\rprocess_field\x18\b \x01(\x0e2B.guesttelemetryextension.isvdiscovery.StringMatchCondition.VmFieldR\fprocessField\"j\n" +
 	"\x0fDiscoveryResult\x12W\n" +
 	"\rdetected_data\x18\x01 \x03(\v22.guesttelemetryextension.isvdiscovery.DetectedDataR\fdetectedData\"<\n" +
 	"\fDetectedData\x12\x12\n" +
@@ -1897,12 +1918,13 @@ var file_isvdiscovery_definition_definition_proto_depIdxs = []int32{
 	0,  // 14: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.command:type_name -> guesttelemetryextension.isvdiscovery.VersionCommand
 	1,  // 15: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.extended_command:type_name -> guesttelemetryextension.isvdiscovery.ExtendedVersionCommand
 	11, // 16: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.steps:type_name -> guesttelemetryextension.isvdiscovery.VersionCommandStep
-	14, // 17: guesttelemetryextension.isvdiscovery.DiscoveryResult.detected_data:type_name -> guesttelemetryextension.isvdiscovery.DetectedData
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	2,  // 17: guesttelemetryextension.isvdiscovery.DiscoveryVersionRule.process_field:type_name -> guesttelemetryextension.isvdiscovery.StringMatchCondition.VmField
+	14, // 18: guesttelemetryextension.isvdiscovery.DiscoveryResult.detected_data:type_name -> guesttelemetryextension.isvdiscovery.DetectedData
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_isvdiscovery_definition_definition_proto_init() }
