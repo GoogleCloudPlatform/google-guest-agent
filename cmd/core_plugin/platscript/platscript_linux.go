@@ -61,9 +61,10 @@ const (
 // NewModule returns the first boot module for late stage registration.
 func NewModule(context.Context) *manager.Module {
 	return &manager.Module{
-		ID:          platscriptModuleID,
-		Setup:       moduleSetup,
-		Description: "Executes platform configuration scripts available in the guest environment",
+		ID:                platscriptModuleID,
+		Setup:             moduleSetup,
+		NoNetworkRequired: true,
+		Description:       "Executes platform configuration scripts available in the guest environment",
 	}
 }
 
