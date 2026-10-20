@@ -36,10 +36,13 @@ install -p -m 0644 build/configs/etc/default/instance_configs.cfg %{buildroot}%/
 install -p -m 0644 build/configs/usr/lib/systemd/system/google-guest-agent.service %{buildroot}%/usr/lib/systemd/system/google-guest-agent.service
 install -p -m 0644 build/configs/usr/lib/systemd/system/google-guest-agent.service %{buildroot}%/usr/lib/systemd/system/google-startup-scripts.service
 install -p -m 0644 build/configs/usr/lib/systemd/system/google-guest-agent.service %{buildroot}%/usr/lib/systemd/system/google-shutdown-scripts.service
+install -p -m 0644 build/configs/usr/lib/systemd/system/google-guest-net-telemetry-early.service %{buildroot}%/usr/lib/systemd/system/google-guest-net-telemetry-early.service
 install -p -m 0755 cmd/google_guest_agent/google_guest_agent %{buildroot}%{_bindir}/google_guest_agent
 install -p -m 0755 cmd/google_guest_agent/ggactl %{buildroot}%{_bindir}/ggactl
 install -p -m 0755 cmd/core_plugin/core_plugin %{buildroot}%{_libdir}/google/guest_agent/GuestAgentCorePlugin/core_plugin
 install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.linux.binpb %{buildroot}%/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
+install -p -m 0755 cmd/guest_net_telemetry/guest_net_telemetry %{buildroot}%{_libdir}/google/guest_agent/GuestNetTelemetry/guest_net_telemetry
+install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestNetTelemetry/manifest.binpb %{buildroot}%/usr/lib/google/guest_agent/GuestNetTelemetry/manifest.binpb
 install -p -m 0755 cmd/guest_telemetry_extension/guest_telemetry %{buildroot}%{_libdir}/google/guest_agent/GuestTelemetryExtension/guest_telemetry
 install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb %{buildroot}%/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb
 
@@ -48,10 +51,13 @@ install -p -m 0644 build/configs/usr/lib/google/guest_agent/GuestTelemetryExtens
 /usr/lib/systemd/system/google-guest-agent.service
 /usr/lib/systemd/system/google-startup-scripts.service
 /usr/lib/systemd/system/google-shutdown-scripts.service
+/usr/lib/systemd/system/google-guest-net-telemetry-early.service
 %{_bindir}/google_guest_agent
 %{_bindir}/ggactl
 %{_libdir}/google/guest_agent/GuestAgentCorePlugin/core_plugin
 %{_libdir}/google/guest_agent/GuestAgentCorePlugin/manifest.binpb
+%{_libdir}/google/guest_agent/GuestNetTelemetry/guest_net_telemetry
+%{_libdir}/google/guest_agent/GuestNetTelemetry/manifest.binpb
 %{_libdir}/google/guest_agent/GuestTelemetryExtension/guest_telemetry
 %{_libdir}/google/guest_agent/GuestTelemetryExtension/manifest.binpb
 
@@ -70,6 +76,7 @@ if [ $1 -eq 1 ]; then
   systemctl enable google-guest-agent.service >/dev/null 2>&1 || :
   systemctl enable google-startup-scripts.service >/dev/null 2>&1 || :
   systemctl enable google-shutdown-scripts.service >/dev/null 2>&1 || :
+  systemctl enable google-guest-net-telemetry-early.service >/dev/null 2>&1 || :
 
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload >/dev/null 2>&1 || :
@@ -89,8 +96,10 @@ if [ $1 -eq 0 ]; then
   systemctl --no-reload disable google-guest-agent.service >/dev/null 2>&1 || :
   systemctl --no-reload disable google-startup-scripts.service >/dev/null 2>&1 || :
   systemctl --no-reload disable google-shutdown-scripts.service >/dev/null 2>&1 || :
+  systemctl --no-reload disable google-guest-net-telemetry-early.service >/dev/null 2>&1 || :
   if [ -d /run/systemd/system ]; then
     systemctl stop google-guest-agent.service >/dev/null 2>&1 || :
+    systemctl stop google-guest-net-telemetry-early.service >/dev/null 2>&1 || :
   fi
 fi
 
