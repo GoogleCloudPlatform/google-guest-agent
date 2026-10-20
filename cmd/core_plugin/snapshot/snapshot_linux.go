@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -54,6 +55,18 @@ const (
 	snapshotModuleID = "snapshot"
 	// defaultNguidGlobPattern is the default glob pattern to find all nguid files for NVMe devices.
 	defaultNguidGlobPattern = "/sys/class/block/nvme*n*/nguid"
+	// defaultPostSnapshotWatchdogTimeout is the failsafe timeout after a
+	// successful PRE_SNAPSHOT before post.sh is automatically executed if the
+	// host fails to deliver POST_SNAPSHOT (matching VMM's 300s operation
+	// timeout).
+	defaultPostSnapshotWatchdogTimeout = 5 * time.Minute
+	// grpcKeepaliveTime is the interval after which the client sends keepalive
+	// pings on the host-local snapshot stream to rapidly detect dead TCP
+	// connections after Live Migration cutover.
+	grpcKeepaliveTime = 10 * time.Second
+	// grpcKeepaliveTimeout is the time the client waits for a keepalive ping ack
+	// before closing and re-establishing the stream.
+	grpcKeepaliveTimeout = 5 * time.Second
 )
 
 // clientOptions contains the options for the snapshot handler.
@@ -62,8 +75,12 @@ type clientOptions struct {
 	protocol string
 	// address is the address of the snapshot service.
 	address string
-	// timeoutInSeconds is the timeout for the snapshot service.
-	timeoutInSeconds time.Duration
+	// timeout is the script execution timeout for the snapshot service.
+	timeout time.Duration
+	// postSnapshotWatchdogTimeout is the maximum time to wait for a
+	// POST_SNAPSHOT request after a successful PRE_SNAPSHOT before running
+	// post.sh as a failsafe.
+	postSnapshotWatchdogTimeout time.Duration
 	// scriptDir is the directory with snapshot pre/post scripts to be executed
 	// on request.
 	scriptDir string
@@ -81,6 +98,11 @@ type snapshotClient struct {
 	options clientOptions
 	// findDeviceByNguidFunc is the function to find a device by Nguid.
 	findDeviceByNguidFunc func(targetNguid string) (string, error)
+	// watchdogMu protects pendingWatchdogs.
+	watchdogMu sync.Mutex
+	// pendingWatchdogs maps operation IDs with an active PRE_SNAPSHOT freeze to
+	// their watchdog cancellation function.
+	pendingWatchdogs map[int32]context.CancelFunc
 }
 
 // NewModule returns the snapshot module for late stage registration.
@@ -99,10 +121,10 @@ func moduleSetup(ctx context.Context, _ any) error {
 	config := cfg.Retrieve().Snapshots
 
 	opts := clientOptions{
-		protocol:         "tcp",
-		address:          fmt.Sprintf("%s:%d", config.SnapshotServiceIP, config.SnapshotServicePort),
-		timeoutInSeconds: time.Duration(config.TimeoutInSeconds) * time.Second,
-		scriptDir:        defaultScriptsDir,
+		protocol:  "tcp",
+		address:   fmt.Sprintf("%s:%d", config.SnapshotServiceIP, config.SnapshotServicePort),
+		timeout:   time.Duration(config.TimeoutInSeconds) * time.Second,
+		scriptDir: defaultScriptsDir,
 	}
 
 	handler, err := newClient(opts)
@@ -121,11 +143,15 @@ func moduleSetup(ctx context.Context, _ any) error {
 
 // newClient creates a new snapshot handler.
 func newClient(options clientOptions) (*snapshotClient, error) {
+	if options.postSnapshotWatchdogTimeout <= 0 {
+		options.postSnapshotWatchdogTimeout = defaultPostSnapshotWatchdogTimeout
+	}
 	return &snapshotClient{
 		seenPreOperationIDS:   lru.New[int32](maxIDCacheSize),
 		seenPostOperationIDS:  lru.New[int32](maxIDCacheSize),
 		options:               options,
 		findDeviceByNguidFunc: findDeviceByNguid,
+		pendingWatchdogs:      make(map[int32]context.CancelFunc),
 	}, nil
 }
 
@@ -171,8 +197,8 @@ func (s *snapshotClient) listen(ctx context.Context) error {
 
 		creds := grpc.WithTransportCredentials(insecure.NewCredentials())
 		keepAlive := grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                1 * time.Minute,
-			Timeout:             20 * time.Second,
+			Time:                grpcKeepaliveTime,
+			Timeout:             grpcKeepaliveTimeout,
 			PermitWithoutStream: true,
 		})
 		conn, err := grpc.NewClient(s.options.fullAddress(), creds, keepAlive)
@@ -293,6 +319,7 @@ func (s *snapshotClient) handleRequest(ctx context.Context, request *sspb.Snapsh
 
 	// Mark the operation ID as seen and avoid repeated execution.
 	config.cache.Put(request.GetOperationId(), true)
+	s.cancelWatchdog(request.GetOperationId())
 	scriptPath := filepath.Join(s.options.scriptDir, config.scriptFileName)
 
 	// Trigger the execution of the script.
@@ -302,6 +329,10 @@ func (s *snapshotClient) handleRequest(ctx context.Context, request *sspb.Snapsh
 		exitCode, errCode = s.runScriptWithNguid(ctx, scriptPath, request.GetNguidList())
 	} else {
 		exitCode, errCode = s.runScript(ctx, scriptPath, request.GetDiskList())
+	}
+
+	if request.GetType() == sspb.OperationType_PRE_SNAPSHOT && errCode == sspb.AgentErrorCode_NO_ERROR {
+		s.startWatchdog(ctx, request)
 	}
 
 	response := &sspb.SnapshotResponse{
@@ -363,7 +394,7 @@ func (s *snapshotClient) runScript(ctx context.Context, scriptPath string, disks
 	}
 
 	cmd := []string{scriptPath, disks}
-	opts := run.Options{Name: cmd[0], Args: cmd[1:], OutputType: run.OutputNone, Timeout: s.options.timeoutInSeconds}
+	opts := run.Options{Name: cmd[0], Args: cmd[1:], OutputType: run.OutputNone, Timeout: s.options.timeout}
 	_, err := run.WithContext(ctx, opts)
 
 	// Handle timeout error.
@@ -409,7 +440,7 @@ func (s *snapshotClient) runScriptWithNguid(ctx context.Context, scriptPath stri
 	diskNamesString := strings.Join(diskNames, ",")
 
 	cmd := []string{scriptPath, diskNamesString}
-	opts := run.Options{Name: cmd[0], Args: cmd[1:], OutputType: run.OutputNone, Timeout: s.options.timeoutInSeconds}
+	opts := run.Options{Name: cmd[0], Args: cmd[1:], OutputType: run.OutputNone, Timeout: s.options.timeout}
 	_, err := run.WithContext(ctx, opts)
 
 	// Handle timeout error.
@@ -424,4 +455,52 @@ func (s *snapshotClient) runScriptWithNguid(ctx context.Context, scriptPath stri
 
 	galog.Infof("Snapshot script %q succeeded.", scriptPath)
 	return 0, sspb.AgentErrorCode_NO_ERROR
+}
+
+// startWatchdog arms a failsafe timer after a successful PRE_SNAPSHOT so that
+// if the host fails to deliver a matching POST_SNAPSHOT (for example across
+// Live Migration or control plane timeout), post.sh is automatically executed
+// to unfreeze the guest filesystem.
+func (s *snapshotClient) startWatchdog(ctx context.Context, request *sspb.SnapshotRequest) {
+	opID := request.GetOperationId()
+	wCtx, cancel := context.WithCancel(ctx)
+
+	s.watchdogMu.Lock()
+	s.pendingWatchdogs[opID] = cancel
+	s.watchdogMu.Unlock()
+
+	go func() {
+		timer := time.NewTimer(s.options.postSnapshotWatchdogTimeout)
+		defer timer.Stop()
+
+		select {
+		case <-wCtx.Done():
+			return
+		case <-timer.C:
+			s.watchdogMu.Lock()
+			delete(s.pendingWatchdogs, opID)
+			s.watchdogMu.Unlock()
+
+			s.seenPostOperationIDS.Put(opID, true)
+
+			galog.Warnf("Timed out waiting %v for POST_SNAPSHOT for operation id %d; running failsafe post.sh to unfreeze disks.", s.options.postSnapshotWatchdogTimeout, opID)
+			scriptPath := filepath.Join(s.options.scriptDir, "post.sh")
+			if request.GetNguidList() != "" {
+				s.runScriptWithNguid(ctx, scriptPath, request.GetNguidList())
+			} else {
+				s.runScript(ctx, scriptPath, request.GetDiskList())
+			}
+		}
+	}()
+}
+
+// cancelWatchdog cancels and removes any active post-snapshot watchdog for the
+// given operation ID.
+func (s *snapshotClient) cancelWatchdog(opID int32) {
+	s.watchdogMu.Lock()
+	defer s.watchdogMu.Unlock()
+	if cancel, exists := s.pendingWatchdogs[opID]; exists {
+		cancel()
+		delete(s.pendingWatchdogs, opID)
+	}
 }

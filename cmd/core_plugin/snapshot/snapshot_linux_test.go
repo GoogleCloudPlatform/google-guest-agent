@@ -296,10 +296,10 @@ func TestSuccess(t *testing.T) {
 	defer server.Close()
 
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(10) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   10 * time.Second,
+		scriptDir: scriptDir,
 	}
 
 	client, err := newClient(clientOpts)
@@ -390,10 +390,10 @@ func TestSuccessWithNguid(t *testing.T) {
 	defer server.Close()
 
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(10) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   10 * time.Second,
+		scriptDir: scriptDir,
 	}
 
 	client, err := newClient(clientOpts)
@@ -486,10 +486,10 @@ func TestPartialSuccessWithNguid(t *testing.T) {
 	defer server.Close()
 
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(10) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   10 * time.Second,
+		scriptDir: scriptDir,
 	}
 
 	client, err := newClient(clientOpts)
@@ -582,10 +582,10 @@ func TestNoMatchedDeviceWithNguid(t *testing.T) {
 	defer server.Close()
 
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(10) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   10 * time.Second,
+		scriptDir: scriptDir,
 	}
 
 	client, err := newClient(clientOpts)
@@ -725,10 +725,10 @@ func TestNoSuchScript(t *testing.T) {
 	defer server.Close()
 
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(10) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   10 * time.Second,
+		scriptDir: scriptDir,
 	}
 
 	client, err := newClient(clientOpts)
@@ -787,10 +787,10 @@ func TestDuplicateRequest(t *testing.T) {
 	defer server.Close()
 
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(10) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   10 * time.Second,
+		scriptDir: scriptDir,
 	}
 	client, err := newClient(clientOpts)
 	if err != nil {
@@ -854,10 +854,10 @@ func TestTimedoutScript(t *testing.T) {
 
 	scriptTimeout := 1
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(scriptTimeout) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   time.Duration(scriptTimeout) * time.Second,
+		scriptDir: scriptDir,
 	}
 
 	client, err := newClient(clientOpts)
@@ -923,10 +923,10 @@ func TestScriptExitCode(t *testing.T) {
 	defer server.Close()
 
 	clientOpts := clientOptions{
-		protocol:         testProtocol,
-		address:          socket,
-		timeoutInSeconds: time.Duration(10) * time.Second,
-		scriptDir:        scriptDir,
+		protocol:  testProtocol,
+		address:   socket,
+		timeout:   10 * time.Second,
+		scriptDir: scriptDir,
 	}
 
 	client, err := newClient(clientOpts)
@@ -1007,5 +1007,352 @@ func TestNewModule(t *testing.T) {
 	}
 	if module.Description == "" {
 		t.Errorf("NewModule() returned module with empty Description")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := module.Setup(ctx, nil); err != nil {
+		t.Errorf("module.Setup() returned unexpected error: %v", err)
+	}
+
+	client, err := newClient(clientOptions{})
+	if err != nil {
+		t.Fatalf("newClient() returned unexpected error: %v", err)
+	}
+	if client.options.postSnapshotWatchdogTimeout != defaultPostSnapshotWatchdogTimeout {
+		t.Errorf("client.options.postSnapshotWatchdogTimeout = %v, want %v", client.options.postSnapshotWatchdogTimeout, defaultPostSnapshotWatchdogTimeout)
+	}
+}
+
+func TestPostSnapshotWatchdogRunsPostScriptOnTimeout(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	clientOpts := clientOptions{
+		protocol:                    testProtocol,
+		address:                     socket,
+		timeout:                     10 * time.Second,
+		postSnapshotWatchdogTimeout: 300 * time.Millisecond,
+		scriptDir:                   scriptDir,
+	}
+
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+	client.findDeviceByNguidFunc = fakeFindDeviceByNguid
+
+	testOpts := testOptions{
+		client: client,
+		server: server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	preOutput := filepath.Join(scriptDir, "pre.out")
+	postOutput := filepath.Join(scriptDir, "post.out")
+	writeScript(t, sspb.OperationType_PRE_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"pre $1\" > %s", preOutput))    // NOLINT
+	writeScript(t, sspb.OperationType_POST_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"post $1\" > %s", postOutput)) // NOLINT
+
+	// Send only PRE_SNAPSHOT and never send POST_SNAPSHOT.
+	reqID := server.requestID()
+	server.messageBus <- newRequest(reqID, "2/0", sspb.OperationType_PRE_SNAPSHOT)
+
+	resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+	if err != nil {
+		t.Fatalf("Failed to get PRE_SNAPSHOT response: %v", err)
+	}
+	if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+		t.Fatalf("PRE_SNAPSHOT ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+	}
+
+	// Wait for the failsafe watchdog to automatically execute post.sh.
+	waitPostCb := func() error {
+		if !file.Exists(postOutput, file.TypeFile) {
+			return fmt.Errorf("post.out not written yet")
+		}
+		return nil
+	}
+	policy := retry.Policy{MaxAttempts: 15, BackoffFactor: 1, Jitter: 100 * time.Millisecond}
+	if err := retry.Run(ctx, policy, waitPostCb); err != nil {
+		t.Fatalf("Watchdog did not execute post.sh after timeout: %v", err)
+	}
+
+	data, err := os.ReadFile(postOutput)
+	if err != nil {
+		t.Fatalf("Failed to read post.out: %v", err)
+	}
+	if string(data) != "post 2/0\n" {
+		t.Fatalf("post.out content = %q, want %q", string(data), "post 2/0\n")
+	}
+
+	// Verify that a late POST_SNAPSHOT for the same operation ID after the
+	// watchdog has already fired is ignored as a duplicate and does not re-run
+	// post.sh.
+	writeScript(t, sspb.OperationType_POST_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"late $1\" >> %s", postOutput)) // NOLINT
+	server.delResponse(reqID)
+	server.messageBus <- newRequest(reqID, "2/0", sspb.OperationType_POST_SNAPSHOT)
+	if _, err := server.waitForResponse(ctx, 1, reqID); err == nil {
+		t.Fatalf("Late POST_SNAPSHOT after watchdog fired succeeded unexpectedly, want duplicate rejection")
+	}
+	data, err = os.ReadFile(postOutput)
+	if err != nil {
+		t.Fatalf("Failed to read post.out: %v", err)
+	}
+	if string(data) != "post 2/0\n" {
+		t.Fatalf("post.out content after late POST_SNAPSHOT = %q, want %q", string(data), "post 2/0\n")
+	}
+
+	// Also verify watchdog timeout execution for an NVMe (NguidList) request.
+	if err := os.Remove(postOutput); err != nil {
+		t.Fatalf("Failed to remove post.out: %v", err)
+	}
+	writeScript(t, sspb.OperationType_POST_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"post $1\" > %s", postOutput)) // NOLINT
+	reqIDNguid := server.requestID()
+	server.messageBus <- newRequestWithNguid(reqIDNguid, "disklist", sspb.OperationType_PRE_SNAPSHOT, "deadbeef,01abcdef")
+	resp, err = server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqIDNguid)
+	if err != nil {
+		t.Fatalf("Failed to get NVMe PRE_SNAPSHOT response: %v", err)
+	}
+	if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+		t.Fatalf("NVMe PRE_SNAPSHOT ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+	}
+	if err := retry.Run(ctx, policy, waitPostCb); err != nil {
+		t.Fatalf("Watchdog did not execute post.sh for NVMe request after timeout: %v", err)
+	}
+	data, err = os.ReadFile(postOutput)
+	if err != nil {
+		t.Fatalf("Failed to read NVMe post.out: %v", err)
+	}
+	if string(data) != "post /dev/nvme0n1\n" {
+		t.Fatalf("NVMe post.out content = %q, want %q", string(data), "post /dev/nvme0n1\n")
+	}
+}
+
+func TestPostSnapshotWatchdogCancelledOnMatchingPostSnapshot(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	watchdogTimeout := 300 * time.Millisecond
+	clientOpts := clientOptions{
+		protocol:                    testProtocol,
+		address:                     socket,
+		timeout:                     10 * time.Second,
+		postSnapshotWatchdogTimeout: watchdogTimeout,
+		scriptDir:                   scriptDir,
+	}
+
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
+	testOpts := testOptions{
+		client: client,
+		server: server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	preOutput := filepath.Join(scriptDir, "pre.out")
+	postOutput := filepath.Join(scriptDir, "post.out")
+	writeScript(t, sspb.OperationType_PRE_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"pre $1\" >> %s", preOutput))    // NOLINT
+	writeScript(t, sspb.OperationType_POST_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"post $1\" >> %s", postOutput)) // NOLINT
+
+	reqID := server.requestID()
+	server.messageBus <- newRequest(reqID, "2/0", sspb.OperationType_PRE_SNAPSHOT)
+
+	resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+	if err != nil {
+		t.Fatalf("Failed to get PRE_SNAPSHOT response: %v", err)
+	}
+	if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+		t.Fatalf("PRE_SNAPSHOT ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+	}
+
+	// Deliver matching POST_SNAPSHOT before the watchdog timeout expires.
+	server.delResponse(reqID)
+	server.messageBus <- newRequest(reqID, "2/0", sspb.OperationType_POST_SNAPSHOT)
+
+	resp, err = server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+	if err != nil {
+		t.Fatalf("Failed to get POST_SNAPSHOT response: %v", err)
+	}
+	if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+		t.Fatalf("POST_SNAPSHOT ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+	}
+
+	// Wait past the watchdog timeout and confirm post.sh was not executed a
+	// second time.
+	time.Sleep(watchdogTimeout + 200*time.Millisecond)
+
+	data, err := os.ReadFile(postOutput)
+	if err != nil {
+		t.Fatalf("Failed to read post.out: %v", err)
+	}
+	if string(data) != "post 2/0\n" {
+		t.Fatalf("post.out content = %q, want single execution %q", string(data), "post 2/0\n")
+	}
+}
+
+func TestPostSnapshotWatchdogNotDisarmedByMismatchedOperationID(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	clientOpts := clientOptions{
+		protocol:                    testProtocol,
+		address:                     socket,
+		timeout:                     10 * time.Second,
+		postSnapshotWatchdogTimeout: 400 * time.Millisecond,
+		scriptDir:                   scriptDir,
+	}
+
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
+	testOpts := testOptions{
+		client: client,
+		server: server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	preOutput := filepath.Join(scriptDir, "pre.out")
+	postOutput := filepath.Join(scriptDir, "post.out")
+	writeScript(t, sspb.OperationType_PRE_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"pre $1\" >> %s", preOutput))    // NOLINT
+	writeScript(t, sspb.OperationType_POST_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"post $1\" >> %s", postOutput)) // NOLINT
+
+	// Start PRE_SNAPSHOT for operation 1.
+	op1 := server.requestID()
+	server.messageBus <- newRequest(op1, "disk-op1", sspb.OperationType_PRE_SNAPSHOT)
+
+	resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, op1)
+	if err != nil {
+		t.Fatalf("Failed to get PRE_SNAPSHOT response for op1: %v", err)
+	}
+	if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+		t.Fatalf("PRE_SNAPSHOT ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+	}
+
+	// Send POST_SNAPSHOT for a different operation ID (op2). It must not disarm
+	// the watchdog waiting for op1.
+	op2 := server.requestID()
+	server.messageBus <- newRequest(op2, "disk-op2", sspb.OperationType_POST_SNAPSHOT)
+
+	resp, err = server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, op2)
+	if err != nil {
+		t.Fatalf("Failed to get POST_SNAPSHOT response for op2: %v", err)
+	}
+	if resp.GetAgentReturnCode() != sspb.AgentErrorCode_NO_ERROR {
+		t.Fatalf("POST_SNAPSHOT ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_NO_ERROR)
+	}
+
+	// Wait for op1's watchdog to fire and append "post disk-op1" to post.out.
+	waitOp1Watchdog := func() error {
+		data, err := os.ReadFile(postOutput)
+		if err != nil {
+			return err
+		}
+		if string(data) != "post disk-op2\npost disk-op1\n" {
+			return fmt.Errorf("post.out = %q, waiting for op1 watchdog execution", string(data))
+		}
+		return nil
+	}
+	policy := retry.Policy{MaxAttempts: 15, BackoffFactor: 1, Jitter: 100 * time.Millisecond}
+	if err := retry.Run(ctx, policy, waitOp1Watchdog); err != nil {
+		t.Fatalf("Watchdog for op1 was unexpectedly disarmed by op2 POST_SNAPSHOT: %v", err)
+	}
+}
+
+func TestPostSnapshotWatchdogNotArmedWhenPreSnapshotFails(t *testing.T) {
+	tmp := t.TempDir()
+	socket := filepath.Join(tmp, "test.sock")
+	scriptDir := filepath.Join(tmp, "scripts")
+
+	server := newSnapshotServer()
+	defer server.Close()
+
+	watchdogTimeout := 250 * time.Millisecond
+	clientOpts := clientOptions{
+		protocol:                    testProtocol,
+		address:                     socket,
+		timeout:                     10 * time.Second,
+		postSnapshotWatchdogTimeout: watchdogTimeout,
+		scriptDir:                   scriptDir,
+	}
+
+	client, err := newClient(clientOpts)
+	if err != nil {
+		t.Fatalf("Failed to create snapshot client: %v", err)
+	}
+
+	testOpts := testOptions{
+		client: client,
+		server: server,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runClientAndServer(ctx, t, testOpts)
+
+	if err := os.MkdirAll(scriptDir, 0700); err != nil {
+		t.Fatalf("failed to create scripts directory %q: %v", scriptDir, err)
+	}
+
+	postOutput := filepath.Join(scriptDir, "post.out")
+	writeScript(t, sspb.OperationType_PRE_SNAPSHOT, scriptDir, "exit 1")                                          // NOLINT
+	writeScript(t, sspb.OperationType_POST_SNAPSHOT, scriptDir, fmt.Sprintf("echo \"post $1\" > %s", postOutput)) // NOLINT
+
+	reqID := server.requestID()
+	server.messageBus <- newRequest(reqID, "2/0", sspb.OperationType_PRE_SNAPSHOT)
+
+	resp, err := server.waitForResponse(ctx, defaultTestGetResponseTimeoutInSeconds, reqID)
+	if err != nil {
+		t.Fatalf("Failed to get PRE_SNAPSHOT response: %v", err)
+	}
+	if resp.GetAgentReturnCode() != sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR {
+		t.Fatalf("PRE_SNAPSHOT ReturnCode = %v, want %v", resp.GetAgentReturnCode(), sspb.AgentErrorCode_UNHANDLED_SCRIPT_ERROR)
+	}
+
+	// Wait past the watchdog deadline and verify post.sh was never executed.
+	time.Sleep(watchdogTimeout + 200*time.Millisecond)
+	if file.Exists(postOutput, file.TypeFile) {
+		t.Fatalf("Watchdog unexpectedly ran post.sh after a failed PRE_SNAPSHOT")
 	}
 }
