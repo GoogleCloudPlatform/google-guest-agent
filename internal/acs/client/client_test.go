@@ -17,7 +17,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"net"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +30,9 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/testserver"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	apb "google.golang.org/protobuf/types/known/anypb"
@@ -646,5 +651,246 @@ func TestIsACSEnabled(t *testing.T) {
 				t.Errorf("isACSEnabled() = %t, want %t", got, tc.want)
 			}
 		})
+	}
+}
+
+// fakeACS is an ACS server that counts the RPCs it receives. testserver
+// doesn't record stream registrations and returns no SendAgentMessage
+// response, so tests that check which RPCs the client makes use fakeACS.
+type fakeACS struct {
+	// streamErr, if set, rejects every stream with this error.
+	streamErr error
+	// failNextUnary, if set, rejects the next SendAgentMessage request.
+	failNextUnary atomic.Bool
+	// streams is the number of StreamAgentMessages streams opened.
+	streams atomic.Int32
+	// unary is the number of SendAgentMessage requests received.
+	unary atomic.Int32
+}
+
+func (s *fakeACS) StreamAgentMessages(stream acpb.AgentCommunication_StreamAgentMessagesServer) error {
+	s.streams.Add(1)
+	if s.streamErr != nil {
+		return s.streamErr
+	}
+	for {
+		req, err := stream.Recv()
+		if err != nil {
+			return nil
+		}
+		// Ack every request, including RegisterConnection.
+		resp := &acpb.StreamAgentMessagesResponse{MessageId: req.GetMessageId(), Type: &acpb.StreamAgentMessagesResponse_MessageResponse{}}
+		if err := stream.Send(resp); err != nil {
+			return err
+		}
+	}
+}
+
+func (s *fakeACS) SendAgentMessage(_ context.Context, req *acpb.SendAgentMessageRequest) (*acpb.SendAgentMessageResponse, error) {
+	s.unary.Add(1)
+	if s.failNextUnary.CompareAndSwap(true, false) {
+		return nil, status.Error(codes.Internal, "injected SendAgentMessage error")
+	}
+	return &acpb.SendAgentMessageResponse{MessageBody: req.GetMessageBody()}, nil
+}
+
+// setupFakeACS points the ACS client at srv and resets the client state.
+// testserver still runs for the metadata server the ACS client library needs.
+func setupFakeACS(t *testing.T, srv *fakeACS) {
+	t.Helper()
+	enableACSClient(t)
+
+	dir := t.TempDir()
+	ts := testserver.NewTestServer(filepath.Join(dir, "ts.sock"))
+	if err := ts.Start(); err != nil {
+		t.Fatalf("Failed to start test server: %v", err)
+	}
+	t.Cleanup(ts.CleanUp)
+
+	addr := filepath.Join(dir, "fake.sock")
+	lis, err := net.Listen("unix", addr)
+	if err != nil {
+		t.Fatalf("net.Listen(unix, %q) failed unexpectedly with error: %v", addr, err)
+	}
+	s := grpc.NewServer()
+	acpb.RegisterAgentCommunicationServer(s, srv)
+	go func() {
+		_ = s.Serve(lis)
+	}()
+	t.Cleanup(s.Stop)
+	// ts.Start() pointed the ACS host at testserver, use srv instead.
+	cfg.Retrieve().ACS.Host = addr
+
+	acs = &acsHelper{}
+	t.Cleanup(func() {
+		if !isNilInterface(acs.connection) {
+			acs.connection.Close()
+		}
+		if acs.client != nil {
+			_ = acs.client.Close()
+		}
+		acs = &acsHelper{}
+	})
+}
+
+func TestSendMessageDoesNotOpenStream(t *testing.T) {
+	srv := &fakeACS{}
+	setupFakeACS(t, srv)
+	ctx := context.Background()
+	msg := &acmpb.GuestAgentModuleMetrics{}
+
+	if _, err := SendMessage(ctx, nil, msg); err != nil {
+		t.Fatalf("SendMessage(ctx, nil, %+v) failed unexpectedly with error: %v", msg, err)
+	}
+	firstClient := acs.client
+	if _, err := SendMessage(ctx, nil, msg); err != nil {
+		t.Fatalf("SendMessage(ctx, nil, %+v) failed unexpectedly with error: %v", msg, err)
+	}
+
+	if got := srv.unary.Load(); got != 2 {
+		t.Errorf("SendAgentMessage requests = %d, want 2", got)
+	}
+	if got := srv.streams.Load(); got != 0 {
+		t.Errorf("StreamAgentMessages streams = %d, want 0", got)
+	}
+	if acs.connection != nil || acs.isConnectionSet.Load() {
+		t.Errorf("SendMessage() set connection = %T, isConnectionSet = %t, want <nil>, false", acs.connection, acs.isConnectionSet.Load())
+	}
+	if acs.client != firstClient {
+		t.Errorf("Second SendMessage() created a new client, want the first client reused")
+	}
+}
+
+func TestSendMessageRetryDoesNotOpenStream(t *testing.T) {
+	srv := &fakeACS{}
+	srv.failNextUnary.Store(true)
+	setupFakeACS(t, srv)
+	origPolicy := defaultRetrypolicy
+	t.Cleanup(func() { defaultRetrypolicy = origPolicy })
+	defaultRetrypolicy.MaxAttempts = 2
+	defaultRetrypolicy.Jitter = time.Millisecond
+	ctx := context.Background()
+	msg := &acmpb.GuestAgentModuleMetrics{}
+
+	_, err := SendMessage(ctx, nil, msg)
+
+	if err != nil {
+		t.Fatalf("SendMessage(ctx, nil, %+v) failed unexpectedly with error: %v", msg, err)
+	}
+	if got := srv.unary.Load(); got != 2 {
+		t.Errorf("SendAgentMessage requests = %d, want 2 (one rejected, one retried)", got)
+	}
+	if got := srv.streams.Load(); got != 0 {
+		t.Errorf("StreamAgentMessages streams = %d, want 0", got)
+	}
+}
+
+func TestNotifyReusesSendMessageClient(t *testing.T) {
+	srv := &fakeACS{}
+	setupFakeACS(t, srv)
+	ctx := context.Background()
+	if _, err := SendMessage(ctx, nil, &acmpb.GuestAgentModuleMetrics{}); err != nil {
+		t.Fatalf("SendMessage() failed unexpectedly with error: %v", err)
+	}
+	unaryClient := acs.client
+	event := &acmpb.PluginEventMessage{PluginName: "test_plugin"}
+
+	if err := Notify(ctx, event); err != nil {
+		t.Fatalf("First Notify(ctx, %+v) failed unexpectedly with error: %v", event, err)
+	}
+	if err := Notify(ctx, event); err != nil {
+		t.Fatalf("Second Notify(ctx, %+v) failed unexpectedly with error: %v", event, err)
+	}
+
+	if acs.client != unaryClient {
+		t.Errorf("Notify() created a new client, want the client created by SendMessage() reused")
+	}
+	if got := srv.streams.Load(); got != 1 {
+		t.Errorf("StreamAgentMessages streams after 2 Notify() calls = %d, want 1", got)
+	}
+}
+
+func TestConnectAfterCloseRecreatesClientAndConnection(t *testing.T) {
+	srv := &fakeACS{}
+	setupFakeACS(t, srv)
+	ctx := context.Background()
+	if err := acs.connect(ctx); err != nil {
+		t.Fatalf("connect(ctx) failed unexpectedly with error: %v", err)
+	}
+	oldClient, oldConnection := acs.client, acs.connection
+
+	acs.close(ctx)
+	if err := acs.connect(ctx); err != nil {
+		t.Fatalf("connect(ctx) after close(ctx) failed unexpectedly with error: %v", err)
+	}
+
+	if acs.client == oldClient {
+		t.Errorf("connect(ctx) after close(ctx) reused the closed client, want a new client")
+	}
+	if acs.connection == oldConnection {
+		t.Errorf("connect(ctx) after close(ctx) reused the closed connection, want a new connection")
+	}
+	if got := srv.streams.Load(); got != 2 {
+		t.Errorf("StreamAgentMessages streams = %d, want 2", got)
+	}
+}
+
+func TestCloseWithoutConnection(t *testing.T) {
+	srv := &fakeACS{}
+	setupFakeACS(t, srv)
+	ctx := context.Background()
+	if _, err := SendMessage(ctx, nil, &acmpb.GuestAgentModuleMetrics{}); err != nil {
+		t.Fatalf("SendMessage() failed unexpectedly with error: %v", err)
+	}
+	unaryClient := acs.client
+
+	acs.close(ctx)
+
+	if acs.isConnectionSet.Load() || acs.isClientSet.Load() {
+		t.Errorf("close(ctx) left isConnectionSet = %t, isClientSet = %t, want false, false", acs.isConnectionSet.Load(), acs.isClientSet.Load())
+	}
+	// close(ctx) must close the client, so later RPCs on it fail.
+	if _, err := unaryClient.SendAgentMessage(ctx, &acpb.SendAgentMessageRequest{}); status.Code(err) != codes.Canceled {
+		t.Errorf("SendAgentMessage() on the client after close(ctx) returned error: %v, want code %v", err, codes.Canceled)
+	}
+}
+
+func TestConnectFailureLeavesConnectionUnset(t *testing.T) {
+	srv := &fakeACS{streamErr: status.Error(codes.PermissionDenied, "stream rejected")}
+	setupFakeACS(t, srv)
+	ctx := context.Background()
+
+	if err := acs.connect(ctx); err == nil {
+		t.Fatalf("connect(ctx) succeeded, want error when ACS rejects the stream")
+	}
+
+	if acs.connection != nil || acs.isConnectionSet.Load() {
+		t.Fatalf("connect(ctx) failed but set connection = %v (%T), isConnectionSet = %t, want nil, false", acs.connection, acs.connection, acs.isConnectionSet.Load())
+	}
+	// A later failed unary send calls close(), which must not panic.
+	acs.close(ctx)
+}
+
+func TestConnectRetryAfterStreamFailure(t *testing.T) {
+	srv := &fakeACS{streamErr: status.Error(codes.PermissionDenied, "stream rejected")}
+	setupFakeACS(t, srv)
+	ctx := context.Background()
+
+	if err := acs.connect(ctx); err == nil {
+		t.Fatalf("connect(ctx) succeeded, want error when ACS rejects the stream")
+	}
+	first := acs.client
+	if err := acs.connect(ctx); err == nil {
+		t.Fatalf("second connect(ctx) succeeded, want error when ACS rejects the stream")
+	}
+
+	if acs.client == first {
+		t.Errorf("connect(ctx) retry reused the client from the failed attempt, want a new client")
+	}
+	if _, err := first.SendAgentMessage(ctx, &acpb.SendAgentMessageRequest{}); status.Code(err) != codes.Canceled {
+		t.Errorf("SendAgentMessage() on the client from the failed attempt returned %v, want code %v", err, codes.Canceled)
+	}
+	if got := srv.streams.Load(); got != 2 {
+		t.Errorf("StreamAgentMessages streams = %d, want 2", got)
 	}
 }

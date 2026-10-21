@@ -82,6 +82,11 @@ type acsHelper struct {
 	// isConnectionSet is set if connection is initialized and still valid.
 	// Its reset to false in error case to trigger reconnection.
 	isConnectionSet atomic.Bool
+	// isClientSet is set if client is initialized and still valid. It's reset
+	// on close and on a failed stream connect so the next call creates a new
+	// client. The closed client is kept in client instead of nil, so a caller
+	// that already read it gets an RPC error rather than a nil dereference.
+	isClientSet atomic.Bool
 	// isEnabledMu protects isEnabled.
 	isEnabledMu sync.Mutex
 	// isEnabled tracks if ACS client is enabled.
@@ -147,7 +152,13 @@ func (acs *acsHelper) close(ctx context.Context) {
 	// Reset connection state, this will trigger to create a new ACS connection
 	// on next send/receive.
 	acs.isConnectionSet.Store(false)
-	acs.connection.Close()
+	acs.isClientSet.Store(false)
+	// connection is nil if this process only sent unary requests. connect()
+	// never stores a typed nil, so a plain nil check is enough (isNilInterface
+	// would also skip the fake connections used in tests).
+	if acs.connection != nil {
+		acs.connection.Close()
+	}
 
 	if ctx.Value(OverrideConnection) != nil {
 		// Skip closing the client in override mode, it might not be set.
@@ -164,7 +175,9 @@ func (acs *acsHelper) shouldReconnect() bool {
 	return !acs.isConnectionSet.Load() || (acs.client == nil) || isNilInterface(acs.connection)
 }
 
-// connect creates new stream and connection to ACS and sets the client.
+// connect opens a stream connection to ACS. It reuses a valid client, such as
+// one created by [connectClient], and creates a new client after [close] or a
+// failed stream attempt.
 // New connection is created if found nil or [isConnectionSet] is unset.
 // isConnectionSet can be unset to trigger new connection creation which is
 // generally required on send/receive error.
@@ -191,22 +204,67 @@ func (acs *acsHelper) connect(ctx context.Context) error {
 	}
 
 	galog.Debugf("Creating new ACS connection")
+	if err := acs.ensureClientLocked(ctx); err != nil {
+		return err
+	}
+	// Only set the connection on success so it's never a typed nil, which
+	// [close] would fail to detect.
+	conn, err := client.NewConnection(ctx, acs.channelID, acs.client)
+	if err != nil {
+		// Close the client so it isn't leaked, and create a new one on the next
+		// attempt so client.NewClient re-evaluates VSOCK and endpoint settings.
+		acs.isClientSet.Store(false)
+		if cerr := acs.client.Close(); cerr != nil {
+			galog.Debugf("Failed to close ACS client: %v", cerr)
+		}
+		return fmt.Errorf("unable to create new ACS connection, err: %w", err)
+	}
+	acs.connection = conn
+	acs.isConnectionSet.Store(true)
+	galog.Debugf("Created ACS connection")
+	return nil
+}
+
+// ensureClientLocked creates a new ACS client, and refreshes channelID from
+// config, unless a valid client is already set. Caller must hold connMu.
+func (acs *acsHelper) ensureClientLocked(ctx context.Context) error {
+	if acs.isClientSet.Load() && acs.client != nil {
+		return nil
+	}
 	acs.channelID = channelID()
 	opts, err := clientOptions(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to get client options, err: %w", err)
 	}
-	acs.client, err = client.NewClient(ctx, false, opts...)
+	c, err := client.NewClient(ctx, false, opts...)
 	if err != nil {
 		return fmt.Errorf("unable to create new ACS client, err: %w", err)
 	}
-	acs.connection, err = client.NewConnection(ctx, acs.channelID, acs.client)
-	if err != nil {
-		return fmt.Errorf("unable to create new ACS connection, err: %w", err)
-	}
-	acs.isConnectionSet.Store(true)
-	galog.Debugf("Created ACS connection")
+	acs.client = c
+	acs.isClientSet.Store(true)
 	return nil
+}
+
+// connectClient creates the ACS client used for unary requests if it's not
+// already set. Unlike [connect], it does not open a stream connection, so a
+// process that only sends unary requests (like core plugin) doesn't register
+// an extra stream that nothing reads from.
+func (acs *acsHelper) connectClient(ctx context.Context) error {
+	acs.connMu.Lock()
+	defer acs.connMu.Unlock()
+
+	if !acs.isACSEnabled(ctx) {
+		galog.V(2).Debugf("ACS client is disabled, skipping client creation")
+		return nil
+	}
+
+	// Unit tests set OverrideConnection to avoid network calls. Unary sends don't
+	// use the override connection, so skip creating a real client.
+	if ctx.Value(OverrideConnection) != nil {
+		return nil
+	}
+
+	return acs.ensureClientLocked(ctx)
 }
 
 // sendStream sends a message to ACS stream.
@@ -236,7 +294,8 @@ var sendAgentMessage = func(ctx context.Context, channelID string, acsClient *ag
 
 // sendStream sends a message and wait for response from ACS.
 func (acs *acsHelper) sendMessage(ctx context.Context, labels map[string]string, msg *anypb.Any) (*acpb.SendAgentMessageResponse, error) {
-	if err := acs.connect(ctx); err != nil {
+	// Unary requests only need the client, don't open a stream connection.
+	if err := acs.connectClient(ctx); err != nil {
 		return nil, fmt.Errorf("unable to connect for sending msg, err: %w", err)
 	}
 
