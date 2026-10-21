@@ -28,6 +28,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/testserver"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	apb "google.golang.org/protobuf/types/known/anypb"
@@ -40,6 +42,8 @@ type conn struct {
 	sendMessage     *apb.Any
 	isNotify        bool
 	throwErr        bool
+	err             error
+	attempts        int
 	closeCalled     bool
 }
 
@@ -48,6 +52,10 @@ func (c *conn) Close() {
 }
 
 func (c *conn) SendMessage(msg *acpb.MessageBody) error {
+	c.attempts++
+	if c.err != nil {
+		return c.err
+	}
 	if c.throwErr {
 		return fmt.Errorf("test error")
 	}
@@ -74,6 +82,10 @@ func (c *conn) SendMessage(msg *acpb.MessageBody) error {
 }
 
 func (c *conn) Receive() (*acpb.MessageBody, error) {
+	c.attempts++
+	if c.err != nil {
+		return nil, c.err
+	}
 	if c.throwErr {
 		return nil, fmt.Errorf("test error")
 	}
@@ -644,6 +656,206 @@ func TestIsACSEnabled(t *testing.T) {
 
 			if got := acs.isACSEnabled(ctx); got != tc.want {
 				t.Errorf("isACSEnabled() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShouldRetry(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil_error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "unsupported_universe",
+			err:  &client.ErrUnsupportedUniverse{},
+			want: false,
+		},
+		{
+			name: "wrapped_unsupported_universe",
+			err:  fmt.Errorf("wrapped: %w", &client.ErrUnsupportedUniverse{}),
+			want: false,
+		},
+		{
+			name: "invalid_argument",
+			err:  status.Error(codes.InvalidArgument, "invalid argument"),
+			want: false,
+		},
+		{
+			name: "not_found",
+			err:  status.Error(codes.NotFound, "not found"),
+			want: false,
+		},
+		{
+			name: "already_exists",
+			err:  status.Error(codes.AlreadyExists, "already exists"),
+			want: false,
+		},
+		{
+			name: "permission_denied",
+			err:  status.Error(codes.PermissionDenied, "permission denied"),
+			want: false,
+		},
+		{
+			name: "wrapped_permission_denied",
+			err:  fmt.Errorf("unable to listen on stream: %w", status.Error(codes.PermissionDenied, "permission denied")),
+			want: false,
+		},
+		{
+			name: "failed_precondition",
+			err:  status.Error(codes.FailedPrecondition, "failed precondition"),
+			want: false,
+		},
+		{
+			name: "out_of_range",
+			err:  status.Error(codes.OutOfRange, "out of range"),
+			want: false,
+		},
+		{
+			name: "unimplemented",
+			err:  status.Error(codes.Unimplemented, "unimplemented"),
+			want: false,
+		},
+		{
+			name: "data_loss",
+			err:  status.Error(codes.DataLoss, "data loss"),
+			want: false,
+		},
+		{
+			name: "unauthenticated",
+			err:  status.Error(codes.Unauthenticated, "unauthenticated"),
+			want: false,
+		},
+		{
+			name: "unavailable_retryable",
+			err:  status.Error(codes.Unavailable, "task is overloaded"),
+			want: true,
+		},
+		{
+			name: "resource_exhausted_retryable",
+			err:  status.Error(codes.ResourceExhausted, "too many requests"),
+			want: true,
+		},
+		{
+			name: "deadline_exceeded_retryable",
+			err:  status.Error(codes.DeadlineExceeded, "deadline exceeded"),
+			want: true,
+		},
+		{
+			name: "internal_retryable",
+			err:  status.Error(codes.Internal, "internal error"),
+			want: true,
+		},
+		{
+			name: "generic_io_error_retryable",
+			err:  fmt.Errorf("transient network error"),
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ShouldRetry(tc.err); got != tc.want {
+				t.Errorf("ShouldRetry(%v) = %t, want %t", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNonRetryableErrors(t *testing.T) {
+	enableACSClient(t)
+	origPolicy := defaultRetrypolicy
+	origSendAgentMsg := sendAgentMessage
+	t.Cleanup(func() {
+		defaultRetrypolicy = origPolicy
+		sendAgentMessage = origSendAgentMsg
+	})
+
+	defaultRetrypolicy.MaxAttempts = 2
+	defaultRetrypolicy.BackoffFactor = 1
+	defaultRetrypolicy.Jitter = time.Millisecond
+
+	msg := &acmpb.AgentInfo{Name: "testagent"}
+	labels := map[string]string{"k": "v"}
+
+	tests := []struct {
+		name         string
+		err          error
+		wantAttempts int
+	}{
+		{
+			name:         "permission_denied_no_retry",
+			err:          status.Error(codes.PermissionDenied, "permission denied"),
+			wantAttempts: 1,
+		},
+		{
+			name:         "unauthenticated_no_retry",
+			err:          status.Error(codes.Unauthenticated, "unauthenticated"),
+			wantAttempts: 1,
+		},
+		{
+			name:         "invalid_argument_no_retry",
+			err:          status.Error(codes.InvalidArgument, "invalid argument"),
+			wantAttempts: 1,
+		},
+		{
+			name:         "unimplemented_no_retry",
+			err:          status.Error(codes.Unimplemented, "unimplemented"),
+			wantAttempts: 1,
+		},
+		{
+			name:         "unavailable_retries",
+			err:          status.Error(codes.Unavailable, "task is overloaded"),
+			wantAttempts: 2,
+		},
+		{
+			name:         "resource_exhausted_retries",
+			err:          status.Error(codes.ResourceExhausted, "quota exceeded"),
+			wantAttempts: 2,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// 1. Verify Send
+			sendConn := &conn{err: tc.err}
+			acs.connection = sendConn
+			ctx := context.WithValue(context.Background(), OverrideConnection, acs.connection)
+			if err := Send(ctx, labels, msg); err == nil {
+				t.Errorf("Send(ctx, %v, %v) = nil, want error %v", labels, msg, tc.err)
+			}
+			if sendConn.attempts != tc.wantAttempts {
+				t.Errorf("Send() attempts = %d, want %d", sendConn.attempts, tc.wantAttempts)
+			}
+
+			// 2. Verify Watch
+			watchConn := &conn{err: tc.err}
+			acs.connection = watchConn
+			watchCtx := context.WithValue(context.Background(), OverrideConnection, acs.connection)
+			if _, err := Watch(watchCtx); err == nil {
+				t.Errorf("Watch(ctx) = nil, want error %v", tc.err)
+			}
+			if watchConn.attempts != tc.wantAttempts {
+				t.Errorf("Watch() attempts = %d, want %d", watchConn.attempts, tc.wantAttempts)
+			}
+
+			// 3. Verify SendMessage
+			var sendMsgAttempts int
+			sendAgentMessage = func(context.Context, string, *agentcommunication.Client, *acpb.MessageBody) (*acpb.SendAgentMessageResponse, error) {
+				sendMsgAttempts++
+				return nil, tc.err
+			}
+			if _, err := SendMessage(ctx, labels, msg); err == nil {
+				t.Errorf("SendMessage(ctx, %v, %v) = nil, want error %v", labels, msg, tc.err)
+			}
+			if sendMsgAttempts != tc.wantAttempts {
+				t.Errorf("SendMessage() attempts = %d, want %d", sendMsgAttempts, tc.wantAttempts)
 			}
 		})
 	}
