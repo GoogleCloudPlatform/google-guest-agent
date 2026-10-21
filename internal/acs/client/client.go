@@ -17,6 +17,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -33,7 +34,9 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 )
@@ -49,16 +52,35 @@ const (
 
 var (
 	// Default retry policy to retry max 5 times for upto ~30 sec.
-	defaultRetrypolicy = retry.Policy{MaxAttempts: 5, Jitter: time.Second, BackoffFactor: 2}
+	defaultRetrypolicy = retry.Policy{MaxAttempts: 5, Jitter: time.Second, BackoffFactor: 2, ShouldRetry: ShouldRetry}
 	// Watcher retry policy to retry indefinitely. Watcher could fail if there is
 	// no connection to ACS (network issue), could be a transient error or unable
 	// to retrieve the identity token. Default retry policy will be too frequent
 	// and will not achieve much in this case but overwhelm instance by consuming
 	// too much CPU/memory.
-	watcherRetrypolicy = retry.Policy{Jitter: time.Second * 2, BackoffFactor: 2, MaximumBackoff: time.Minute * 20}
+	watcherRetrypolicy = retry.Policy{Jitter: time.Second * 2, BackoffFactor: 2, MaximumBackoff: time.Minute * 20, ShouldRetry: ShouldRetry}
 	// acs manages ACS connection and implements all ACS client methods.
 	acs = &acsHelper{}
 )
+
+// ShouldRetry returns true if the error is transient and the ACS request should
+// be retried.
+func ShouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, &client.ErrUnsupportedUniverse{}) {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.InvalidArgument, codes.NotFound, codes.AlreadyExists,
+		codes.PermissionDenied, codes.FailedPrecondition, codes.OutOfRange,
+		codes.Unimplemented, codes.DataLoss, codes.Unauthenticated:
+		return false
+	default:
+		return true
+	}
+}
 
 // ConnectionInterface is the minimum interface required by Agent to communicate
 // with ACS.
@@ -331,12 +353,15 @@ func Watch(ctx context.Context) (*acpb.MessageBody, error) {
 }
 
 func watcherRetryPolicy(ctx context.Context) retry.Policy {
+	policy := watcherRetrypolicy
 	if ctx.Value(OverrideConnection) != nil {
 		// Override max retry attempts for unit tests to avoid spending too much
 		// time waiting in retries.
-		return retry.Policy{MaxAttempts: 2, Jitter: time.Millisecond, BackoffFactor: 1}
+		policy.MaxAttempts = 2
+		policy.Jitter = time.Millisecond
+		policy.BackoffFactor = 1
 	}
-	return watcherRetrypolicy
+	return policy
 }
 
 // isNilInterface returns true if the given interface is nil or of unexpected

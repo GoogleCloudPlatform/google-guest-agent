@@ -25,6 +25,8 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/acs/client"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/google/go-cmp/cmp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/testing/protocmp"
 	apb "google.golang.org/protobuf/types/known/anypb"
 )
@@ -32,7 +34,8 @@ import (
 type conn struct {
 	expectedLabels map[string]string
 	sendMessage    *apb.Any
-	throwErr       bool
+	err            error
+	attempts       int
 }
 
 func (c *conn) Close() {}
@@ -42,8 +45,9 @@ func (c *conn) SendMessage(msg *acpb.MessageBody) error {
 }
 
 func (c *conn) Receive() (*acpb.MessageBody, error) {
-	if c.throwErr {
-		return nil, fmt.Errorf("test error")
+	c.attempts++
+	if c.err != nil {
+		return nil, c.err
 	}
 	return &acpb.MessageBody{Labels: c.expectedLabels, Body: c.sendMessage}, nil
 }
@@ -61,33 +65,85 @@ func TestRun(t *testing.T) {
 	}
 
 	w := New()
-	ctx := context.Background()
 
 	tests := []struct {
-		name    string
-		want    *apb.Any
-		wantErr bool
+		name         string
+		want         *apb.Any
+		err          error
+		wantErr      bool
+		wantRun      bool
+		wantAttempts int
 	}{
 		{
-			name: "success",
-			want: wantMsg,
+			name:         "success",
+			want:         wantMsg,
+			wantRun:      true,
+			wantAttempts: 1,
 		},
 		{
-			name:    "failure",
-			wantErr: true,
+			name:         "failure",
+			err:          fmt.Errorf("test error"),
+			wantErr:      true,
+			wantRun:      true,
+			wantAttempts: 2,
+		},
+		{
+			name:         "retryable_unavailable",
+			err:          status.Error(codes.Unavailable, "task is overloaded"),
+			wantErr:      true,
+			wantRun:      true,
+			wantAttempts: 2,
+		},
+		{
+			name:         "retryable_resource_exhausted",
+			err:          status.Error(codes.ResourceExhausted, "too many requests"),
+			wantErr:      true,
+			wantRun:      true,
+			wantAttempts: 2,
+		},
+		{
+			name:         "non_retryable_permission_denied",
+			err:          status.Error(codes.PermissionDenied, "non external channel or environment used with non internal project"),
+			wantErr:      true,
+			wantRun:      false,
+			wantAttempts: 1,
+		},
+		{
+			name:         "non_retryable_unauthenticated",
+			err:          status.Error(codes.Unauthenticated, "invalid token"),
+			wantErr:      true,
+			wantRun:      false,
+			wantAttempts: 1,
+		},
+		{
+			name:         "non_retryable_invalid_argument",
+			err:          status.Error(codes.InvalidArgument, "invalid channel"),
+			wantErr:      true,
+			wantRun:      false,
+			wantAttempts: 1,
+		},
+		{
+			name:         "non_retryable_unimplemented",
+			err:          status.Error(codes.Unimplemented, "method not implemented"),
+			wantErr:      true,
+			wantRun:      false,
+			wantAttempts: 1,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &conn{sendMessage: wantMsg, throwErr: tc.wantErr}
-			ctx = context.WithValue(ctx, client.OverrideConnection, c)
+			c := &conn{sendMessage: wantMsg, err: tc.err}
+			ctx := context.WithValue(t.Context(), client.OverrideConnection, c)
 			gotRun, gotResp, err := w.Run(ctx, MessageReceiver)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("Run(ctx, %s) = got error: %v, want error: %t", MessageReceiver, err, tc.wantErr)
 			}
-			if !gotRun {
-				t.Errorf("Run(ctx, %s) returned should re-run: %t, want true", MessageReceiver, gotRun)
+			if gotRun != tc.wantRun {
+				t.Errorf("Run(ctx, %s) returned should re-run: %t, want %t", MessageReceiver, gotRun, tc.wantRun)
+			}
+			if c.attempts != tc.wantAttempts {
+				t.Errorf("Run(ctx, %s) attempts = %d, want %d", MessageReceiver, c.attempts, tc.wantAttempts)
 			}
 			if tc.wantErr {
 				return

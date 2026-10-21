@@ -53,8 +53,8 @@ func (w *Watcher) Events() []string {
 	return []string{MessageReceiver}
 }
 
-// Run listens on ACS channel and report back the messages. Run must return true
-// irrespective of the error to continue listening for any messages.
+// Run listens on the ACS channel and reports back messages. It returns false
+// for renewal only when disabled or when watching fails with a non-retryable error.
 func (w *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
 	skipGDUUnverseCheck := os.Getenv("SKIP_GDU_UNIVERSE_CHECK") != ""
 
@@ -80,7 +80,7 @@ func (w *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
 
 	msg, err := client.Watch(ctx)
 	if err != nil {
-		return true, nil, fmt.Errorf("unable to receive new messages on ACS channel: %w", err)
+		return client.ShouldRetry(err), nil, fmt.Errorf("unable to receive new messages on ACS channel: %w", err)
 	}
 
 	return true, msg, nil
