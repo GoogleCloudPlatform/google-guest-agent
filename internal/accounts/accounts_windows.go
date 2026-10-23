@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	mathRand "math/rand"
@@ -27,7 +28,21 @@ import (
 	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"golang.org/x/sys/windows"
 )
+
+// verNTDomainController is the VER_NT_DOMAIN_CONTROLLER product type, reported
+// by both writable and read-only domain controllers.
+// https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfoexw
+const verNTDomainController = 0x2
+
+// ErrDomainController is returned when an account change is refused because the
+// machine is an Active Directory domain controller. On a domain controller the
+// local account APIs change domain accounts instead of local ones. The message
+// is written to the serial port for password reset clients, so it says how to
+// opt in.
+var ErrDomainController = errors.New("refusing to change Windows accounts on an Active Directory domain controller, where they would change domain accounts; to allow it, set allow_on_domain_controller = true in the [Accounts] section of instance_configs.cfg and restart the guest agent")
 
 // windowsUserInfo contains windows specific user information.
 type windowsUserInfo struct {
@@ -56,10 +71,32 @@ var (
 	netLocalGroupDel        = defaultNetLocalGroupDel
 	netLocalGroupAddMembers = defaultNetLocalGroupAddMembers
 	netLocalGroupDelMembers = defaultNetLocalGroupDelMembers
+
+	// isDomainController reports whether the machine is an Active Directory
+	// domain controller. RtlGetVersion always succeeds, so this has no error
+	// path that could block account changes on other machines.
+	isDomainController = func() bool {
+		return windows.RtlGetVersion().ProductType == verNTDomainController
+	}
 )
+
+// checkDomainController returns ErrDomainController if the machine is a domain
+// controller and the config file doesn't allow account changes on it.
+func checkDomainController() error {
+	if !isDomainController() {
+		return nil
+	}
+	if a := cfg.Retrieve().Accounts; a != nil && a.AllowOnDomainController {
+		return nil
+	}
+	return ErrDomainController
+}
 
 // SetPassword sets the password for the current user.
 func (u *User) SetPassword(_ context.Context, password string) error {
+	if err := checkDomainController(); err != nil {
+		return err
+	}
 	return netUserSetPassword(u.Name, password)
 }
 
@@ -96,6 +133,9 @@ func CreateUser(_ context.Context, u *User) error {
 	if u == nil {
 		return fmt.Errorf("user is nil")
 	}
+	if err := checkDomainController(); err != nil {
+		return err
+	}
 	galog.V(1).Debugf("Creating user %s", u.Name)
 
 	// Create a new user using the password.
@@ -112,6 +152,9 @@ func CreateUser(_ context.Context, u *User) error {
 func DelUser(_ context.Context, u *User) error {
 	if u == nil {
 		return fmt.Errorf("user is nil")
+	}
+	if err := checkDomainController(); err != nil {
+		return err
 	}
 	galog.V(1).Debugf("Deleting user %s", u.Name)
 	if err := netUserDel(u.Name); err != nil {
@@ -141,6 +184,9 @@ func handleGroup(ctx context.Context, g *Group) (*Group, error) {
 
 // CreateGroup creates a new group with the given name.
 func CreateGroup(_ context.Context, group string) error {
+	if err := checkDomainController(); err != nil {
+		return err
+	}
 	galog.V(1).Debugf("Creating group %s", group)
 	if err := netLocalGroupAdd(group); err != nil {
 		return fmt.Errorf("failed to create group: %w", err)
@@ -153,6 +199,9 @@ func CreateGroup(_ context.Context, group string) error {
 func DelGroup(ctx context.Context, g *Group) error {
 	if g == nil {
 		return fmt.Errorf("group is nil")
+	}
+	if err := checkDomainController(); err != nil {
+		return err
 	}
 	group, err := handleGroup(ctx, g)
 	if err != nil {
@@ -198,6 +247,9 @@ func AddUserToGroup(ctx context.Context, u *User, g *Group) error {
 	if g == nil {
 		return fmt.Errorf("group is nil")
 	}
+	if err := checkDomainController(); err != nil {
+		return err
+	}
 
 	osSpecific, ok := u.osSpecific.(*windowsUserInfo)
 	if !ok {
@@ -228,6 +280,9 @@ func RemoveUserFromGroup(ctx context.Context, u *User, g *Group) error {
 	}
 	if g == nil {
 		return fmt.Errorf("group is nil")
+	}
+	if err := checkDomainController(); err != nil {
+		return err
 	}
 
 	osSpecific, ok := u.osSpecific.(*windowsUserInfo)
