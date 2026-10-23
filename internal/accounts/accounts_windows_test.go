@@ -18,10 +18,24 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/user"
 	"syscall"
 	"testing"
+
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"golang.org/x/sys/windows"
+)
+
+const (
+	// verNTWorkstation and verNTServer are the non-DC Windows
+	// RTL_OSVERSIONINFOEXW wProductType values.
+	// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_osversioninfoexw
+	verNTWorkstation = 0x1
+	verNTServer      = 0x3
+
+	allowOnDomainControllerConfig = "[Accounts]\nallow_on_domain_controller = true\n"
 )
 
 // Options for overriding functions. These are primarily used for error
@@ -60,6 +74,9 @@ type accountsTestOpts struct {
 // function to delete the user.
 func createTestUser(t *testing.T, username string, password string) *User {
 	t.Helper()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed: %v", err)
+	}
 	testUser := &User{
 		Name:     username,
 		Password: password,
@@ -85,6 +102,9 @@ func createTestUser(t *testing.T, username string, password string) *User {
 // cleanup function to delete the group.
 func createTestGroup(t *testing.T, groupname string) *Group {
 	t.Helper()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed: %v", err)
+	}
 	ctx := context.Background()
 	err := CreateGroup(ctx, groupname)
 	if err != nil {
@@ -103,6 +123,9 @@ func createTestGroup(t *testing.T, groupname string) *Group {
 }
 
 func accountsTestSetup(t *testing.T, opts accountsTestOpts) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed: %v", err)
+	}
 	// This is a generic UID for all users.
 	sid, err := syscall.StringToSid("S-1-1-0")
 	if err != nil {
@@ -718,5 +741,66 @@ func TestGeneratePassword(t *testing.T) {
 				t.Errorf("GeneratePassword(%d) = %q, want %d characters", test.length, password, test.length)
 			}
 		})
+	}
+}
+
+func TestCheckDomainController(t *testing.T) {
+	tests := []struct {
+		name        string
+		productType byte
+		config      *cfg.Sections
+		wantErr     error
+	}{
+		{
+			name:        "workstation",
+			productType: verNTWorkstation,
+			config:      &cfg.Sections{Accounts: &cfg.Accounts{}},
+		},
+		{
+			name:        "member_or_standalone_server",
+			productType: verNTServer,
+			config:      &cfg.Sections{Accounts: &cfg.Accounts{}},
+		},
+		{
+			name:        "domain_controller_default_refused",
+			productType: verNTDomainController,
+			config:      &cfg.Sections{Accounts: &cfg.Accounts{}},
+			wantErr:     ErrDomainController,
+		},
+		{
+			name:        "domain_controller_opt_in_allowed",
+			productType: verNTDomainController,
+			config:      &cfg.Sections{Accounts: &cfg.Accounts{AllowOnDomainController: true}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			version := &windows.OsVersionInfoEx{ProductType: test.productType}
+			if err := checkDomainController(version, test.config); !errors.Is(err, test.wantErr) {
+				t.Errorf("checkDomainController(%+v, %+v) = %v, want %v", version, test.config, err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckDomainControllerConfigFileOptIn(t *testing.T) {
+	t.Cleanup(func() {
+		if err := cfg.Load(nil); err != nil {
+			t.Errorf("cfg.Load(nil) cleanup failed: %v", err)
+		}
+	})
+	dcVersion := &windows.OsVersionInfoEx{ProductType: verNTDomainController}
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed: %v", err)
+	}
+	if err := checkDomainController(dcVersion, cfg.Retrieve()); !errors.Is(err, ErrDomainController) {
+		t.Errorf("checkDomainController() with default config = %v, want %v", err, ErrDomainController)
+	}
+	if err := cfg.Load([]byte(allowOnDomainControllerConfig)); err != nil {
+		t.Fatalf("cfg.Load(%q) failed: %v", allowOnDomainControllerConfig, err)
+	}
+	if err := checkDomainController(dcVersion, cfg.Retrieve()); err != nil {
+		t.Errorf("checkDomainController() with opt-in config = %v, want nil", err)
 	}
 }
