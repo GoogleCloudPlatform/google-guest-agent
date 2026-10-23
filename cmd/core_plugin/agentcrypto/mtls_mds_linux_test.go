@@ -78,7 +78,50 @@ func TestReadAndWriteRootCACert(t *testing.T) {
 			if string(got) != validCertPEM {
 				t.Errorf("readAndWriteRootCACert(%+v, %s) = %s, want %s", v, crt, string(got), validCertPEM)
 			}
+			info, err := os.Stat(crt)
+			if err != nil {
+				t.Fatalf("Failed to stat root cert file: %v", err)
+			}
+			if info.Mode().Perm() != 0644 {
+				t.Errorf("root cert file permissions = %o, want %o", info.Mode().Perm(), 0644)
+			}
 		})
+	}
+}
+
+func TestWriteClientCredentials(t *testing.T) {
+	ctx := context.Background()
+	credsDir := filepath.Join(t.TempDir(), "google-mds-mtls")
+	clientKey := filepath.Join(credsDir, clientCredsFileName)
+	j := &CredsJob{}
+	want := "test-client-credentials"
+
+	if err := j.writeClientCredentials(ctx, []byte(want), clientKey); err != nil {
+		t.Fatalf("writeClientCredentials(ctx, %q, %q) failed unexpectedly: %v", want, clientKey, err)
+	}
+
+	dirInfo, err := os.Stat(credsDir)
+	if err != nil {
+		t.Fatalf("os.Stat(%q) failed unexpectedly: %v", credsDir, err)
+	}
+	if dirInfo.Mode().Perm() != 0755 {
+		t.Errorf("credentials directory permissions = %o, want %o", dirInfo.Mode().Perm(), 0755)
+	}
+
+	got, err := os.ReadFile(clientKey)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) failed unexpectedly: %v", clientKey, err)
+	}
+	if string(got) != want {
+		t.Errorf("writeClientCredentials wrote %q, want %q", string(got), want)
+	}
+
+	fileInfo, err := os.Stat(clientKey)
+	if err != nil {
+		t.Fatalf("os.Stat(%q) failed unexpectedly: %v", clientKey, err)
+	}
+	if fileInfo.Mode().Perm() != 0644 {
+		t.Errorf("client credentials file permissions = %o, want %o", fileInfo.Mode().Perm(), 0644)
 	}
 }
 
