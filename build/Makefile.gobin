@@ -20,6 +20,7 @@ GO_BINARIES = \
 
 LINUX_BINPB_FILES = \
   build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb \
+	build/configs/usr/lib/google/guest_agent/GuestNetTelemetry/manifest.binpb \
 	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb \
 	build/configs/usr/lib/google/guest_agent/ManagedWorkloadIdentityExtension/manifest.binpb
 
