@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
 )
@@ -72,12 +73,62 @@ func SHA256FileSum(filePath string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// validateSymlinkTarget verifies that linkname for a symlink at entryName
+// inside realDest is relative and resolves within realDest.
+func validateSymlinkTarget(realDest, entryName, linkname string) error {
+	if linkname == "" || filepath.IsAbs(linkname) || filepath.VolumeName(linkname) != "" || strings.HasPrefix(linkname, "/") || strings.HasPrefix(linkname, `\`) {
+		return fmt.Errorf("invalid symlink target %q for %q: escapes destination directory %q", linkname, entryName, realDest)
+	}
+	// Only allow ".." at the start of the target. A ".." after a normal name is
+	// resolved relative to wherever that name points (it may be a symlink), so
+	// the lexical check below can't be trusted for it.
+	seenElem := false
+	for _, part := range strings.FieldsFunc(linkname, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if seenElem {
+				return fmt.Errorf("invalid symlink target %q for %q: escapes destination directory %q", linkname, entryName, realDest)
+			}
+			continue
+		}
+		seenElem = true
+	}
+	realParent, err := filepath.EvalSymlinks(filepath.Join(realDest, filepath.Dir(entryName)))
+	if err != nil {
+		return fmt.Errorf("failed to resolve parent directory for %q: %w", entryName, err)
+	}
+	targetPath := filepath.Join(realParent, linkname)
+	relTarget, err := filepath.Rel(realDest, targetPath)
+	if err != nil || !filepath.IsLocal(relTarget) {
+		return fmt.Errorf("invalid symlink target %q for %q: escapes destination directory %q", linkname, entryName, realDest)
+	}
+	return nil
+}
+
 // UnpackTargzFile unpacks a src *tar.gz file into dest directory. It also creates a dest
 // directory if it does not exist.
 func UnpackTargzFile(src, dest string) error {
+	dest = filepath.Clean(dest)
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %q: %w", dest, err)
 	}
+
+	realDest, err := filepath.EvalSymlinks(dest)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination directory %q: %w", dest, err)
+	}
+
+	root, err := os.OpenRoot(realDest)
+	if err != nil {
+		return fmt.Errorf("failed to open destination root %q: %w", dest, err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			galog.Warnf("Failed to close destination root %q: %v", dest, err)
+		}
+	}()
 
 	srcFile, err := os.Open(src)
 	if err != nil {
@@ -102,25 +153,45 @@ func UnpackTargzFile(src, dest string) error {
 			return fmt.Errorf("failed to read next tar entry: %w", err)
 		}
 
+		if !filepath.IsLocal(hdr.Name) {
+			return fmt.Errorf("illegal file path %q in archive: escapes destination directory %q", hdr.Name, dest)
+		}
 		name := filepath.Clean(hdr.Name)
 		entryPath := filepath.Join(dest, name)
 
+		// os.Root rejects mode bits outside 0o777, and some archives set type or
+		// setuid bits in the header mode, so keep only the permission bits.
+		mode := os.FileMode(hdr.Mode).Perm()
+
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(entryPath, os.FileMode(hdr.Mode)); err != nil {
+			if name == "." {
+				continue
+			}
+			if err := root.MkdirAll(name, mode); err != nil {
 				return fmt.Errorf("failed to create directory %q: %w", entryPath, err)
 			}
 		case tar.TypeSymlink:
-			if err := os.Symlink(hdr.Linkname, entryPath); err != nil {
+			if dir := filepath.Dir(name); dir != "." {
+				if err := root.MkdirAll(dir, 0755); err != nil {
+					return fmt.Errorf("failed to create directory %q: %w", filepath.Dir(entryPath), err)
+				}
+			}
+			if err := validateSymlinkTarget(realDest, name, hdr.Linkname); err != nil {
+				return err
+			}
+			if err := root.Symlink(hdr.Linkname, name); err != nil {
 				return fmt.Errorf("failed to create symlink %q: %w", entryPath, err)
 			}
 		// Treat it as regular file and simply copy it to the destination.
 		default:
-			if err := os.MkdirAll(filepath.Dir(entryPath), os.FileMode(hdr.Mode)); err != nil {
-				return fmt.Errorf("failed to create directory %q: %w", filepath.Dir(entryPath), err)
+			if dir := filepath.Dir(name); dir != "." {
+				if err := root.MkdirAll(dir, 0755); err != nil {
+					return fmt.Errorf("failed to create directory %q: %w", filepath.Dir(entryPath), err)
+				}
 			}
 
-			f, err := os.OpenFile(entryPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(hdr.Mode))
+			f, err := root.OpenFile(name, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
 			if err != nil {
 				return fmt.Errorf("failed to open file %q: %w", entryPath, err)
 			}
