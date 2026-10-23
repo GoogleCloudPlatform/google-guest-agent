@@ -18,10 +18,13 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/user"
 	"syscall"
 	"testing"
+
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 )
 
 // Options for overriding functions. These are primarily used for error
@@ -718,5 +721,105 @@ func TestGeneratePassword(t *testing.T) {
 				t.Errorf("GeneratePassword(%d) = %q, want %d characters", test.length, password, test.length)
 			}
 		})
+	}
+}
+
+func TestCheckDomainController(t *testing.T) {
+	tests := []struct {
+		name    string
+		isDC    bool
+		config  string
+		wantErr error
+	}{
+		{
+			name:    "not_domain_controller",
+			isDC:    false,
+			wantErr: nil,
+		},
+		{
+			name:    "domain_controller",
+			isDC:    true,
+			wantErr: ErrDomainController,
+		},
+		{
+			name:    "domain_controller_opt_in",
+			isDC:    true,
+			config:  "[Accounts]\nallow_on_domain_controller = true\n",
+			wantErr: nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := cfg.Load([]byte(test.config)); err != nil {
+				t.Fatalf("cfg.Load(%q) failed: %v", test.config, err)
+			}
+			origIsDomainController := isDomainController
+			isDomainController = func() bool { return test.isDC }
+			t.Cleanup(func() { isDomainController = origIsDomainController })
+
+			if err := checkDomainController(); !errors.Is(err, test.wantErr) {
+				t.Errorf("checkDomainController() = %v, want %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestAccountChangesRefusedOnDomainController(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed: %v", err)
+	}
+	origIsDomainController := isDomainController
+	isDomainController = func() bool { return true }
+
+	// Record any call that reaches the Windows account APIs.
+	var called []string
+	netUserAdd = func(string, string) error { called = append(called, "NetUserAdd"); return nil }
+	netUserDel = func(string) error { called = append(called, "NetUserDel"); return nil }
+	netUserSetPassword = func(string, string) error { called = append(called, "NetUserSetInfo"); return nil }
+	netLocalGroupAdd = func(string) error { called = append(called, "NetLocalGroupAdd"); return nil }
+	netLocalGroupDel = func(string) error { called = append(called, "NetLocalGroupDel"); return nil }
+	netLocalGroupAddMembers = func(*syscall.SID, string) error {
+		called = append(called, "NetLocalGroupAddMembers")
+		return nil
+	}
+	netLocalGroupDelMembers = func(*syscall.SID, string) error {
+		called = append(called, "NetLocalGroupDelMembers")
+		return nil
+	}
+	t.Cleanup(func() {
+		isDomainController = origIsDomainController
+		netUserAdd = defaultNetUserAdd
+		netUserDel = defaultNetUserDel
+		netUserSetPassword = defaultNetUserSetPassword
+		netLocalGroupAdd = defaultNetLocalGroupAdd
+		netLocalGroupDel = defaultNetLocalGroupDel
+		netLocalGroupAddMembers = defaultNetLocalGroupAddMembers
+		netLocalGroupDelMembers = defaultNetLocalGroupDelMembers
+	})
+
+	ctx := context.Background()
+	u := &User{Name: "dc-test-user", osSpecific: &windowsUserInfo{}}
+	g := &Group{Name: "dc-test-group"}
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{name: "CreateUser", fn: func() error { return CreateUser(ctx, u) }},
+		{name: "DelUser", fn: func() error { return DelUser(ctx, u) }},
+		{name: "SetPassword", fn: func() error { return u.SetPassword(ctx, "password") }},
+		{name: "CreateGroup", fn: func() error { return CreateGroup(ctx, g.Name) }},
+		{name: "DelGroup", fn: func() error { return DelGroup(ctx, g) }},
+		{name: "AddUserToGroup", fn: func() error { return AddUserToGroup(ctx, u, g) }},
+		{name: "RemoveUserFromGroup", fn: func() error { return RemoveUserFromGroup(ctx, u, g) }},
+	}
+
+	for _, test := range tests {
+		if err := test.fn(); !errors.Is(err, ErrDomainController) {
+			t.Errorf("%s() on a domain controller = %v, want %v", test.name, err, ErrDomainController)
+		}
+	}
+	if len(called) > 0 {
+		t.Errorf("Windows account APIs called on a domain controller: %v, want none", called)
 	}
 }
