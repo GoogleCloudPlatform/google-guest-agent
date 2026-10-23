@@ -229,6 +229,174 @@ func TestUnpackTARGZFile(t *testing.T) {
 	}
 }
 
+type archiveEntry struct {
+	header  *tar.Header
+	content string
+}
+
+func createCustomArchive(t *testing.T, entries []archiveEntry) string {
+	t.Helper()
+
+	tempFile := filepath.Join(t.TempDir(), "custom.tar.gz")
+	f, err := os.Create(tempFile)
+	if err != nil {
+		t.Fatalf("error creating test file: %v", err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	for _, entry := range entries {
+		if err := tw.WriteHeader(entry.header); err != nil {
+			t.Fatalf("error writing tar header %+v: %v", entry.header, err)
+		}
+		if entry.content != "" {
+			if _, err := tw.Write([]byte(entry.content)); err != nil {
+				t.Fatalf("error writing tar content: %v", err)
+			}
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("error closing tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("error closing gzip writer: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("error closing archive file: %v", err)
+	}
+	return tempFile
+}
+
+func TestUnpackTARGZFileTraversal(t *testing.T) {
+	body := "malicious"
+	tests := []struct {
+		name    string
+		entries []archiveEntry
+		wantErr bool
+	}{
+		{
+			name: "zipslip_relative_parent",
+			entries: []archiveEntry{
+				{
+					header:  &tar.Header{Name: "../../escaped.txt", Mode: filePerms, Typeflag: tar.TypeReg, Size: int64(len(body))},
+					content: body,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "zipslip_dot_dot",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "..", Mode: dirPerms, Typeflag: tar.TypeDir},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "zipslip_absolute_path",
+			entries: []archiveEntry{
+				{
+					header:  &tar.Header{Name: "/etc/passwd", Mode: filePerms, Typeflag: tar.TypeReg, Size: int64(len(body))},
+					content: body,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_empty_target",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: ""},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_absolute_target",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_unc_path",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: `\\server\share`},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_volume_prefix",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: `C:\escaped.txt`},
+				},
+			},
+			wantErr: runtime.GOOS == "windows",
+		},
+		{
+			name: "symlink_relative_escape",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "dir1/link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "../../escaped.txt"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_dot_dot_after_element",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "sub/../../escaped.txt"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_two_hop_chain_escape",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "cur", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "."},
+				},
+				{
+					header: &tar.Header{Name: "cur/escape", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "../outside"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid_nested_relative_symlink",
+			entries: []archiveEntry{
+				{
+					header:  &tar.Header{Name: "dir1/file1", Mode: filePerms, Typeflag: tar.TypeReg, Size: int64(len(body))},
+					content: body,
+				},
+				{
+					header: &tar.Header{Name: "dir1/sub/link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "../file1"},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srcArchive := createCustomArchive(t, tc.entries)
+			destDir := filepath.Join(t.TempDir(), "dest")
+			err := UnpackTargzFile(srcArchive, destDir)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("UnpackTargzFile(%s, %s) error = %v, wantErr %t", srcArchive, destDir, err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestSaferWriteFile(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
 	want := "test-data"
