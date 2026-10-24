@@ -766,10 +766,10 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 }
 
 // stopAndRemovePlugin stops the given plugin, all of its schedulers and removes
-// it from the manager.
+// it from the manager. It does not send PLUGIN_CONFIG_REMOVE, which is only an
+// acknowledgement of a remove request from ACS (see [removePlugin]); upgrades
+// and ad-hoc stops also go through this path.
 func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin, removeState bool) error {
-	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_REMOVE, "Received request to remove a plugin.")
-
 	// Stop all schedulers running on the plugin so it doesn't interfere with the
 	// stop process.
 	m.stopMonitoring(p)
@@ -858,6 +858,7 @@ func (m *PluginManager) removePlugin(ctx context.Context, req *acpb.ConfigurePlu
 		return fmt.Errorf("plugin %q not found", req.GetPlugin().GetName())
 	}
 
+	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_REMOVE, "Received request to remove a plugin.")
 	if err := m.stopAndRemovePlugin(ctx, p, true); err != nil {
 		return fmt.Errorf("failed to remove plugin %q: %w", p.FullName(), err)
 	}
