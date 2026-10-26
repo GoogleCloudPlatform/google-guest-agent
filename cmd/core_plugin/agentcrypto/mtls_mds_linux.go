@@ -101,7 +101,7 @@ func (j *CredsJob) writeClientCredentials(ctx context.Context, plaintext []byte,
 // writeCredentials stores the provided credentials to the output file.
 func (j *CredsJob) writeCredentials(ctx context.Context, certContent []byte, outputFile string) error {
 	// The directory should be executable, but the file does not need to be.
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0655); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
 		return err
 	}
 	return file.SaferWriteFile(ctx, certContent, outputFile, file.Options{Perm: 0644})
