@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -58,10 +57,6 @@ const (
 	// galogShutdownTimeout is the period of time we should wait galog to
 	// shutdown.
 	galogShutdownTimeout = time.Second
-	// defaultLinuxCorePath is the default path where core plugin is installed on Linux.
-	defaultLinuxCorePath = "/usr/lib/google/guest_agent/GuestAgentCorePlugin/core_plugin"
-	// defaultWindowsCorePath is the default path where core plugin is installed on Windows.
-	defaultWindowsCorePath = `C:\Program Files\Google\Compute Engine\agent\GuestAgentCorePlugin\CorePlugin.exe`
 )
 
 func setupFlags() {
@@ -75,18 +70,10 @@ func setupFlags() {
 	// On-demand plugins flags.
 	flag.BoolVar(&forceOnDemandPlugins, "on_demand_plugins", false, "force on-demand plugins (even if disabled on the configuration)")
 	// Core plugin flags.
-	flag.StringVar(&corePluginPath, "core_plugin_path", entryPath(), "path to core plugin binary")
+	flag.StringVar(&corePluginPath, "core_plugin_path", defaultCorePluginPath, "path to core plugin binary")
 	flag.BoolVar(&skipCorePlugin, "core_plugins", false, "skip core plugin installation")
 
 	flag.Parse()
-}
-
-// entryPath returns the path from where core plugin should be started.
-func entryPath() string {
-	if runtime.GOOS == "windows" {
-		return defaultWindowsCorePath
-	}
-	return defaultLinuxCorePath
 }
 
 // readExtraConfig reads the extra config from file set in environment variable.
@@ -166,12 +153,11 @@ func main() {
 
 // ignoreCorePlugin returns true if core plugin should be skipped.
 func ignoreCorePlugin() bool {
-	binaryPath := agentBinaryPath()
 	// This is a configuration guardrail to see if the guest agent binary is
 	// present. If it is not present, we enable the core plugin. Ignore this
 	// check in test environment as binary path is expected to be not present.
-	if !file.Exists(binaryPath, file.TypeFile) && os.Getenv("TEST_UNDECLARED_OUTPUTS_DIR") == "" {
-		galog.Infof("Guest agent binary %q not found, enabling core plugin", binaryPath)
+	if !file.Exists(agentBinaryPath, file.TypeFile) && os.Getenv("TEST_UNDECLARED_OUTPUTS_DIR") == "" {
+		galog.Infof("Guest agent binary %q not found, enabling core plugin", agentBinaryPath)
 		return false
 	}
 
@@ -184,12 +170,4 @@ func ignoreCorePlugin() bool {
 	}
 
 	return skipCorePlugin
-}
-
-// agentBinaryPath returns the path to the guest agent binary based on the OS.
-func agentBinaryPath() string {
-	if runtime.GOOS == "windows" {
-		return `C:\Program Files\Google\Compute Engine\agent\GCEWindowsAgent.exe`
-	}
-	return "/usr/bin/google_guest_agent"
 }
