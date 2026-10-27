@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"runtime"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -141,17 +140,7 @@ func ReconfigureHostname(ctx context.Context, _ []byte) ([]byte, error) {
 	}
 	if cfg.Retrieve().Unstable.SetFQDN {
 		galog.V(1).Debugf("SetFQDN is enabled.")
-		h := hostname
-		var err error
-		if runtime.GOOS != "windows" {
-			// Get the hostname from the OS in case we are configured to manage only the
-			// fqdn. Don't do this on windows because:
-			// 1) The hostname is always managed on Windows (albeit not by the agent: see
-			// https://github.com/GoogleCloudPlatform/compute-image-windows/blob/master/sysprep/activate_instance.ps1)
-			// 2) Windows truncates hostnames to 15 characters when they are set so we
-			// cannot rely on the OS to report the full hostname.
-			h, err = os.Hostname()
-		}
+		h, err := fqdnHostname(hostname)
 		if disallowedConfigurations[fqdn] {
 			err = fmt.Errorf("Disallowed fqdn: %q", fqdn)
 		}
