@@ -296,10 +296,7 @@ func setupAndRunScript(ctx context.Context, universeDomain, metadataKey, value s
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tmpFile := filepath.Join(tmpDir, metadataKey)
-	if runtime.GOOS == "windows" {
-		tmpFile = normalizeFilePathForWindows(tmpFile, metadataKey, gcsScriptURL)
-	}
+	tmpFile := normalizeFilePath(filepath.Join(tmpDir, metadataKey), metadataKey, gcsScriptURL)
 
 	if err := writeScriptToFile(ctx, universeDomain, value, tmpFile, gcsScriptURL); err != nil {
 		return fmt.Errorf("unable to write script to file: %v", err)
@@ -316,12 +313,7 @@ func runScript(ctx context.Context, filePath, metadataKey string) error {
 		name = "powershell.exe"
 		args = append(args, append(powerShellArgs, filePath)...)
 	} else {
-		if runtime.GOOS == "windows" {
-			name = filePath
-		} else {
-			name = cfg.Retrieve().MetadataScripts.DefaultShell
-			args = append(args, "-c", filePath)
-		}
+		name, args = shellCommand(filePath)
 	}
 
 	// These are arbitrary scripts ran by agent which could be long running and
@@ -482,13 +474,6 @@ func handleEvent(ctx context.Context, mdsClient metadata.MDSClientInterface, eve
 	return nil
 }
 
-func cloudLoggingName() string {
-	if runtime.GOOS == "windows" {
-		return "GCEMetadataScripts"
-	}
-	return "google_metadata_script_runner"
-}
-
 func main() {
 	ctx := context.Background()
 
@@ -500,7 +485,7 @@ func main() {
 	coreCfg := cfg.Retrieve().Core
 	logOpts := logger.Options{
 		Ident:                       "google_metadata_script_runner",
-		CloudIdent:                  cloudLoggingName(),
+		CloudIdent:                  cloudLoggingName,
 		ProgramVersion:              version,
 		LogToCloudLogging:           coreCfg.CloudLoggingEnabled,
 		LogFile:                     coreCfg.LogFile,
