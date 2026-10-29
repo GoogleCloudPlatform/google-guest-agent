@@ -63,7 +63,11 @@ func SHA256FileSum(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			galog.Warnf("Failed to close file %q: %v", filePath, err)
+		}
+	}()
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -75,21 +79,40 @@ func SHA256FileSum(filePath string) (string, error) {
 // UnpackTargzFile unpacks a src *tar.gz file into dest directory. It also creates a dest
 // directory if it does not exist.
 func UnpackTargzFile(src, dest string) error {
+	dest = filepath.Clean(dest)
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %q: %w", dest, err)
 	}
+
+	root, err := os.OpenRoot(dest)
+	if err != nil {
+		return fmt.Errorf("failed to open destination root %q: %w", dest, err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			galog.Warnf("Failed to close destination root %q: %v", dest, err)
+		}
+	}()
 
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("failed to open file %q: %w", src, err)
 	}
-	defer srcFile.Close()
+	defer func() {
+		if err := srcFile.Close(); err != nil {
+			galog.Warnf("Failed to close file %q: %v", src, err)
+		}
+	}()
 
 	gr, err := gzip.NewReader(srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader for file %q: %w", src, err)
 	}
-	defer gr.Close()
+	defer func() {
+		if err := gr.Close(); err != nil {
+			galog.Warnf("Failed to close gzip reader for file %q: %v", src, err)
+		}
+	}()
 
 	tr := tar.NewReader(gr)
 	for {
@@ -102,31 +125,43 @@ func UnpackTargzFile(src, dest string) error {
 			return fmt.Errorf("failed to read next tar entry: %w", err)
 		}
 
+		if !filepath.IsLocal(hdr.Name) {
+			return fmt.Errorf("illegal file path %q in archive: escapes destination directory %q", hdr.Name, dest)
+		}
 		name := filepath.Clean(hdr.Name)
 		entryPath := filepath.Join(dest, name)
 
+		// os.Root rejects mode bits outside 0o777, and some archives set type or
+		// setuid bits in the header mode, so keep only the permission bits.
+		mode := os.FileMode(hdr.Mode).Perm()
+
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(entryPath, os.FileMode(hdr.Mode)); err != nil {
+			if name == "." {
+				continue
+			}
+			if err := root.MkdirAll(name, mode); err != nil {
 				return fmt.Errorf("failed to create directory %q: %w", entryPath, err)
 			}
 		case tar.TypeSymlink:
-			if err := os.Symlink(hdr.Linkname, entryPath); err != nil {
-				return fmt.Errorf("failed to create symlink %q: %w", entryPath, err)
-			}
+			return fmt.Errorf("unsupported symlink %q -> %q in archive %q", hdr.Name, hdr.Linkname, src)
 		// Treat it as regular file and simply copy it to the destination.
 		default:
-			if err := os.MkdirAll(filepath.Dir(entryPath), os.FileMode(hdr.Mode)); err != nil {
-				return fmt.Errorf("failed to create directory %q: %w", filepath.Dir(entryPath), err)
+			if dir := filepath.Dir(name); dir != "." {
+				if err := root.MkdirAll(dir, 0755); err != nil {
+					return fmt.Errorf("failed to create directory %q: %w", filepath.Dir(entryPath), err)
+				}
 			}
 
-			f, err := os.OpenFile(entryPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(hdr.Mode))
+			f, err := root.OpenFile(name, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
 			if err != nil {
 				return fmt.Errorf("failed to open file %q: %w", entryPath, err)
 			}
 
 			if _, err = io.Copy(f, tr); err != nil {
-				f.Close()
+				if closeErr := f.Close(); closeErr != nil {
+					galog.Warnf("Failed to close file %q: %v", entryPath, closeErr)
+				}
 				// Return original error.
 				return fmt.Errorf("failed to copy contents to the file %q: %w", entryPath, err)
 			}
@@ -257,7 +292,11 @@ func ReadLastNLines(path string, n int) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file %q: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			galog.Warnf("Failed to close file %q: %v", path, err)
+		}
+	}()
 
 	stat, err := f.Stat()
 	if err != nil {

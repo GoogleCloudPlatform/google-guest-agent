@@ -100,7 +100,6 @@ const (
 // └── dir1
 // │   └── file1
 // │   └── dir2
-// └── file2 -> dir1/file1
 func createTestArchive(t *testing.T) string {
 	t.Helper()
 
@@ -135,12 +134,6 @@ func createTestArchive(t *testing.T) string {
 		t.Fatalf("error creating test archive header: %v", err)
 	}
 
-	link := "file2"
-	h := &tar.Header{Name: link, Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: name}
-	if err := tw.WriteHeader(h); err != nil {
-		t.Fatalf("error creating test archive header: %v", err)
-	}
-
 	if err := tw.Close(); err != nil {
 		t.Fatalf("error closing test archive tar writer: %v", err)
 	}
@@ -168,8 +161,7 @@ func TestUnpackTARGZFile(t *testing.T) {
 	}
 
 	wantDirs := []string{filepath.Join(destDir, "dir1"), filepath.Join(destDir, "dir1", "dir2")}
-	wantFiles := []testfile{testfile{filepath.Join(destDir, "dir1", "file1"), "test content"}, testfile{filepath.Join(destDir, "file2"), "test content"}}
-	wantSymlinks := []string{filepath.Join(destDir, "file2")}
+	wantFiles := []testfile{{filepath.Join(destDir, "dir1", "file1"), "test content"}}
 	wantDirPerms := os.FileMode(dirPerms)
 	wantFilePerms := os.FileMode(filePerms)
 
@@ -215,17 +207,122 @@ func TestUnpackTARGZFile(t *testing.T) {
 			t.Errorf("os.Stat(%s) = %v, want %v", wantDir, info.Mode().Perm(), wantDirPerms)
 		}
 	}
+}
 
-	// Verify all the symlinks were created as expected.
-	for _, wantSymlink := range wantSymlinks {
-		fileInfo, err := os.Lstat(wantSymlink)
-		if err != nil {
-			t.Errorf("os.Lstat(%s) failed unexpectedly with error: %v", wantSymlink, err)
-		}
+type archiveEntry struct {
+	header  *tar.Header
+	content string
+}
 
-		if fileInfo.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("%s should have been a symlink, got %v", wantSymlink, fileInfo.Mode())
+func createCustomArchive(t *testing.T, entries []archiveEntry) string {
+	t.Helper()
+
+	tempFile := filepath.Join(t.TempDir(), "custom.tar.gz")
+	f, err := os.Create(tempFile)
+	if err != nil {
+		t.Fatalf("error creating test file: %v", err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	for _, entry := range entries {
+		if err := tw.WriteHeader(entry.header); err != nil {
+			t.Fatalf("error writing tar header %+v: %v", entry.header, err)
 		}
+		if entry.content != "" {
+			if _, err := tw.Write([]byte(entry.content)); err != nil {
+				t.Fatalf("error writing tar content: %v", err)
+			}
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("error closing tar writer: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("error closing gzip writer: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("error closing archive file: %v", err)
+	}
+	return tempFile
+}
+
+func TestUnpackTARGZFileTraversal(t *testing.T) {
+	body := "malicious"
+	baseDir := t.TempDir()
+	tests := []struct {
+		name    string
+		entries []archiveEntry
+		wantErr bool
+	}{
+		{
+			name: "zipslip_relative_parent",
+			entries: []archiveEntry{
+				{
+					header:  &tar.Header{Name: "../../escaped.txt", Mode: filePerms, Typeflag: tar.TypeReg, Size: int64(len(body))},
+					content: body,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "zipslip_dot_dot",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "..", Mode: dirPerms, Typeflag: tar.TypeDir},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "zipslip_absolute_path",
+			entries: []archiveEntry{
+				{
+					header:  &tar.Header{Name: "/etc/passwd", Mode: filePerms, Typeflag: tar.TypeReg, Size: int64(len(body))},
+					content: body,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_relative_target",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "dir1/link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "file1"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_escaping_target",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "dir1/link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "../../escaped.txt"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "symlink_absolute_target",
+			entries: []archiveEntry{
+				{
+					header: &tar.Header{Name: "link", Mode: filePerms, Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srcArchive := createCustomArchive(t, tc.entries)
+			destDir := filepath.Join(baseDir, tc.name, "dest")
+			err := UnpackTargzFile(srcArchive, destDir)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("UnpackTargzFile(%s, %s) error = %v, wantErr %t", srcArchive, destDir, err, tc.wantErr)
+			}
+		})
 	}
 }
 
