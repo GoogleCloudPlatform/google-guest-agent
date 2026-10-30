@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"runtime"
 	"strings"
 	"sync"
 	"text/template"
@@ -579,12 +578,8 @@ func Log() {
 	if err != nil {
 		galog.Debugf("Failed to convert config to string: %v", err)
 	} else {
-		newLine := "\n"
-		if runtime.GOOS == "windows" {
-			newLine = "\r\n"
-		}
-
-		for _, str := range strings.Split(cfgStr, newLine) {
+		// Split on the same delimiter the ini writer used to compose the string.
+		for _, str := range strings.Split(cfgStr, ini.LineBreak) {
 			galog.Debugf("CFG: %s", str)
 		}
 	}
