@@ -245,8 +245,8 @@ func TestFetchACSClientOverride(t *testing.T) {
 	if diff := cmp.Diff(testConn, acs.connection, cmp.AllowUnexported(conn{})); diff != "" {
 		t.Errorf("Unexpected connection, diff (-want +got):\n%s", diff)
 	}
-	if defaultRetrypolicy.MaxAttempts != 2 {
-		t.Errorf("defaultRetrypolicy.MaxAttempts = %d, want 2", defaultRetrypolicy.MaxAttempts)
+	if got := defaultRetryPolicy(ctx).MaxAttempts; got != 2 {
+		t.Errorf("defaultRetryPolicy(ctx).MaxAttempts = %d, want 2", got)
 	}
 }
 
@@ -575,6 +575,15 @@ func TestClose(t *testing.T) {
 	acs.connection = testConnection
 	acs.isConnectionSet.Store(true)
 	ctx = context.WithValue(ctx, OverrideConnection, acs.connection)
+
+	// Closing a stale connection should not close the active connection.
+	acs.closeConnection(ctx, &conn{})
+	if testConnection.closeCalled {
+		t.Errorf("closeConnection() with stale connection closed active connection")
+	}
+	if !acs.isConnectionSet.Load() {
+		t.Errorf("closeConnection() with stale connection set isConnectionSet to false")
+	}
 
 	acs.close(ctx)
 	if !testConnection.closeCalled {

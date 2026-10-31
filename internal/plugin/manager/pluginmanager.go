@@ -63,6 +63,9 @@ var (
 	// pluginManager is the instance of plugin manager.
 	pluginManager *PluginManager
 
+	// eventWg tracks background event notifications sent by sendEvent.
+	eventWg sync.WaitGroup
+
 	// isUDSSupported checks if UDS is supported on the host. This is stubbed out
 	// for testing.
 	isUDSSupported = defaultIsUDSSupported
@@ -111,6 +114,9 @@ type PluginManager struct {
 
 	// IsInitialized indicates if plugin manager is initialized.
 	IsInitialized atomic.Bool
+
+	// bgWg tracks background goroutines spawned by the plugin manager (e.g. cleanupOldState, startPluginSchedulers).
+	bgWg sync.WaitGroup
 }
 
 // LocalPluginInstallation contains the configuration for a local plugin
@@ -170,7 +176,9 @@ func InitAdHocPluginManager(ctx context.Context, instanceID string) (*PluginMana
 	if err != nil {
 		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
 	}
+	pluginManager.mu.Lock()
 	pluginManager.plugins = plugins
+	pluginManager.mu.Unlock()
 
 	return pluginManager, nil
 }
@@ -201,13 +209,16 @@ func (m *PluginManager) StopPlugin(ctx context.Context, name string) error {
 func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, error) {
 	version := cfg.Retrieve().Core.Version
 	galog.Infof("Initializing plugin manager for instance %q, agent version: %q", instanceID, version)
-	pluginManager.setInstanceID(instanceID)
+	pm := pluginManager
+	pm.setInstanceID(instanceID)
 
 	// Cleanup old plugin state in a separate goroutine. This operation is not
 	// critical for plugin manager initialization and should not block it.
 	stateParentDir := filepath.Dir(baseState())
+	pm.bgWg.Add(1)
 	go func() {
-		if err := pluginManager.cleanupOldState(ctx, stateParentDir); err != nil {
+		defer pm.bgWg.Done()
+		if err := pm.cleanupOldState(ctx, stateParentDir); err != nil {
 			galog.Errorf("Failed to cleanup old plugin state: %v", err)
 		}
 	}()
@@ -217,8 +228,6 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 	if err != nil {
 		return nil, fmt.Errorf("unable to load existing plugin state: %w", err)
 	}
-
-	pluginManager.plugins = plugins
 
 	// Remove the state file for local plugins. This should prevent local plugins
 	// from being started in cases where they are disabled.
@@ -230,32 +239,36 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 			}
 
 			// Remove the plugin from the plugin manager.
-			delete(pluginManager.plugins, p.Name)
+			delete(plugins, p.Name)
 		}
 	}
 
+	pm.mu.Lock()
+	pm.plugins = plugins
+	pm.mu.Unlock()
+
 	// Subscribe to cleanup event. This needs to happen after plugin manager is
 	// initialized, or we may accidentally cleanup plugins that shouldn't be removed.
-	scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(pluginManager)}, false)
+	scheduler.ScheduleJobs(ctx, []scheduler.Job{newCleanupJob(pm)}, false)
 
 	if err := RegisterCmdHandler(ctx); err != nil {
 		return nil, fmt.Errorf("failed to register plugin command handler: %w", err)
 	}
 
 	wg := sync.WaitGroup{}
-	pluginManager.pendingPluginRevisionsMu.Lock()
+	pm.pendingPluginRevisionsMu.Lock()
 
 	for _, p := range plugins {
-		pluginManager.inProgressPluginRequests[p.Name] = true
+		pm.inProgressPluginRequests[p.Name] = true
 		wg.Add(1)
 
 		go func(p *Plugin) {
 			// Regardless of the outcome, we should remove the plugin from the pending
 			// list as request is no longer in process for this plugin.
 			defer func() {
-				pluginManager.pendingPluginRevisionsMu.Lock()
-				defer pluginManager.pendingPluginRevisionsMu.Unlock()
-				delete(pluginManager.inProgressPluginRequests, p.Name)
+				pm.pendingPluginRevisionsMu.Lock()
+				defer pm.pendingPluginRevisionsMu.Unlock()
+				delete(pm.inProgressPluginRequests, p.Name)
 				wg.Done()
 			}()
 
@@ -273,31 +286,31 @@ func InitPluginManager(ctx context.Context, instanceID string) (*PluginManager, 
 			if err := connectOrReLaunch(ctx, p); err != nil {
 				galog.Errorf("Failed to connect or relaunch plugin %q: %v", p.FullName(), err)
 			} else {
-				pluginManager.startPluginSchedulers(ctx, p)
+				pm.startPluginSchedulers(ctx, p)
 			}
 		}(p)
 	}
-	pluginManager.IsInitialized.Store(true)
-	pluginManager.pendingPluginRevisionsMu.Unlock()
+	pm.IsInitialized.Store(true)
+	pm.pendingPluginRevisionsMu.Unlock()
 	wg.Wait()
 
 	// TCP is always supported, so if the forced connection type is TCP, we can
 	// return early.
 	connType := cfg.Retrieve().Plugin.ConnectionType
 	if connType == tcpProtocol {
-		pluginManager.protocol = tcpProtocol
-		return pluginManager, nil
+		pm.protocol = tcpProtocol
+		return pm, nil
 	}
 
 	// If the connection type is not TCP, check if UDS is supported and set the
 	// protocol to UDS if it is. Otherwise, fallback to TCP.
 	if isUDSSupported() {
-		pluginManager.protocol = udsProtocol
+		pm.protocol = udsProtocol
 	} else {
 		galog.Debugf("UDS is not supported, fallback to TCP")
-		pluginManager.protocol = tcpProtocol
+		pm.protocol = tcpProtocol
 	}
-	return pluginManager, nil
+	return pm, nil
 }
 
 // RemoveAllDynamicPlugins filters out core plugins and triggers plugin manager
@@ -679,7 +692,9 @@ func (m *PluginManager) startPluginSchedulers(ctx context.Context, plugin *Plugi
 	// to avoid blocking the main thread. These jobs are configured to start
 	// immediately scheduling them synchronously would block the caller until they
 	// finish first run.
+	m.bgWg.Add(1)
 	go func() {
+		defer m.bgWg.Done()
 		m.startMonitoring(ctx, plugin)
 		m.startMetricsMonitoring(ctx, plugin)
 	}()
@@ -879,28 +894,31 @@ func (m *PluginManager) startMonitoring(ctx context.Context, p *Plugin) {
 	galog.Infof("Starting plugin monitor job for plugin %q", p.FullName())
 	pm := NewPluginMonitor(p, healthCheckFrequency)
 
-	m.pluginMonitorMu.Lock()
-	m.pluginMonitors[p.FullName()] = pm.ID()
-	m.pluginMonitorMu.Unlock()
-
 	// ScheduleJob() throws error only if we try to schedule a job that should
 	// not be enabled (ShouldEnable() returns false). Ignoring this error
 	// here as in case of monitoring pm.ShouldEnable() always returns true.
 	m.scheduler.ScheduleJob(ctx, pm)
+
+	m.pluginMonitorMu.Lock()
+	defer m.pluginMonitorMu.Unlock()
+	m.pluginMonitors[p.FullName()] = pm.ID()
 }
 
 // stopMonitoring stops/removes the plugin monitoring job.
 func (m *PluginManager) stopMonitoring(p *Plugin) {
 	galog.Infof("Removing plugin monitor job for plugin %q", p.FullName())
+	m.pluginMonitorMu.Lock()
 	pm, ok := m.pluginMonitors[p.FullName()]
+	if ok {
+		delete(m.pluginMonitors, p.FullName())
+	}
+	m.pluginMonitorMu.Unlock()
+
 	if !ok {
 		galog.Warnf("Plugin monitor not found for %q, ignoring stop monitor request", p.FullName())
 		return
 	}
 	m.scheduler.UnscheduleJob(pm)
-	m.pluginMonitorMu.Lock()
-	defer m.pluginMonitorMu.Unlock()
-	delete(m.pluginMonitors, p.FullName())
 }
 
 // startMetricsMonitoring schedules a plugin resource metrics collection job
@@ -923,6 +941,9 @@ func (m *PluginManager) stopMetricsMonitoring(p *Plugin) {
 
 	m.pluginMetricsMu.Lock()
 	pm, ok := m.pluginMetricsMonitors[p.FullName()]
+	if ok {
+		delete(m.pluginMetricsMonitors, p.FullName())
+	}
 	m.pluginMetricsMu.Unlock()
 
 	if !ok {
@@ -930,9 +951,6 @@ func (m *PluginManager) stopMetricsMonitoring(p *Plugin) {
 		return
 	}
 	m.scheduler.UnscheduleJob(pm)
-	m.pluginMetricsMu.Lock()
-	defer m.pluginMetricsMu.Unlock()
-	delete(m.pluginMetricsMonitors, p.FullName())
 }
 
 // connectOrReLaunch connects to the plugin and launches the plugin if needed.
@@ -1010,7 +1028,9 @@ func sendEvent(ctx context.Context, p *Plugin, evType acpb.PluginEventMessage_Pl
 	}
 	// This might do a retry on the client side if it fails no point in blocking
 	// the caller.
+	eventWg.Add(1)
 	go func() {
+		defer eventWg.Done()
 		if err := client.Notify(ctx, event); err != nil {
 			// Just log the error, Notify() internally handles retrying the request
 			// if this fails there's nothing really we can do.
@@ -1167,7 +1187,9 @@ func (m *PluginManager) StartLocalPlugins(ctx context.Context, config map[string
 
 		// Run the non-boot critical plugins in the background.
 		for _, req := range nonBootCriticalPlugins {
+			m.bgWg.Add(1)
 			go func(ctx context.Context, req *acpb.ConfigurePluginStates_ConfigurePlugin, config map[string]LocalPluginInstallation) {
+				defer m.bgWg.Done()
 				if err := m.configureAndVerifyPlugin(ctx, req, config); err != nil {
 					galog.Warnf("Failed to configure and verify local plugin %q: %v", req.GetPlugin().GetName(), err)
 				}

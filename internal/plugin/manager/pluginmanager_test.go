@@ -289,6 +289,7 @@ func TestConnectOrReLaunch(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
+			t.Cleanup(eventWg.Wait)
 			var wantArgs []string
 			addr := filepath.Join(t.TempDir(), "pluginA_revisionA.sock")
 			ts := &testPluginServer{statusFail: !tc.isRunning, ctrs: make(map[string]int)}
@@ -335,6 +336,7 @@ func TestConnectOrReLaunch(t *testing.T) {
 }
 
 func TestInitPluginManagerError(t *testing.T) {
+	t.Cleanup(pluginManager.bgWg.Wait)
 	ctx := context.Background()
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
@@ -353,6 +355,11 @@ func TestInitPluginManagerError(t *testing.T) {
 }
 
 func TestInitPluginManager(t *testing.T) {
+	t.Cleanup(func() {
+		pluginManager.bgWg.Wait()
+		scheduler.Instance().Stop()
+		eventWg.Wait()
+	})
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	stateDir := t.TempDir()
 	addr := filepath.Join(t.TempDir(), "pluginA_revisionA.sock")
@@ -503,6 +510,11 @@ func TestInitPluginManagerConfig(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				pluginManager.bgWg.Wait()
+				scheduler.Instance().Stop()
+				eventWg.Wait()
+			})
 			config := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\nconnection_type = %s\n[Core]\nacs_client = false\nsocket_connections_dir = %s", stateDir, tc.connectionType, filepath.Dir(addr))
 			if err := cfg.Load([]byte(config)); err != nil {
 				t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
@@ -775,7 +787,6 @@ func TestInstallPlugin(t *testing.T) {
 			req.Manifest.Config = &acpb.ConfigurePluginStates_Manifest_StringConfig{StringConfig: tc.name}
 			req.Manifest.PluginInstallationType = tc.installationType
 			s := scheduler.Instance()
-			t.Cleanup(s.Stop)
 			pm := &PluginManager{
 				plugins:                  map[string]*Plugin{},
 				protocol:                 udsProtocol,
@@ -784,6 +795,11 @@ func TestInstallPlugin(t *testing.T) {
 				scheduler:                s,
 				inProgressPluginRequests: make(map[string]bool),
 			}
+			t.Cleanup(func() {
+				pm.bgWg.Wait()
+				s.Stop()
+				eventWg.Wait()
+			})
 			pluginManager = pm
 			err := pm.installPlugin(ctx, req)
 			if (err != nil) != tc.wantErr {
@@ -907,8 +923,6 @@ func TestUpgradePlugin(t *testing.T) {
 	}
 
 	s := scheduler.Instance()
-	t.Cleanup(s.Stop)
-
 	pm := &PluginManager{
 		plugins:                  map[string]*Plugin{plugin.Name: plugin},
 		protocol:                 udsProtocol,
@@ -917,6 +931,11 @@ func TestUpgradePlugin(t *testing.T) {
 		scheduler:                s,
 		inProgressPluginRequests: make(map[string]bool),
 	}
+	t.Cleanup(func() {
+		pm.bgWg.Wait()
+		s.Stop()
+		eventWg.Wait()
+	})
 	pluginManager = pm
 	if err := pm.installPlugin(ctx, req); err != nil {
 		t.Fatalf("installPlugin(ctx, %+v) failed unexpectedly with error: %v", req, err)
@@ -1113,8 +1132,6 @@ func TestRemovePluginFallback(t *testing.T) {
 			}
 
 			s := scheduler.Instance()
-			t.Cleanup(s.Stop)
-
 			orig := pluginManager
 			t.Cleanup(func() { pluginManager = orig })
 
@@ -1127,6 +1144,11 @@ func TestRemovePluginFallback(t *testing.T) {
 				inProgressPluginRequests: make(map[string]bool),
 				requestCount:             make(map[acpb.ConfigurePluginStates_Action]map[bool]int),
 			}
+			t.Cleanup(func() {
+				pm.bgWg.Wait()
+				s.Stop()
+				eventWg.Wait()
+			})
 			pluginManager = pm
 
 			req := &acpb.ConfigurePluginStates{
@@ -1165,13 +1187,33 @@ func TestMonitoring(t *testing.T) {
 	addr := filepath.Join(t.TempDir(), "PluginA_RevisionA.sock")
 	cfg.Retrieve().Plugin.SocketConnectionsDir = filepath.Dir(addr)
 	startTestServer(t, &testPluginServer{ctrs: make(map[string]int)}, udsProtocol, "")
-	plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3}}
+	plugin := &Plugin{
+		Name:     "PluginA",
+		Revision: "RevisionA",
+		Protocol: udsProtocol,
+		RuntimeInfo: &RuntimeInfo{
+			Pid:     -5555,
+			metrics: boundedlist.New[Metric](2),
+		},
+		Manifest: &Manifest{
+			StartAttempts:       1,
+			StopTimeout:         time.Second * 3,
+			MaxMetricDatapoints: 2,
+			MetricsInterval:     time.Second * 3,
+		},
+	}
 	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
 	if err := plugin.Connect(ctx); err != nil {
 		t.Fatalf("plugin.Connect(ctx) failed unexpectedly with error: %v", err)
 	}
 
-	pm := &PluginManager{plugins: map[string]*Plugin{plugin.Name: plugin}, protocol: udsProtocol, pluginMonitors: make(map[string]string), scheduler: s}
+	pm := &PluginManager{
+		plugins:               map[string]*Plugin{plugin.Name: plugin},
+		protocol:              udsProtocol,
+		pluginMonitors:        make(map[string]string),
+		pluginMetricsMonitors: make(map[string]string),
+		scheduler:             s,
+	}
 
 	pm.startMonitoring(ctx, plugin)
 	if _, ok := pm.pluginMonitors[plugin.FullName()]; !ok {
@@ -1184,6 +1226,20 @@ func TestMonitoring(t *testing.T) {
 
 	if _, ok := pm.pluginMonitors[plugin.FullName()]; ok {
 		t.Errorf("stopMonitoring(%+v) did not stop and remove monitor from map", plugin)
+	}
+
+	setupMockPsClient(t, &mockPsClient{alive: true})
+	pm.startMetricsMonitoring(ctx, plugin)
+	if _, ok := pm.pluginMetricsMonitors[plugin.FullName()]; !ok {
+		t.Errorf("startMetricsMonitoring(ctx, %+v) did not create and add metrics monitor in map", plugin)
+	}
+
+	pm.stopMetricsMonitoring(plugin)
+	// Stop on non-existing plugin should be a no-op.
+	pm.stopMetricsMonitoring(&Plugin{Name: "non-existing", Revision: "avc"})
+
+	if _, ok := pm.pluginMetricsMonitors[plugin.FullName()]; ok {
+		t.Errorf("stopMetricsMonitoring(%+v) did not stop and remove metrics monitor from map", plugin)
 	}
 }
 
@@ -1309,6 +1365,7 @@ func TestSendEvent(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
+			t.Cleanup(eventWg.Wait)
 			testconnection := &fakeACS{throwErr: tc.shouldFail}
 			ctx = context.WithValue(ctx, client.OverrideConnection, testconnection)
 			sendEvent(ctx, plugin, acpb.PluginEventMessage_PLUGIN_CONFIG_INSTALL, "test-event")
@@ -1727,7 +1784,11 @@ func TestApplyConfig(t *testing.T) {
 
 	pm := &PluginManager{plugins: map[string]*Plugin{dynamicPlugin.Name: dynamicPlugin, localPlugin.Name: localPlugin}, protocol: udsProtocol, instanceID: "test-instance-id"}
 	origPluginManager := pluginManager
-	t.Cleanup(func() { pluginManager = origPluginManager })
+	t.Cleanup(func() {
+		pm.bgWg.Wait()
+		eventWg.Wait()
+		pluginManager = origPluginManager
+	})
 	pluginManager = pm
 
 	tests := []struct {
@@ -1989,10 +2050,11 @@ func TestStartLocalPlugin(t *testing.T) {
 	t.Cleanup(func() { pluginManager = orig })
 
 	tests := []struct {
-		name     string
-		url      string
-		disabled bool
-		onReady  bool
+		name            string
+		url             string
+		disabled        bool
+		onReady         bool
+		nonBootCritical bool
 	}{
 		{
 			name: "success",
@@ -2005,6 +2067,11 @@ func TestStartLocalPlugin(t *testing.T) {
 		{
 			name:    "on-ready",
 			onReady: true,
+		},
+		{
+			name:            "non-boot-critical",
+			url:             server.URL,
+			nonBootCritical: true,
 		},
 	}
 
@@ -2037,7 +2104,7 @@ func TestStartLocalPlugin(t *testing.T) {
 					DownloadTimeout:        &dpb.Duration{Seconds: 5},
 					PluginInstallationType: acpb.PluginInstallationType_LOCAL_INSTALLATION,
 					ExecutionModel: &acpb.ExecutionModel{
-						BootCritical: true,
+						BootCritical: !tc.nonBootCritical,
 					},
 				},
 			}
@@ -2051,7 +2118,6 @@ func TestStartLocalPlugin(t *testing.T) {
 
 			// Set up the plugin manager.
 			s := scheduler.Instance()
-			t.Cleanup(s.Stop)
 			pm := &PluginManager{
 				plugins:                  map[string]*Plugin{},
 				protocol:                 udsProtocol,
@@ -2061,6 +2127,11 @@ func TestStartLocalPlugin(t *testing.T) {
 				inProgressPluginRequests: make(map[string]bool),
 				requestCount:             make(map[acpb.ConfigurePluginStates_Action]map[bool]int),
 			}
+			t.Cleanup(func() {
+				pm.bgWg.Wait()
+				s.Stop()
+				eventWg.Wait()
+			})
 			pluginManager = pm
 
 			var onReadyCalled bool
@@ -2083,6 +2154,7 @@ func TestStartLocalPlugin(t *testing.T) {
 			if err := pm.StartLocalPlugins(ctx, installations); err != nil {
 				t.Fatalf("StartLocalPlugins(ctx, %+v) = error: %v, want no error", installations, err)
 			}
+			pm.bgWg.Wait()
 
 			// Fresh install should not have any pending plugins.
 			if len(seenPendingPlugins.revisions) != 0 || len(seenPendingPlugins.status) != 0 {

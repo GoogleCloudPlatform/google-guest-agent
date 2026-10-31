@@ -72,7 +72,7 @@ type ConnectionInterface interface {
 type acsHelper struct {
 	// channelID is the channel ID used by this ACS connection.
 	channelID string
-	// connMu protects connection.
+	// connMu protects channelID, connection, and client.
 	connMu sync.Mutex
 	// connection is cached ACS Connection, reuse across Agent if its already set.
 	// connection uses the acsClient to send and receive messages.
@@ -140,9 +140,17 @@ func clientOptions(ctx context.Context) ([]option.ClientOption, error) {
 
 // Close closes the ACS connection and client.
 func (acs *acsHelper) close(ctx context.Context) {
+	acs.closeConnection(ctx, nil)
+}
+
+func (acs *acsHelper) closeConnection(ctx context.Context, failedConn ConnectionInterface) {
 	galog.Debugf("Closing ACS connection")
 	acs.connMu.Lock()
 	defer acs.connMu.Unlock()
+
+	if failedConn != nil && acs.connection != failedConn {
+		return
+	}
 
 	// Reset connection state, this will trigger to create a new ACS connection
 	// on next send/receive.
@@ -180,9 +188,6 @@ func (acs *acsHelper) connect(ctx context.Context) error {
 	// Used of unit testing. Create connection makes a http call which must be avoided in unit tests.
 	if ctx.Value(OverrideConnection) != nil {
 		acs.connection = ctx.Value(OverrideConnection).(ConnectionInterface)
-		// Override max retry attempts for unit tests to avoid spending too much
-		// time waiting in retries.
-		defaultRetrypolicy.MaxAttempts = 2
 		return nil
 	}
 
@@ -218,11 +223,15 @@ func (acs *acsHelper) sendStream(ctx context.Context, labels map[string]string, 
 		return fmt.Errorf("unable to set connection for sending msg, err: %w", err)
 	}
 
-	err := acs.connection.SendMessage(&acpb.MessageBody{Labels: labels, Body: msg})
+	acs.connMu.Lock()
+	conn := acs.connection
+	acs.connMu.Unlock()
+
+	err := conn.SendMessage(&acpb.MessageBody{Labels: labels, Body: msg})
 	if err != nil {
 		// Close connection if error occurs, this triggers to create a new ACS
 		// connection and ensures the previous connection is closed.
-		acs.close(ctx)
+		acs.closeConnection(ctx, conn)
 	}
 
 	return err
@@ -240,9 +249,15 @@ func (acs *acsHelper) sendMessage(ctx context.Context, labels map[string]string,
 		return nil, fmt.Errorf("unable to connect for sending msg, err: %w", err)
 	}
 
-	resp, err := sendAgentMessage(ctx, acs.channelID, acs.client, &acpb.MessageBody{Labels: labels, Body: msg})
+	acs.connMu.Lock()
+	channelID := acs.channelID
+	acsClient := acs.client
+	conn := acs.connection
+	acs.connMu.Unlock()
+
+	resp, err := sendAgentMessage(ctx, channelID, acsClient, &acpb.MessageBody{Labels: labels, Body: msg})
 	if err != nil {
-		acs.close(ctx)
+		acs.closeConnection(ctx, conn)
 	}
 	return resp, err
 }
@@ -251,9 +266,14 @@ func (acs *acsHelper) receiveStream(ctx context.Context) (*acpb.MessageBody, err
 	if err := acs.connect(ctx); err != nil {
 		return nil, fmt.Errorf("unable to connect for watching new messages on channel, err: %w", err)
 	}
-	msg, err := acs.connection.Receive()
+
+	acs.connMu.Lock()
+	conn := acs.connection
+	acs.connMu.Unlock()
+
+	msg, err := conn.Receive()
 	if err != nil {
-		acs.close(ctx)
+		acs.closeConnection(ctx, conn)
 		return nil, err
 	}
 	return msg, err
@@ -281,7 +301,7 @@ func SendMessage(ctx context.Context, labels map[string]string, msg proto.Messag
 		return resp, nil
 	}
 
-	return retry.RunWithResponse(ctx, defaultRetrypolicy, fn)
+	return retry.RunWithResponse(ctx, defaultRetryPolicy(ctx), fn)
 }
 
 // Notify sends an event notification on ACS.
@@ -309,7 +329,7 @@ func Send(ctx context.Context, labels map[string]string, msg proto.Message) erro
 		return nil
 	}
 
-	return retry.Run(ctx, defaultRetrypolicy, fn)
+	return retry.Run(ctx, defaultRetryPolicy(ctx), fn)
 }
 
 // Watch checks for a new message from ACS and returns.
@@ -328,6 +348,15 @@ func Watch(ctx context.Context) (*acpb.MessageBody, error) {
 	}
 
 	return retry.RunWithResponse(ctx, watcherRetryPolicy(ctx), fn)
+}
+
+func defaultRetryPolicy(ctx context.Context) retry.Policy {
+	if ctx.Value(OverrideConnection) != nil {
+		policy := defaultRetrypolicy
+		policy.MaxAttempts = 2
+		return policy
+	}
+	return defaultRetrypolicy
 }
 
 func watcherRetryPolicy(ctx context.Context) retry.Policy {
