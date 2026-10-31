@@ -781,10 +781,10 @@ func (m *PluginManager) upgradePlugin(ctx context.Context, req *acpb.ConfigurePl
 }
 
 // stopAndRemovePlugin stops the given plugin, all of its schedulers and removes
-// it from the manager.
+// it from the manager. It does not send PLUGIN_CONFIG_REMOVE, which is only an
+// acknowledgement of a remove request from ACS (see [removePlugin]); upgrades
+// and ad-hoc stops also go through this path.
 func (m *PluginManager) stopAndRemovePlugin(ctx context.Context, p *Plugin, removeState bool) error {
-	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_REMOVE, "Received request to remove a plugin.")
-
 	// Stop all schedulers running on the plugin so it doesn't interfere with the
 	// stop process.
 	m.stopMonitoring(p)
@@ -873,6 +873,7 @@ func (m *PluginManager) removePlugin(ctx context.Context, req *acpb.ConfigurePlu
 		return fmt.Errorf("plugin %q not found", req.GetPlugin().GetName())
 	}
 
+	sendEvent(ctx, p, acpb.PluginEventMessage_PLUGIN_CONFIG_REMOVE, "Received request to remove a plugin.")
 	if err := m.stopAndRemovePlugin(ctx, p, true); err != nil {
 		return fmt.Errorf("failed to remove plugin %q: %w", p.FullName(), err)
 	}
@@ -1017,6 +1018,10 @@ func load(stateDir string) (map[string]*Plugin, error) {
 	return plugins, nil
 }
 
+// notifyEvent sends a plugin event to ACS. It is a variable so tests can
+// capture events without going through the ACS client.
+var notifyEvent = client.Notify
+
 // sendEvent sends a plugin event on ACS channel.
 func sendEvent(ctx context.Context, p *Plugin, evType acpb.PluginEventMessage_PluginEventType, details string) {
 	event := &acpb.PluginEventMessage{
@@ -1026,12 +1031,13 @@ func sendEvent(ctx context.Context, p *Plugin, evType acpb.PluginEventMessage_Pl
 		EventTimestamp: tpb.New(time.Now()),
 		EventDetails:   []byte(details),
 	}
+	notify := notifyEvent
 	// This might do a retry on the client side if it fails no point in blocking
 	// the caller.
 	eventWg.Add(1)
 	go func() {
 		defer eventWg.Done()
-		if err := client.Notify(ctx, event); err != nil {
+		if err := notify(ctx, event); err != nil {
 			// Just log the error, Notify() internally handles retrying the request
 			// if this fails there's nothing really we can do.
 			galog.Errorf("Failed to sent event notification [%+v]: %v", event, err)

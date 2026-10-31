@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -1033,6 +1034,120 @@ func TestRemovePlugin(t *testing.T) {
 	verifyStopRequest(t, ps.seenStopReq, true, true)
 
 	validatePluginRemoved(t, plugin, pm, ctc)
+}
+
+// TestPluginConfigRemoveEvent verifies that PLUGIN_CONFIG_REMOVE is only sent
+// when ACS requests a removal, not on upgrades or ad-hoc stops.
+func TestPluginConfigRemoveEvent(t *testing.T) {
+	tests := []struct {
+		desc             string
+		remove           func(ctx context.Context, pm *PluginManager, p *Plugin) error
+		wantConfigRemove bool
+	}{
+		{
+			desc: "acs_remove_request",
+			remove: func(ctx context.Context, pm *PluginManager, p *Plugin) error {
+				req := &acpb.ConfigurePluginStates_ConfigurePlugin{
+					Action: acpb.ConfigurePluginStates_REMOVE,
+					Plugin: &acpb.ConfigurePluginStates_Plugin{Name: p.Name, RevisionId: p.Revision},
+				}
+				return pm.removePlugin(ctx, req)
+			},
+			wantConfigRemove: true,
+		},
+		{
+			desc: "upgrade",
+			remove: func(ctx context.Context, pm *PluginManager, p *Plugin) error {
+				return pm.stopAndRemovePlugin(ctx, p, false)
+			},
+			wantConfigRemove: false,
+		},
+		{
+			desc: "adhoc_stop",
+			remove: func(ctx context.Context, pm *PluginManager, p *Plugin) error {
+				return pm.StopPlugin(ctx, p.Name)
+			},
+			wantConfigRemove: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			// Capture events through notifyEvent instead of the ACS client, whose
+			// test connection override is not safe for concurrent sends.
+			var mu sync.Mutex
+			var seenTypes []acpb.PluginEventMessage_PluginEventType
+			origNotify := notifyEvent
+			t.Cleanup(func() {
+				eventWg.Wait()
+				notifyEvent = origNotify
+			})
+			notifyEvent = func(_ context.Context, event *acpb.PluginEventMessage) error {
+				mu.Lock()
+				defer mu.Unlock()
+				seenTypes = append(seenTypes, event.GetEventType())
+				return nil
+			}
+
+			ctx := context.Background()
+			// Use a short directory for the socket instead of t.TempDir(), whose
+			// path includes the (long) test name and can exceed the Windows
+			// AF_UNIX socket path limit.
+			connections, err := os.MkdirTemp("", "pcr")
+			if err != nil {
+				t.Fatalf("os.MkdirTemp() failed unexpectedly with error: %v", err)
+			}
+			t.Cleanup(func() { os.RemoveAll(connections) })
+			state := t.TempDir()
+			tmp := fmt.Sprintf("[PluginConfig]\nstate_dir = %s\n[Core]\nacs_client = false", state)
+			if err := cfg.Load([]byte(tmp)); err != nil {
+				t.Fatalf("cfg.Load(%s) failed unexpectedly with error: %v", tmp, err)
+			}
+			setupConstraintTestClient(t)
+			cfg.Retrieve().Plugin.SocketConnectionsDir = connections
+
+			addr := filepath.Join(connections, "PluginA_RevisionA.sock")
+			ps := &testPluginServer{ctrs: make(map[string]int)}
+			startTestServer(t, ps, udsProtocol, addr)
+
+			entryPoint := filepath.Join(state, "plugins", "PluginA", "test-entry-point")
+			createTestFile(t, entryPoint)
+			setupMockPsClient(t, &mockPsClient{alive: true, exe: entryPoint})
+
+			plugin := &Plugin{Name: "PluginA", Revision: "RevisionA", Protocol: udsProtocol, Address: addr, EntryPath: entryPoint, InstallPath: filepath.Dir(entryPoint), RuntimeInfo: &RuntimeInfo{Pid: -5555}, Manifest: &Manifest{StartAttempts: 1, StopTimeout: time.Second * 3, PluginInstallationType: acpb.PluginInstallationType_DYNAMIC_INSTALLATION}}
+			if err := plugin.Connect(ctx); err != nil {
+				t.Fatalf("plugin.Connect() failed unexpectedly with error: %v", err)
+			}
+
+			s := scheduler.Instance()
+			t.Cleanup(s.Stop)
+			pm := &PluginManager{plugins: map[string]*Plugin{plugin.Name: plugin}, protocol: udsProtocol, pluginMonitors: make(map[string]string), pluginMetricsMonitors: make(map[string]string), scheduler: s}
+
+			if err := tc.remove(ctx, pm, plugin); err != nil {
+				t.Fatalf("removing plugin %q failed unexpectedly with error: %v", plugin.FullName(), err)
+			}
+
+			// Events are sent asynchronously; wait for PLUGIN_REMOVED, which is
+			// always sent last on every removal path.
+			var gotTypes []acpb.PluginEventMessage_PluginEventType
+			policy := retry.Policy{MaxAttempts: 10, Jitter: time.Millisecond * 200, BackoffFactor: 1}
+			if err := retry.Run(ctx, policy, func() error {
+				mu.Lock()
+				gotTypes = slices.Clone(seenTypes)
+				mu.Unlock()
+				if !slices.Contains(gotTypes, acpb.PluginEventMessage_PLUGIN_REMOVED) {
+					return fmt.Errorf("PLUGIN_REMOVED not sent yet, got events: %v", gotTypes)
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("waiting for PLUGIN_REMOVED event failed: %v", err)
+			}
+
+			if got := slices.Contains(gotTypes, acpb.PluginEventMessage_PLUGIN_CONFIG_REMOVE); got != tc.wantConfigRemove {
+				t.Errorf("PLUGIN_CONFIG_REMOVE sent = %t, want %t (events: %v)", got, tc.wantConfigRemove, gotTypes)
+			}
+		})
+	}
 }
 
 func TestRemovePluginFallback(t *testing.T) {
