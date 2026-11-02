@@ -22,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -38,14 +37,8 @@ const (
 var (
 	// CorePluginEnabledConfigFile is the path to the file that contains the
 	// core plugin enabled or not configuration.
-	CorePluginEnabledConfigFile = "/etc/google-guest-agent/core-plugin-enabled"
+	CorePluginEnabledConfigFile = defaultCorePluginEnabledConfigFile
 )
-
-func init() {
-	if runtime.GOOS == "windows" {
-		CorePluginEnabledConfigFile = `C:\ProgramData\Google\Compute Engine\google-guest-agent\core-plugin-enabled`
-	}
-}
 
 // SetCorePluginEnabled sets the core plugin enabled configuration.
 func SetCorePluginEnabled(enableCorePlugin bool) error {
