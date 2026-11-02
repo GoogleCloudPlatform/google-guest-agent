@@ -19,9 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"syscall"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -57,22 +54,6 @@ func (ss *stopStep) ErrorStatus() acmpb.CurrentPluginStates_StatusValue {
 	// This step is not expected to fail as agent would kill the plugin if stop
 	// fails.
 	return acmpb.CurrentPluginStates_STATE_VALUE_UNSPECIFIED
-}
-
-// isSameExecutablePath checks if the executable path is the same as the plugin
-// entry path.
-func (p *Plugin) isSameExecutablePath(executable string) bool {
-	if runtime.GOOS == "windows" {
-		// On Windows, when the process is running and the binary is being deleted
-		// path show up similar to -
-		// C:\Users\<username>\AppData\Local\Temp\ProcessName.exe.old805949437"
-		return strings.Contains(executable, filepath.Base(p.EntryPath))
-	}
-
-	// If the pathname has been unlinked/deleted, the /proc returned executable
-	// path will contain the string '(deleted)' appended to the original pathname.
-	entryPath := strings.TrimSuffix(executable, " (deleted)")
-	return p.EntryPath == entryPath
 }
 
 func (ss *stopStep) stopPlugin(ctx context.Context, p *Plugin) error {

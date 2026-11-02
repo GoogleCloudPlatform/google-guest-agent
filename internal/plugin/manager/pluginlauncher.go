@@ -20,7 +20,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -290,40 +289,4 @@ func address(ctx context.Context, protocol, id string, policy retry.Policy) (str
 	}
 
 	return retry.RunWithResponse(ctx, policy, f)
-}
-
-// defaultIsUDSSupported returns true if UDS is supported on Windows. Instead of
-// going by version to figure out if UDS is supported, try listening on test
-// address using UDS, if it gets listener successfully consider UDS is supported.
-func defaultIsUDSSupported() bool {
-	if runtime.GOOS == "linux" {
-		return true
-	}
-
-	connDir := connectionsPath()
-	if err := os.MkdirAll(connDir, 0755); err != nil {
-		galog.Debugf("Failed to test if UDS is supported, could not create connections directory: %v", err)
-		return false
-	}
-
-	sockAddr := filepath.Join(connDir, "test-connection")
-	defer func() {
-		if err := os.RemoveAll(sockAddr); err != nil {
-			galog.Debugf("Failed to remove socket file %q: %v", sockAddr, err)
-		}
-	}()
-
-	listener, err := net.Listen(udsProtocol, sockAddr)
-	if err != nil {
-		galog.Infof("Cannot listen on %q, UDS not supported/disabled, fallback to TCP: %v", sockAddr, err)
-		return false
-	}
-
-	// Ignore these errors - we just need to know if UDS is supported and this
-	// address is not reused.
-	if err := listener.Close(); err != nil {
-		galog.Debugf("Failed to close UDS listener: %v", err)
-	}
-
-	return true
 }
