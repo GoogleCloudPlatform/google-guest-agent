@@ -17,11 +17,11 @@ package cfg
 import (
 	"errors"
 	"fmt"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"gopkg.in/ini.v1"
 )
 
 func TestApplyTemplate(t *testing.T) {
@@ -204,14 +204,9 @@ func TestToString(t *testing.T) {
 		t.Fatalf("ToString() failed unexpectedly; err = %s", err)
 	}
 
-	newLine := "\n"
-	if runtime.GOOS == "windows" {
-		newLine = "\r\n"
-	}
-
 	want := []string{"[Core]", "log_level = 2", "", "[Daemons]", "accounts_daemon = true"}
 
-	if diff := cmp.Diff(strings.Split(got, newLine), want); diff != "" {
+	if diff := cmp.Diff(strings.Split(got, ini.LineBreak), want); diff != "" {
 		t.Errorf("ToString() got diff (-want +got):\n%s", diff)
 	}
 }
