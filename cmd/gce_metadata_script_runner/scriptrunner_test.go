@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -267,8 +269,10 @@ func TestRunScript(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			oldClient := run.Client
 			runner := &testRunner{throwErr: tc.wantErr}
 			run.Client = runner
+			t.Cleanup(func() { run.Client = oldClient })
 			gotErr := runScript(ctx, tc.filePath, "some-key")
 			if tc.wantErr != (gotErr != nil) {
 				t.Errorf("runScript(ctx, %s, some-key) error = [%v], want error = %t", tc.filePath, gotErr, tc.wantErr)
@@ -278,6 +282,165 @@ func TestRunScript(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.wantArgs, runner.seenArgs); diff != "" {
 				t.Errorf("runScript(ctx, %s, some-key) executed with args diff (-want +got):\n%s", tc.filePath, diff)
+			}
+		})
+	}
+}
+
+type manualStreamRunner struct {
+	out       chan string
+	errCh     chan string
+	res       chan error
+	ready     chan struct{}
+	outOnce   sync.Once
+	errOnce   sync.Once
+	resOnce   sync.Once
+	readyOnce sync.Once
+}
+
+func newManualStreamRunner() *manualStreamRunner {
+	return &manualStreamRunner{
+		out:   make(chan string),
+		errCh: make(chan string),
+		res:   make(chan error, 1),
+		ready: make(chan struct{}),
+	}
+}
+
+func (r *manualStreamRunner) closeOut() { r.outOnce.Do(func() { close(r.out) }) }
+func (r *manualStreamRunner) closeErr() { r.errOnce.Do(func() { close(r.errCh) }) }
+func (r *manualStreamRunner) closeRes() { r.resOnce.Do(func() { close(r.res) }) }
+func (r *manualStreamRunner) closeAll() {
+	r.closeRes()
+	r.closeOut()
+	r.closeErr()
+}
+
+func (r *manualStreamRunner) WithContext(context.Context, run.Options) (*run.Result, error) {
+	r.readyOnce.Do(func() { close(r.ready) })
+	return &run.Result{
+		OutputScanners: &run.StreamOutput{
+			Result: r.res,
+			StdOut: r.out,
+			StdErr: r.errCh,
+		},
+	}, nil
+}
+
+func TestRunScriptWaitsForStreamConsumers(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed unexpectedly with error: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		resultErr   error
+		firstName   string
+		firstCh     func(*manualStreamRunner) chan string
+		closeFirst  func(*manualStreamRunner)
+		secondName  string
+		secondCh    func(*manualStreamRunner) chan string
+		closeSecond func(*manualStreamRunner)
+	}{
+		{
+			name:        "success_stdout_closed_first",
+			firstName:   "StdOut",
+			firstCh:     func(r *manualStreamRunner) chan string { return r.out },
+			closeFirst:  (*manualStreamRunner).closeOut,
+			secondName:  "StdErr",
+			secondCh:    func(r *manualStreamRunner) chan string { return r.errCh },
+			closeSecond: (*manualStreamRunner).closeErr,
+		},
+		{
+			name:        "script_error_stderr_closed_first",
+			resultErr:   errors.New("exit status 1"),
+			firstName:   "StdErr",
+			firstCh:     func(r *manualStreamRunner) chan string { return r.errCh },
+			closeFirst:  (*manualStreamRunner).closeErr,
+			secondName:  "StdOut",
+			secondCh:    func(r *manualStreamRunner) chan string { return r.out },
+			closeSecond: (*manualStreamRunner).closeOut,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldClient := run.Client
+			runner := newManualStreamRunner()
+			run.Client = runner
+			t.Cleanup(func() { run.Client = oldClient })
+
+			var runErr error
+			done := make(chan struct{})
+			t.Cleanup(func() {
+				runner.closeAll()
+				<-done
+			})
+
+			go func() {
+				defer close(done)
+				runErr = runScript(t.Context(), "testcmd", "startup-script")
+			}()
+
+			select {
+			case <-runner.ready:
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before calling run.WithContext", runErr)
+			}
+
+			// Verify both streams are concurrently drained before Result is sent.
+			select {
+			case tc.secondCh(runner) <- "initial " + tc.secondName:
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before draining initial %s", runErr, tc.secondName)
+			}
+			select {
+			case tc.firstCh(runner) <- "initial " + tc.firstName:
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before draining initial %s", runErr, tc.firstName)
+			}
+
+			// Deliver Result while StdOut and StdErr are still open.
+			select {
+			case runner.res <- tc.resultErr:
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before reading Result", runErr)
+			}
+			runner.closeRes()
+
+			// Both StdOut and StdErr are still open, so runScript must remain blocked.
+			runtime.Gosched()
+			select {
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before StdOut and StdErr closed", runErr)
+			default:
+			}
+
+			select {
+			case tc.firstCh(runner) <- "trailing " + tc.firstName:
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before draining %s", runErr, tc.firstName)
+			}
+			tc.closeFirst(runner)
+
+			// The second stream is still open, so runScript must remain blocked until it closes too.
+			runtime.Gosched()
+			select {
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before %s closed", runErr, tc.secondName)
+			default:
+			}
+
+			select {
+			case tc.secondCh(runner) <- "trailing " + tc.secondName:
+			case <-done:
+				t.Fatalf("runScript() returned (%v) before draining %s", runErr, tc.secondName)
+			}
+			tc.closeSecond(runner)
+
+			<-done
+			if !errors.Is(runErr, tc.resultErr) {
+				t.Errorf("runScript() error = %v, want %v", runErr, tc.resultErr)
 			}
 		})
 	}

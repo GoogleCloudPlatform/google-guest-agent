@@ -30,6 +30,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -338,19 +339,25 @@ func runScript(ctx context.Context, filePath, metadataKey string) error {
 	streams := res.OutputScanners
 	// Go routines will exit once all output is consumed. Run library guarantees
 	// that all channels are closed after use.
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		for line := range streams.StdOut {
 			galog.Infof("Metadata key(%q), command(%q): %s", metadataKey, opts.Name, line)
 		}
 	}()
 
 	go func() {
+		defer wg.Done()
 		for line := range streams.StdErr {
 			galog.Errorf("Metadata key(%q), command(%q): %s", metadataKey, opts.Name, line)
 		}
 	}()
 
-	return <-streams.Result
+	err = <-streams.Result
+	wg.Wait()
+	return err
 }
 
 // mdsScriptKeys validates the event type and returns the list of MDS keys to
