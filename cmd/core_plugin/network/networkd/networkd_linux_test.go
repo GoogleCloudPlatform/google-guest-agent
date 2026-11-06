@@ -40,7 +40,7 @@ import (
 // mockSystemd is the test systemd-networkd implementation to use for testing.
 var (
 	mockSystemd = Module{
-		networkCtlKeys: []string{"AdministrativeState", "SetupState"},
+		networkCtlKeys: DefaultNetworkCtlKeys,
 		priority:       1,
 	}
 )
@@ -94,20 +94,30 @@ type systemdVersionOpts struct {
 	version int
 }
 
-// systemdStatusOpts are options for running `networkctl status iface --json=short`
+// systemdStatusOpts are options for running `networkctl status iface`.
 type systemdStatusOpts struct {
-	// returnValue indicates whether to return a configured or non-configured interface.
+	// returnValue indicates whether to return a configured or non-configured
+	// interface.
 	returnValue bool
 
-	// returnErr indicates whether to return an error.
+	// returnErr indicates whether to return an error for JSON status output.
 	returnErr bool
 
 	// hasKey determines whether the configuredKey should be included or not.
 	hasKey bool
 
-	// configuredKey is used only when returnValue is not err. This indicates what key to
-	// use for determining the configured state.
+	// configuredKey indicates what key to use for determining the configured
+	// state when returnErr is false.
 	configuredKey string
+
+	// state overrides the JSON state string for configuredKey when non-empty.
+	state string
+
+	// textOutput provides plain-text output for `networkctl status iface`.
+	textOutput string
+
+	// textReturnErr forces `networkctl status iface` plain-text output to fail.
+	textReturnErr bool
 }
 
 // systemdRunnerOpts are options to set for initializing the MockRunner.
@@ -163,6 +173,10 @@ func (s systemdMockRunner) WithContext(ctx context.Context, opts run.Options) (*
 		if statusOpts.returnErr {
 			return nil, &exec.ExitError{}
 		}
+		if statusOpts.state != "" {
+			mockOut := fmt.Sprintf(`{"Name": "iface", %q: %q}`, statusOpts.configuredKey, statusOpts.state)
+			return &run.Result{Output: mockOut}, nil
+		}
 		if statusOpts.returnValue {
 			mockOut := fmt.Sprintf(`{"Name": "iface", "%s": "%s"}`, statusOpts.configuredKey, "configured")
 			return &run.Result{
@@ -180,6 +194,13 @@ func (s systemdMockRunner) WithContext(ctx context.Context, opts run.Options) (*
 		return &run.Result{
 			Output: mockOut,
 		}, nil
+	}
+	if opts.Name == "networkctl" && argsStr == "status iface" {
+		statusOpts := s.statusOpts
+		if statusOpts.textReturnErr || statusOpts.textOutput == "" {
+			return nil, &exec.ExitError{}
+		}
+		return &run.Result{Output: statusOpts.textOutput}, nil
 	}
 
 	return nil, &exec.ExitError{}
@@ -453,6 +474,166 @@ func TestSystemdNetworkdIsManaging(t *testing.T) {
 			expectedRes: true,
 			expectErr:   false,
 		},
+		// networkctl JSON status interface is configuring.
+		{
+			name: "json-configuring",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						configuredKey: "SetupState",
+						state:         "configuring",
+					},
+				},
+			},
+			expectedRes: true,
+			expectErr:   false,
+		},
+		// networkctl JSON status interface is unconfigured.
+		{
+			name: "json-unconfigured",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						configuredKey: "SetupState",
+						state:         "unconfigured",
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
+		// networkctl JSON status interface is pending.
+		{
+			name: "json-pending",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						configuredKey: "SetupState",
+						state:         "pending",
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
+		// networkctl JSON status interface is failed.
+		{
+			name: "json-failed",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						configuredKey: "SetupState",
+						state:         "failed",
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
+		// JSON fails and plain-text fallback reports configured.
+		{
+			name: "text-fallback-configured",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						returnErr:  true,
+						textOutput: "● 2: iface\n  State: routable (configured)\n",
+					},
+				},
+			},
+			expectedRes: true,
+			expectErr:   false,
+		},
+		// JSON fails and plain-text fallback reports configuring.
+		{
+			name: "text-fallback-configuring",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						returnErr:  true,
+						textOutput: "● 2: iface\n  State: routable (configuring)\n",
+					},
+				},
+			},
+			expectedRes: true,
+			expectErr:   false,
+		},
+		// JSON fails and plain-text fallback reports unconfigured.
+		{
+			name: "text-fallback-unconfigured",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						returnErr:  true,
+						textOutput: "● 2: iface\n  Setup State: unconfigured\n",
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
+		// JSON fails and plain-text fallback reports unmanaged.
+		{
+			name: "text-fallback-unmanaged",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						returnErr:  true,
+						textOutput: "● 2: iface\n  State: off (unmanaged)\n",
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
+		// JSON fails and plain-text fallback reports pending.
+		{
+			name: "text-fallback-pending",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						returnErr:  true,
+						textOutput: "● 2: iface\n  State: no-carrier (pending)\n",
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
+		// JSON fails and plain-text fallback reports failed.
+		{
+			name: "text-fallback-failed",
+			opts: systemdTestOpts{
+				lookPathOpts: systemdLookPathOpts{returnValue: true},
+				runnerOpts: systemdRunnerOpts{
+					versionOpts: systemdVersionOpts{version: 300},
+					statusOpts: systemdStatusOpts{
+						returnErr:  true,
+						textOutput: "● 2: iface\n  State: carrier (failed)\n",
+					},
+				},
+			},
+			expectedRes: false,
+			expectErr:   false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -490,6 +671,241 @@ func TestSystemdNetworkdIsManaging(t *testing.T) {
 			}
 
 			systemdTestTearDown(t)
+		})
+	}
+}
+
+func TestInterfaceConfiguredJSON(t *testing.T) {
+	tests := []struct {
+		name       string
+		jsonOutput string
+		want       bool
+	}{
+		{
+			name:       "setup_state_configured",
+			jsonOutput: `{"Name": "eth0", "SetupState": "configured"}`,
+			want:       true,
+		},
+		{
+			name:       "setup_state_configuring",
+			jsonOutput: `{"Name": "eth0", "SetupState": "configuring"}`,
+			want:       true,
+		},
+		{
+			name:       "admin_state_configuring",
+			jsonOutput: `{"Name": "eth0", "AdministrativeState": "configuring"}`,
+			want:       true,
+		},
+		{
+			name:       "state_configured",
+			jsonOutput: `{"Name": "eth0", "State": "configured"}`,
+			want:       true,
+		},
+		{
+			name:       "setup_state_unconfigured",
+			jsonOutput: `{"Name": "eth0", "SetupState": "unconfigured"}`,
+			want:       false,
+		},
+		{
+			name:       "setup_state_unmanaged",
+			jsonOutput: `{"Name": "eth0", "SetupState": "unmanaged"}`,
+			want:       false,
+		},
+		{
+			name:       "setup_state_pending",
+			jsonOutput: `{"Name": "eth0", "SetupState": "pending"}`,
+			want:       false,
+		},
+		{
+			name:       "setup_state_failed",
+			jsonOutput: `{"Name": "eth0", "SetupState": "failed"}`,
+			want:       false,
+		},
+		{
+			name:       "non_string_state_value",
+			jsonOutput: `{"Name": "eth0", "SetupState": 42}`,
+			want:       false,
+		},
+	}
+
+	mod := DefaultModule()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldRunner := run.Client
+			t.Cleanup(func() { run.Client = oldRunner })
+			run.Client = &runMock{
+				callback: func(_ context.Context, _ run.Options) (*run.Result, error) {
+					return &run.Result{Output: tc.jsonOutput}, nil
+				},
+			}
+
+			got, err := mod.interfaceConfiguredJSON(context.Background(), "eth0")
+			if err != nil {
+				t.Fatalf("interfaceConfiguredJSON(%q) unexpected error: %v", tc.jsonOutput, err)
+			}
+			if got != tc.want {
+				t.Errorf("interfaceConfiguredJSON(%q) = %v, want %v", tc.jsonOutput, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInterfaceConfiguredJSON_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		jsonOutput string
+		runErr     error
+	}{
+		{
+			name:   "command_error",
+			runErr: &exec.ExitError{},
+		},
+		{
+			name:       "invalid_json",
+			jsonOutput: `{invalid`,
+		},
+		{
+			name:       "missing_status_keys",
+			jsonOutput: `{"Name": "eth0"}`,
+		},
+	}
+
+	mod := DefaultModule()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldRunner := run.Client
+			t.Cleanup(func() { run.Client = oldRunner })
+			run.Client = &runMock{
+				callback: func(_ context.Context, _ run.Options) (*run.Result, error) {
+					if tc.runErr != nil {
+						return nil, tc.runErr
+					}
+					return &run.Result{Output: tc.jsonOutput}, nil
+				},
+			}
+
+			got, err := mod.interfaceConfiguredJSON(context.Background(), "eth0")
+			if err == nil {
+				t.Fatalf("interfaceConfiguredJSON(%q) = (%v, nil), want error", tc.jsonOutput, got)
+			}
+		})
+	}
+}
+
+func TestInterfaceConfiguredText(t *testing.T) {
+	tests := []struct {
+		name       string
+		textOutput string
+		want       bool
+	}{
+		{
+			name:       "state_routable_configured",
+			textOutput: "● 2: eth0\n             Link File: /usr/lib/systemd/network/99-default.link\n                 State: routable (configured)\n          Online state: online\n",
+			want:       true,
+		},
+		{
+			name:       "state_routable_configuring",
+			textOutput: "● 2: eth0\n                 State: routable (configuring)\n          Online state: online\n",
+			want:       true,
+		},
+		{
+			name:       "state_degraded_configuring",
+			textOutput: "● 2: eth0\n                 State: degraded (configuring)\n",
+			want:       true,
+		},
+		{
+			name:       "setup_state_configuring",
+			textOutput: "● 2: eth0\n           SetupState: configuring\n",
+			want:       true,
+		},
+		{
+			name:       "admin_state_configured",
+			textOutput: "● 2: eth0\n  AdministrativeState: configured\n",
+			want:       true,
+		},
+		{
+			name:       "setup_state_unconfigured",
+			textOutput: "● 2: eth0\n           Setup State: unconfigured\n",
+			want:       false,
+		},
+		{
+			name:       "state_routable_unconfigured",
+			textOutput: "● 2: eth0\n                 State: routable (unconfigured)\n",
+			want:       false,
+		},
+		{
+			name:       "state_off_unmanaged",
+			textOutput: "● 2: eth0\n                 State: off (unmanaged)\n",
+			want:       false,
+		},
+		{
+			name:       "state_no_carrier_pending",
+			textOutput: "● 2: eth0\n                 State: no-carrier (pending)\n",
+			want:       false,
+		},
+		{
+			name:       "state_carrier_failed",
+			textOutput: "● 2: eth0\n                 State: carrier (failed)\n",
+			want:       false,
+		},
+	}
+
+	mod := DefaultModule()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldRunner := run.Client
+			t.Cleanup(func() { run.Client = oldRunner })
+			run.Client = &runMock{
+				callback: func(_ context.Context, _ run.Options) (*run.Result, error) {
+					return &run.Result{Output: tc.textOutput}, nil
+				},
+			}
+
+			got, err := mod.interfaceConfiguredText(context.Background(), "eth0")
+			if err != nil {
+				t.Fatalf("interfaceConfiguredText(%q) unexpected error: %v", tc.textOutput, err)
+			}
+			if got != tc.want {
+				t.Errorf("interfaceConfiguredText(%q) = %v, want %v", tc.textOutput, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInterfaceConfiguredText_Errors(t *testing.T) {
+	tests := []struct {
+		name       string
+		textOutput string
+		runErr     error
+	}{
+		{
+			name:   "command_error",
+			runErr: &exec.ExitError{},
+		},
+		{
+			name:       "missing_status_keys",
+			textOutput: "● 2: eth0\n             Link File: /usr/lib/systemd/network/99-default.link\n          Online state: online\n",
+		},
+	}
+
+	mod := DefaultModule()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldRunner := run.Client
+			t.Cleanup(func() { run.Client = oldRunner })
+			run.Client = &runMock{
+				callback: func(_ context.Context, _ run.Options) (*run.Result, error) {
+					if tc.runErr != nil {
+						return nil, tc.runErr
+					}
+					return &run.Result{Output: tc.textOutput}, nil
+				},
+			}
+
+			got, err := mod.interfaceConfiguredText(context.Background(), "eth0")
+			if err == nil {
+				t.Fatalf("interfaceConfiguredText(%q) = (%v, nil), want error", tc.textOutput, got)
+			}
 		})
 	}
 }
