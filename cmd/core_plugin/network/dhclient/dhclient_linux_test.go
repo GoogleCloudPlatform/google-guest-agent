@@ -21,7 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -373,6 +375,7 @@ func TestRunDhclient(t *testing.T) {
 	tests := []struct {
 		name        string
 		nicName     string
+		nicIndex    uint32
 		ipVersion   ipVersion
 		op          dhclientOperation
 		wantError   bool
@@ -452,6 +455,42 @@ func TestRunDhclient(t *testing.T) {
 			wantError:   false,
 			wantCommand: "dhclient -6 -pf /run/dhclient.google-guest-agent.eth0.ipv6.pid -lf /run/dhclient.google-guest-agent.eth0.ipv6.lease -r eth0",
 		},
+		{
+			name:        "success-secondary-ipv4-obtain-lease",
+			nicName:     "eth1",
+			nicIndex:    1,
+			ipVersion:   ipv4,
+			op:          obtainLease,
+			wantError:   false,
+			wantCommand: "dhclient -4 -pf /run/dhclient.google-guest-agent.eth1.ipv4.pid -lf /run/dhclient.google-guest-agent.eth1.ipv4.lease -e PEERDNS=no eth1",
+		},
+		{
+			name:        "success-secondary-ipv6-obtain-lease",
+			nicName:     "eth1",
+			nicIndex:    1,
+			ipVersion:   ipv6,
+			op:          obtainLease,
+			wantError:   false,
+			wantCommand: "dhclient -6 -pf /run/dhclient.google-guest-agent.eth1.ipv6.pid -lf /run/dhclient.google-guest-agent.eth1.ipv6.lease -e PEERDNS=no eth1",
+		},
+		{
+			name:        "success-secondary-ipv4-release-lease",
+			nicName:     "eth1",
+			nicIndex:    1,
+			ipVersion:   ipv4,
+			op:          releaseLease,
+			wantError:   false,
+			wantCommand: "dhclient -4 -pf /run/dhclient.google-guest-agent.eth1.ipv4.pid -lf /run/dhclient.google-guest-agent.eth1.ipv4.lease -e PEERDNS=no -r eth1",
+		},
+		{
+			name:        "success-secondary-ipv6-release-lease",
+			nicName:     "eth1",
+			nicIndex:    1,
+			ipVersion:   ipv6,
+			op:          releaseLease,
+			wantError:   false,
+			wantCommand: "dhclient -6 -pf /run/dhclient.google-guest-agent.eth1.ipv6.pid -lf /run/dhclient.google-guest-agent.eth1.ipv6.lease -e PEERDNS=no -r eth1",
+		},
 	}
 
 	for _, tc := range tests {
@@ -476,6 +515,7 @@ func TestRunDhclient(t *testing.T) {
 			}
 
 			nicConfig := &nic.Configuration{
+				Index: tc.nicIndex,
 				Interface: &ethernet.Interface{
 					NameOp: func() string { return tc.nicName },
 				},
@@ -483,7 +523,7 @@ func TestRunDhclient(t *testing.T) {
 
 			ds := &dhclientService{baseDhclientDir: defaultBaseDhclientDir}
 
-			err := ds.runDhclient(context.Background(), nicConfig.Interface.Name(), tc.ipVersion, tc.op)
+			err := ds.runDhclient(context.Background(), nicConfig, tc.ipVersion, tc.op)
 			if (err == nil) == tc.wantError {
 				t.Fatalf("runDhclient(ctx, %+v, %+v, %#v) returned %v, want %v", nicConfig, tc.ipVersion, tc.op, err, tc.wantError)
 			}
@@ -1559,6 +1599,265 @@ func TestSetupVlanInterfaces(t *testing.T) {
 				if diff := cmp.Diff(tc.wantCommands, commands); diff != "" {
 					t.Errorf("setupVlanInterfaces(ctx, %+v) returned unexpected diff (-want +got):\n%s", nics[0], diff)
 				}
+			}
+		})
+	}
+}
+
+func TestSetupEthernetPeerDNSHook(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed: %v", err)
+	}
+	cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC = true
+	t.Cleanup(func() {
+		cfg.Retrieve().NetworkInterfaces.ManagePrimaryNIC = false
+	})
+
+	tests := []struct {
+		name            string
+		hooksDirMode    string // "existing", "missing", "empty"
+		includeSecNIC   bool
+		secSupportsIPv6 bool
+		existingProcs   []ps.Process
+		wantHookWritten bool
+		wantCommands    []string
+	}{
+		{
+			name:            "secondary-nic-ipv4-writes-hook",
+			hooksDirMode:    "existing",
+			includeSecNIC:   true,
+			wantHookWritten: true,
+			wantCommands: []string{
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth0.ipv4.pid -lf /run/dhclient.google-guest-agent.eth0.ipv4.lease eth0",
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth1.ipv4.pid -lf /run/dhclient.google-guest-agent.eth1.ipv4.lease -e PEERDNS=no eth1",
+			},
+		},
+		{
+			name:            "secondary-nic-ipv6-writes-hook",
+			hooksDirMode:    "existing",
+			includeSecNIC:   true,
+			secSupportsIPv6: true,
+			existingProcs: []ps.Process{
+				{CommandLine: []string{"dhclient", "-4", "eth0"}},
+				{CommandLine: []string{"dhclient", "-4", "eth1"}},
+			},
+			wantHookWritten: true,
+			wantCommands: []string{
+				"ip -6 -o a s dev eth0 scope link tentative",
+				"sysctl net.ipv6.conf.eth1.accept_ra_rt_info_max_plen=128",
+				"dhclient -6 -pf /run/dhclient.google-guest-agent.eth1.ipv6.pid -lf /run/dhclient.google-guest-agent.eth1.ipv6.lease -e PEERDNS=no eth1",
+			},
+		},
+		{
+			name:            "primary-nic-only-skips-hook",
+			hooksDirMode:    "existing",
+			includeSecNIC:   false,
+			wantHookWritten: false,
+			wantCommands: []string{
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth0.ipv4.pid -lf /run/dhclient.google-guest-agent.eth0.ipv4.lease eth0",
+			},
+		},
+		{
+			name:            "missing-hooks-dir-skips-hook",
+			hooksDirMode:    "missing",
+			includeSecNIC:   true,
+			wantHookWritten: false,
+			wantCommands: []string{
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth0.ipv4.pid -lf /run/dhclient.google-guest-agent.eth0.ipv4.lease eth0",
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth1.ipv4.pid -lf /run/dhclient.google-guest-agent.eth1.ipv4.lease -e PEERDNS=no eth1",
+			},
+		},
+		{
+			name:            "empty-hooks-dir-skips-hook",
+			hooksDirMode:    "empty",
+			includeSecNIC:   true,
+			wantHookWritten: false,
+			wantCommands: []string{
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth0.ipv4.pid -lf /run/dhclient.google-guest-agent.eth0.ipv4.lease eth0",
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth1.ipv4.pid -lf /run/dhclient.google-guest-agent.eth1.ipv4.lease -e PEERDNS=no eth1",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var hooksDir string
+			switch tc.hooksDirMode {
+			case "existing":
+				hooksDir = t.TempDir()
+			case "missing":
+				hooksDir = filepath.Join(t.TempDir(), "nonexistent")
+			case "empty":
+				hooksDir = ""
+			}
+
+			oldPsClient := ps.Client
+			ps.Client = &dhclientMockPs{
+				FindRegexCallback: func(string) ([]ps.Process, error) {
+					return tc.existingProcs, nil
+				},
+			}
+			oldRunClient := run.Client
+			var gotCommands []string
+			run.Client = &dhclientMockRunner{
+				callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+					gotCommands = append(gotCommands, strings.Join(append([]string{opts.Name}, opts.Args...), " "))
+					return &run.Result{}, nil
+				},
+			}
+			t.Cleanup(func() {
+				ps.Client = oldPsClient
+				run.Client = oldRunClient
+			})
+
+			nics := []*nic.Configuration{
+				{
+					Index:     0,
+					Interface: &ethernet.Interface{NameOp: func() string { return "eth0" }},
+				},
+			}
+			if tc.includeSecNIC {
+				nics = append(nics, &nic.Configuration{
+					Index:        1,
+					SupportsIPv6: tc.secSupportsIPv6,
+					Interface:    &ethernet.Interface{NameOp: func() string { return "eth1" }},
+				})
+			}
+
+			ds := &dhclientService{
+				baseDhclientDir:       defaultBaseDhclientDir,
+				dhclientEnterHooksDir: hooksDir,
+			}
+			config := &cfg.Sections{NetworkInterfaces: &cfg.NetworkInterfaces{}}
+			if err := ds.setupEthernet(context.Background(), service.NewOptions(nil, nics), config); err != nil {
+				t.Fatalf("setupEthernet() unexpected error: %v", err)
+			}
+
+			if diff := cmp.Diff(tc.wantCommands, gotCommands); diff != "" {
+				t.Errorf("setupEthernet() commands diff (-want +got):\n%s", diff)
+			}
+
+			if hooksDir == "" {
+				return
+			}
+			hookPath := filepath.Join(hooksDir, peerDNSHookFile)
+			info, statErr := os.Stat(hookPath)
+			if tc.wantHookWritten {
+				if statErr != nil {
+					t.Fatalf("expected hook file %q to exist, stat error: %v", hookPath, statErr)
+				}
+				if gotPerm := info.Mode().Perm(); gotPerm != 0755 {
+					t.Errorf("hook file %q permissions = %o, want 0755", hookPath, gotPerm)
+				}
+				gotContent, err := os.ReadFile(hookPath)
+				if err != nil {
+					t.Fatalf("os.ReadFile(%q) failed: %v", hookPath, err)
+				}
+				if string(gotContent) != peerDNSHookContent {
+					t.Errorf("hook file %q content = %q, want %q", hookPath, string(gotContent), peerDNSHookContent)
+				}
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("expected hook file %q not to exist, got stat (%v, %v)", hookPath, info, statErr)
+			}
+		})
+	}
+}
+
+func TestRollbackPeerDNSHook(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) failed: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		preCreateHook  bool
+		processes      []ps.Process
+		wantRolledBack bool
+		wantCommands   []string
+	}{
+		{
+			name:          "removes-hook-and-releases-secondary-with-peerdns-no",
+			preCreateHook: true,
+			processes: []ps.Process{
+				{CommandLine: []string{"dhclient", "-4", "eth0"}},
+				{CommandLine: []string{"dhclient", "-4", "eth1"}},
+			},
+			wantRolledBack: true,
+			wantCommands: []string{
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth0.ipv4.pid -lf /run/dhclient.google-guest-agent.eth0.ipv4.lease -r eth0",
+				"dhclient -4 -pf /run/dhclient.google-guest-agent.eth1.ipv4.pid -lf /run/dhclient.google-guest-agent.eth1.ipv4.lease -e PEERDNS=no -r eth1",
+			},
+		},
+		{
+			name:           "removes-orphaned-hook-when-no-processes",
+			preCreateHook:  true,
+			wantRolledBack: true,
+		},
+		{
+			name:           "noop-when-hook-absent-and-no-processes",
+			preCreateHook:  false,
+			wantRolledBack: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			hooksDir := t.TempDir()
+			hookPath := filepath.Join(hooksDir, peerDNSHookFile)
+			if tc.preCreateHook {
+				if err := os.WriteFile(hookPath, []byte(peerDNSHookContent), 0755); err != nil {
+					t.Fatalf("os.WriteFile(%q) failed: %v", hookPath, err)
+				}
+			}
+
+			execLookPath = func(string) (string, error) { return "/sbin/dhclient", nil }
+			oldPsClient := ps.Client
+			ps.Client = &dhclientMockPs{
+				FindRegexCallback: func(string) ([]ps.Process, error) {
+					return tc.processes, nil
+				},
+			}
+			oldRunClient := run.Client
+			var gotCommands []string
+			run.Client = &dhclientMockRunner{
+				callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+					gotCommands = append(gotCommands, strings.Join(append([]string{opts.Name}, opts.Args...), " "))
+					return &run.Result{}, nil
+				},
+			}
+			t.Cleanup(func() {
+				execLookPath = exec.LookPath
+				ps.Client = oldPsClient
+				run.Client = oldRunClient
+			})
+
+			nics := []*nic.Configuration{
+				{
+					Index:     0,
+					Interface: &ethernet.Interface{NameOp: func() string { return "eth0" }},
+				},
+				{
+					Index:     1,
+					Interface: &ethernet.Interface{NameOp: func() string { return "eth1" }},
+				},
+			}
+			ds := &dhclientService{
+				baseDhclientDir:       defaultBaseDhclientDir,
+				dhclientEnterHooksDir: hooksDir,
+			}
+
+			rolledBack, err := ds.Rollback(context.Background(), service.NewOptions(nil, nics), false)
+			if err != nil {
+				t.Fatalf("Rollback() unexpected error: %v", err)
+			}
+			if rolledBack != tc.wantRolledBack {
+				t.Errorf("Rollback() rolledBack = %v, want %v", rolledBack, tc.wantRolledBack)
+			}
+			if diff := cmp.Diff(tc.wantCommands, gotCommands); diff != "" {
+				t.Errorf("Rollback() commands diff (-want +got):\n%s", diff)
+			}
+			if _, statErr := os.Stat(hookPath); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("expected hook file %q to be removed after Rollback(), statErr = %v", hookPath, statErr)
 			}
 		})
 	}
