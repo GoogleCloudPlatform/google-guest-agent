@@ -25,12 +25,19 @@ import (
 )
 
 const (
-	// The base directory for dhclient files managed by guest agent.
-	// For finer control of the execution, dhclient is invoked for
-	// each interface individually such that each call will have its
-	// own PID file. This is where those PID and lease files are
-	// expected to be written.
+	// defaultBaseDhclientDir is where dhclient PID and lease files managed by
+	// guest agent are written. For finer control of execution, dhclient is
+	// invoked for each interface individually with its own PID file.
 	defaultBaseDhclientDir = "/run"
+
+	// defaultDhclientEnterHooksDir is the Debian/Ubuntu dhclient-script enter
+	// hooks directory.
+	defaultDhclientEnterHooksDir = "/etc/dhcp/dhclient-enter-hooks.d"
+
+	// peerDNSHookFile is the enter-hook script filename installed to honor
+	// PEERDNS=no on distros using run-parts (no dots allowed in filename; zz_
+	// prefix ensures it runs after resolvconf and resolved-enter).
+	peerDNSHookFile = "zz_google_guest_agent"
 
 	// obtainLease is enum used to identify we should run dhclient to obtain
 	// a lease.
@@ -81,11 +88,15 @@ type dhclientOperation int
 type dhclientService struct {
 	// baseDhclientDir points to the base directory for DHClient leases and PIDs.
 	baseDhclientDir string
+
+	// dhclientEnterHooksDir points to the dhclient-script enter hooks directory.
+	dhclientEnterHooksDir string
 }
 
-// NewService returns a new dhclient service handler.
+// newModule returns a new dhclient service handler.
 func newModule() *dhclientService {
 	return &dhclientService{
-		baseDhclientDir: defaultBaseDhclientDir,
+		baseDhclientDir:       defaultBaseDhclientDir,
+		dhclientEnterHooksDir: defaultDhclientEnterHooksDir,
 	}
 }
