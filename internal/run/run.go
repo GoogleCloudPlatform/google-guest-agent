@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -43,14 +44,16 @@ type RunnerInterface interface {
 // StreamOutput represents the output channels streaming command result.
 // Executor takes care of closing all channels after all writes are completed.
 // Caller must not try to close channel and should only read from these receive
-// only channels.
+// only channels. Callers must concurrently drain both StdOut and StdErr until
+// closed before Result emits a value; waiting on Result first will deadlock if
+// the command writes output.
 type StreamOutput struct {
 	// StdOut is the channel for stdout of a command.
 	StdOut <-chan string
 	// StdErr is the channel for stderr of a command.
 	StdErr <-chan string
 	// Result is the final output of a command. It is same as what cmd.Wait()
-	// finally returns.
+	// finally returns, delivered after both StdOut and StdErr close.
 	Result <-chan error
 }
 
@@ -175,7 +178,8 @@ func (rr Runner) WithContext(ctx context.Context, opts Options) (*Result, error)
 }
 
 // streamOutput starts the command and streams the output and any errors on the
-// channel.
+// channel. Callers must concurrently drain both StdOut and StdErr until closed
+// so the pipe scanners finish before cmd.Wait() runs and delivers to Result.
 func streamOutput(ctx context.Context, opts Options) (*Result, error) {
 	galog.Debugf("Running command: %+v", opts)
 	cmd := exec.CommandContext(ctx, opts.Name, opts.Args...)
@@ -193,9 +197,6 @@ func streamOutput(ctx context.Context, opts Options) (*Result, error) {
 	errChan := make(chan string)
 	doneChan := make(chan error, 1)
 
-	go scanPipe(stdout, outChan)
-	go scanPipe(stderr, errChan)
-
 	if opts.InheritEnv {
 		cmd.Env = os.Environ()
 	}
@@ -204,8 +205,20 @@ func streamOutput(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("unable to start command: %w", err)
 	}
 
+	var pipeWG sync.WaitGroup
+	pipeWG.Add(2)
+	go func() {
+		defer pipeWG.Done()
+		scanPipe(stdout, outChan)
+	}()
+	go func() {
+		defer pipeWG.Done()
+		scanPipe(stderr, errChan)
+	}()
+
 	go func() {
 		defer close(doneChan)
+		pipeWG.Wait()
 		doneChan <- cmd.Wait()
 	}()
 

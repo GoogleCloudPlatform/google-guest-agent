@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -111,17 +112,23 @@ func launchScriptRunner(ctx context.Context, mdsClient metadata.MDSClientInterfa
 	streams := res.OutputScanners
 	// Go routines will exit once all output is consumed. Run library guarantees
 	// that all channels are closed after use.
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
+		defer wg.Done()
 		for line := range streams.StdOut {
 			galog.Info(line)
 		}
 	}()
 
 	go func() {
+		defer wg.Done()
 		for line := range streams.StdErr {
 			galog.Error(line)
 		}
 	}()
 
-	return <-streams.Result
+	err = <-streams.Result
+	wg.Wait()
+	return err
 }

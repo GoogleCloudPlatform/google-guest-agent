@@ -557,6 +557,12 @@ func TestTimeoutError(t *testing.T) {
 func TestStreamOutput(t *testing.T) {
 	ctx := context.Background()
 
+	var manyStdout, manyStderr []string
+	for i := 1; i <= 50; i++ {
+		manyStdout = append(manyStdout, fmt.Sprintf("out-%d", i))
+		manyStderr = append(manyStderr, fmt.Sprintf("err-%d", i))
+	}
+
 	test := []struct {
 		name       string
 		cmd        string
@@ -586,10 +592,32 @@ func TestStreamOutput(t *testing.T) {
 			wantStderr: []string{"14", "16", "18"},
 		},
 		{
+			name:       "write_without_trailing_sleep",
+			cmd:        "bash",
+			args:       []string{"-c", "for i in {1..50}; do echo out-$i; echo err-$i >&2; done"},
+			wantStdout: manyStdout,
+			wantStderr: manyStderr,
+		},
+		{
+			name:       "write_without_trailing_newline",
+			cmd:        "bash",
+			args:       []string{"-c", "printf 'final-stdout'; printf 'final-stderr' >&2"},
+			wantStdout: []string{"final-stdout"},
+			wantStderr: []string{"final-stderr"},
+		},
+		{
 			name:    "cmd_fails",
 			cmd:     "bash",
 			args:    []string{"-c", "exit 2"},
 			wantErr: true,
+		},
+		{
+			name:       "write_without_trailing_sleep_and_fail",
+			cmd:        "bash",
+			args:       []string{"-c", "for i in {1..50}; do echo out-$i; echo err-$i >&2; done; exit 2"},
+			wantStdout: manyStdout,
+			wantStderr: manyStderr,
+			wantErr:    true,
 		},
 		{
 			name:     "start_fails",
