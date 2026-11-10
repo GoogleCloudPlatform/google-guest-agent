@@ -27,4 +27,7 @@ func TestNewModule(t *testing.T) {
 	if mod.baseDhclientDir != defaultBaseDhclientDir {
 		t.Errorf("newModule() returned module with baseDhclientDir = %q, want %q", mod.baseDhclientDir, defaultBaseDhclientDir)
 	}
+	if mod.dhclientEnterHooksDir != defaultDhclientEnterHooksDir {
+		t.Errorf("newModule() returned module with dhclientEnterHooksDir = %q, want %q", mod.dhclientEnterHooksDir, defaultDhclientEnterHooksDir)
+	}
 }

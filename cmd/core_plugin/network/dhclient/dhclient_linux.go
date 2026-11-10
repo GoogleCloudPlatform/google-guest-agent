@@ -20,8 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -35,6 +37,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/ps"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 var (
@@ -250,12 +253,18 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 		return fmt.Errorf("error partitioning interfaces: %w", err)
 	}
 
+	if managesSecondaryNIC(opts.FilteredNICConfigs()) {
+		if err := ds.writePeerDNSHook(ctx); err != nil {
+			galog.Warnf("Failed to write dhclient enter hook: %v", err)
+		}
+	}
+
 	// Release IPv6 leases.
 	if len(partitions.releaseIpv6) != 0 {
 		galog.Debugf("Releasing IPv6 leases for interfaces: %v", partitions.releaseIpv6)
 	}
 	for _, nicConfig := range partitions.releaseIpv6 {
-		if err := ds.runDhclient(ctx, nicConfig.Interface.Name(), ipv6, releaseLease); err != nil {
+		if err := ds.runDhclient(ctx, nicConfig, ipv6, releaseLease); err != nil {
 			return fmt.Errorf("failed to run dhclient: %w", err)
 		}
 	}
@@ -264,8 +273,8 @@ func (ds *dhclientService) setupEthernet(ctx context.Context, opts *service.Opti
 	if len(partitions.obtainIpv4) != 0 {
 		galog.Debugf("Obtaining IPv4 leases for interfaces: %v", partitions.obtainIpv4)
 	}
-	for _, nic := range partitions.obtainIpv4 {
-		if err := ds.runDhclient(ctx, nic.Interface.Name(), ipv4, obtainLease); err != nil {
+	for _, nicConfig := range partitions.obtainIpv4 {
+		if err := ds.runDhclient(ctx, nicConfig, ipv4, obtainLease); err != nil {
 			return fmt.Errorf("failed to run dhclient: %w", err)
 		}
 	}
@@ -320,9 +329,8 @@ func (ds *dhclientService) setupIPV6Interfaces(ctx context.Context, opts *servic
 	// Obtain leases for all interfaces that support IPv6 and don't already have
 	// a lease.
 	for _, iface := range partitions.obtainIpv6 {
-		ifaceName := iface.Interface.Name()
-		if err := ds.runDhclient(ctx, ifaceName, ipv6, obtainLease); err != nil {
-			return fmt.Errorf("failed to obtain lease for %s: %w", ifaceName, err)
+		if err := ds.runDhclient(ctx, iface, ipv6, obtainLease); err != nil {
+			return fmt.Errorf("failed to obtain lease for %s: %w", iface.Interface.Name(), err)
 		}
 	}
 
@@ -341,13 +349,58 @@ func (ds *dhclientService) leaseFilePath(iface string, ipVersion ipVersion) stri
 	return path.Join(ds.baseDhclientDir, fmt.Sprintf("dhclient.google-guest-agent.%s.%s.lease", iface, ipVersion.Desc))
 }
 
-// runDhclient obtains a lease with the provided IP version for the given
-// network interface. If release is set, this will release leases instead.
-func (ds *dhclientService) runDhclient(ctx context.Context, nicName string, ipVersion ipVersion, op dhclientOperation) error {
+// isSecondaryNIC reports whether n is a secondary network interface.
+func isSecondaryNIC(n *nic.Configuration) bool {
+	return n.Index != 0
+}
+
+// managesSecondaryNIC reports whether any managed NIC in nics is secondary.
+func managesSecondaryNIC(nics []*nic.Configuration) bool {
+	return slices.ContainsFunc(nics, func(n *nic.Configuration) bool {
+		return n.ShouldManage() && isSecondaryNIC(n)
+	})
+}
+
+// writePeerDNSHook installs an enter hook in dhclient-enter-hooks.d (when that
+// directory exists, such as on Debian and Ubuntu) so dhclient-script honors
+// PEERDNS=no for secondary NICs.
+func (ds *dhclientService) writePeerDNSHook(ctx context.Context) error {
+	if !file.Exists(ds.dhclientEnterHooksDir, file.TypeDir) {
+		return nil
+	}
+	hookPath := filepath.Join(ds.dhclientEnterHooksDir, peerDNSHookFile)
+	return file.SaferWriteFile(ctx, []byte(peerDNSHookContent), hookPath, file.Options{Perm: 0755})
+}
+
+// removePeerDNSHook removes the guest-agent dhclient enter hook. It reports
+// whether a hook was removed; a missing hook is not an error.
+func (ds *dhclientService) removePeerDNSHook() (removed bool, err error) {
+	// Guard empty dir so os.Remove never targets cwd on zero-value structs.
+	if ds.dhclientEnterHooksDir == "" {
+		return false, nil
+	}
+	hookPath := filepath.Join(ds.dhclientEnterHooksDir, peerDNSHookFile)
+	if err := os.Remove(hookPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to remove dhclient enter hook %q: %w", hookPath, err)
+	}
+	return true, nil
+}
+
+// runDhclient runs dhclient to obtain or release (per op) a lease of the given
+// IP version for nicConfig's interface. Secondary NICs are run with
+// PEERDNS=no so their leases never rewrite the guest's DNS configuration.
+func (ds *dhclientService) runDhclient(ctx context.Context, nicConfig *nic.Configuration, ipVersion ipVersion, op dhclientOperation) error {
+	nicName := nicConfig.Interface.Name()
 	pidFile := ds.pidFilePath(nicName, ipVersion)
 	leaseFile := ds.leaseFilePath(nicName, ipVersion)
 
 	dhclientArgs := []string{ipVersion.Flag, "-pf", pidFile, "-lf", leaseFile}
+	if isSecondaryNIC(nicConfig) {
+		dhclientArgs = append(dhclientArgs, "-e", "PEERDNS=no")
+	}
 	opts := run.Options{OutputType: run.OutputNone, Name: "dhclient", ExecMode: run.ExecModeSync}
 
 	var errMsg string
@@ -390,7 +443,8 @@ func runConfiguredCommand(ctx context.Context, config *cfg.Sections) (bool, erro
 }
 
 // Rollback rolls back the changes created in Setup. It returns true if any
-// dhclient lease was released or any VLAN interface was removed.
+// dhclient lease was released, any VLAN interface was removed, or the PEERDNS
+// dhclient enter hook was removed.
 func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, _ bool) (bool, error) {
 	galog.Infof("Rolling back changes for dhclient.")
 
@@ -413,7 +467,7 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, 
 		}
 		// Only release IPv4 leases if the process exists.
 		if ipv4Exists {
-			if err := ds.runDhclient(ctx, ifaceName, ipv4, releaseLease); err != nil {
+			if err := ds.runDhclient(ctx, iface, ipv4, releaseLease); err != nil {
 				return rolledBack, fmt.Errorf("failed to release IPv4 lease for %s: %w", ifaceName, err)
 			}
 			rolledBack = true
@@ -427,7 +481,7 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, 
 			}
 			// Only release IPv6 leases if the process exists.
 			if ipv6Exists {
-				if err := ds.runDhclient(ctx, ifaceName, ipv6, releaseLease); err != nil {
+				if err := ds.runDhclient(ctx, iface, ipv6, releaseLease); err != nil {
 					return rolledBack, fmt.Errorf("failed to release IPv6 lease for %s: %w", ifaceName, err)
 				}
 				rolledBack = true
@@ -460,6 +514,13 @@ func (ds *dhclientService) Rollback(ctx context.Context, opts *service.Options, 
 			rolledBack = true
 		}
 	}
+
+	removedHook, err := ds.removePeerDNSHook()
+	if err != nil {
+		return rolledBack, err
+	}
+	rolledBack = rolledBack || removedHook
+
 	return rolledBack, nil
 }
 
