@@ -1,0 +1,15 @@
+[Unit]
+Description=Google Extension Manager
+After=local-fs.target network-online.target syslog.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/google_extension_manager
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=5s
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

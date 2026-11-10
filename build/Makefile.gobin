@@ -10,6 +10,7 @@ GO_BINARIES = \
 	cmd/core_plugin/core_plugin \
 	cmd/ggactl/ggactl_plugin \
 	cmd/google_authorized_keys/google_authorized_keys \
+	cmd/google_extension_manager/google_extension_manager \
 	cmd/google_guest_agent/google_guest_agent \
 	cmd/google_guest_compat_manager/google_guest_compat_manager \
 	cmd/gce_metadata_script_runner/gce_metadata_script_runner \

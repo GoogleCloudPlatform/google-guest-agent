@@ -35,6 +35,9 @@ const (
 	// GuestAgentCompatManager is the name of the guest agent compat manager
 	// daemon.
 	GuestAgentCompatManager = "GCEWindowsCompatManager"
+	// GoogleExtensionManager is the name of the standalone extension manager
+	// Windows service.
+	GoogleExtensionManager = "GoogleExtensionManager"
 )
 
 // serviceState is a map of windows service states to strings.

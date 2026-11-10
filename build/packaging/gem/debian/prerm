@@ -1,0 +1,11 @@
+#!/bin/sh -e
+
+if [ "$1" = "remove" ]; then
+  if [ -d /run/systemd/system ]; then
+    systemctl --no-reload disable google-extension-manager.service >/dev/null 2>&1 || true
+    systemctl stop google-extension-manager.service >/dev/null 2>&1 || true
+  fi
+  if [ -x /usr/bin/google_extension_manager ]; then
+    /usr/bin/google_extension_manager -cleanup || true
+  fi
+fi

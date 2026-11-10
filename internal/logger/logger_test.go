@@ -316,3 +316,27 @@ func TestParseMIGLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestInitWithGEMOptions(t *testing.T) {
+	events.FetchManager().Unsubscribe(metadata.LongpollEvent, loggerMetadataSubscriberID)
+
+	logFile := filepath.Join(t.TempDir(), "gem.log")
+	opts := Options{
+		Ident:               GEMLocalLoggerIdent,
+		Prefix:              GEMLogPrefix,
+		CloudIdent:          GEMCloudLoggingLogID,
+		LogFile:             logFile,
+		LogToCloudLogging:   false,
+		DisableSerialLogger: true,
+		Level:               3,
+		Verbosity:           1,
+	}
+
+	if err := Init(t.Context(), opts); err != nil {
+		t.Fatalf("Init(ctx, %+v) error = %v, want nil", opts, err)
+	}
+
+	if events.FetchManager().IsSubscribed(metadata.LongpollEvent, loggerMetadataSubscriberID) {
+		t.Errorf("events.FetchManager().IsSubscribed(%q, %q) = true, want false when LogToCloudLogging is false", metadata.LongpollEvent, loggerMetadataSubscriberID)
+	}
+}

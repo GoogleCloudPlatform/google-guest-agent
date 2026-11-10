@@ -42,13 +42,13 @@ func TestInitPlatformLoggerWindows(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	backends, err := initPlatformLogger(ctx, "test", "")
+	backends, err := initPlatformLogger(ctx, "test", "", false)
 	if err != nil {
-		t.Fatalf("initPlatformLogger(%v, %v) = %v, want nil", ctx, "test", err)
+		t.Fatalf("initPlatformLogger(%v, %v, false) = %v, want nil", ctx, "test", err)
 	}
 
 	if len(backends) != len(tests) {
-		t.Fatalf("initPlatformLogger(%v, %v) = %v, want %v", ctx, "test", backends, len(tests))
+		t.Fatalf("initPlatformLogger(%v, %v, false) = %v, want %v", ctx, "test", backends, len(tests))
 	}
 
 	for _, expected := range tests {
@@ -57,8 +57,23 @@ func TestInitPlatformLoggerWindows(t *testing.T) {
 				return slices.ContainsFunc(tests, func(t testTable) bool { return backend.ID() == expected.id })
 			})
 			if !contains {
-				t.Errorf("initPlatformLogger(%v, %v) = %v, want %v", ctx, "test", backends, tests)
+				t.Errorf("initPlatformLogger(%v, %v, false) = %v, want %v", ctx, "test", backends, tests)
 			}
 		})
+	}
+}
+
+func TestInitPlatformLoggerWindowsDisableSerial(t *testing.T) {
+	ctx := t.Context()
+	backends, err := initPlatformLogger(ctx, "test", GEMLogPrefix, true)
+	if err != nil {
+		t.Fatalf("initPlatformLogger(ctx, %q, %q, true) error = %v, want nil", "test", GEMLogPrefix, err)
+	}
+
+	if len(backends) != 1 {
+		t.Fatalf("len(initPlatformLogger(ctx, %q, %q, true)) = %d, want 1", "test", GEMLogPrefix, len(backends))
+	}
+	if got := backends[0].ID(); got != "log-backend,eventlog" {
+		t.Errorf("initPlatformLogger(ctx, %q, %q, true)[0].ID() = %q, want %q", "test", GEMLogPrefix, got, "log-backend,eventlog")
 	}
 }

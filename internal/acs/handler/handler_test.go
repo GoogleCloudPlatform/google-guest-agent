@@ -320,3 +320,62 @@ func TestHandleMessageFilter(t *testing.T) {
 		t.Errorf("Unexpected ConfigurePluginStates diff (-want +got):\n%s", diff)
 	}
 }
+
+func TestAgentInfo(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) error = %v, want nil", err)
+	}
+	cfg.Retrieve().Core.ACSClient = true
+
+	tests := []struct {
+		name      string
+		agentName string
+		wantName  string
+	}{
+		{
+			name:      "default_gce_guest_agent",
+			agentName: "GCEGuestAgent",
+			wantName:  "GCEGuestAgent",
+		},
+		{
+			name:      "standalone_gem_agent_name",
+			agentName: "GoogleExtensionManager",
+			wantName:  "GoogleExtensionManager",
+		},
+		{
+			name:      "empty_falls_back_to_gce_guest_agent",
+			agentName: "",
+			wantName:  "GCEGuestAgent",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg.Retrieve().Core.AgentName = tc.agentName
+			f := dataFetchers{clientVersion: "2.0.0", pluginManager: &manager.PluginManager{}}
+
+			got := f.agentInfo()
+			if got.GetName() != tc.wantName {
+				t.Errorf("agentInfo().GetName() = %q, want %q", got.GetName(), tc.wantName)
+			}
+
+			conn := &fakeConnection{}
+			ctx := context.WithValue(t.Context(), client.OverrideConnection, conn)
+			ev := &events.EventData{
+				Data: &acpb.MessageBody{Labels: map[string]string{messageTypeLabel: getAgentInfoMsg}},
+			}
+			if _, _, err := f.handleMessage(ctx, "test-event", nil, ev); err != nil {
+				t.Fatalf("handleMessage(ctx, %q, nil, %+v) error = %v, want nil", "test-event", ev, err)
+			}
+			f.worker.Wait()
+
+			sent := new(acmpb.AgentInfo)
+			if err := conn.seenMessage.GetBody().UnmarshalTo(sent); err != nil {
+				t.Fatalf("UnmarshalTo(AgentInfo) error = %v, want nil", err)
+			}
+			if sent.GetName() != tc.wantName {
+				t.Errorf("handleMessage(GetAgentInfo) sent Name = %q, want %q", sent.GetName(), tc.wantName)
+			}
+		})
+	}
+}

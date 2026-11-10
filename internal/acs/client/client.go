@@ -201,6 +201,9 @@ func (acs *acsHelper) connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("unable to get client options, err: %w", err)
 	}
+	if !cfg.Retrieve().Core.MDSEnabled {
+		return fmt.Errorf("GCE metadata server is disabled in configuration; non-MDS ACS authentication is not configured")
+	}
 	acs.client, err = client.NewClient(ctx, false, opts...)
 	if err != nil {
 		return fmt.Errorf("unable to create new ACS client, err: %w", err)
@@ -411,6 +414,18 @@ func (acs *acsHelper) isACSEnabled(ctx context.Context) bool {
 	if acs.isEnabled != nil {
 		galog.V(4).Debugf("ACS client is enabled is already set, returning isEnabled: %t", *acs.isEnabled)
 		return *acs.isEnabled
+	}
+
+	if !cfg.Retrieve().Core.MDSEnabled {
+		acsCfg := cfg.Retrieve().ACS
+		if acsCfg.Endpoint == "" && acsCfg.Host == "" {
+			galog.Debugf("MDS is disabled and no ACS endpoint or host is configured; disabling ACS client")
+			acs.isEnabled = proto.Bool(false)
+			return false
+		}
+		galog.Debugf("MDS check is disabled in configuration, enabling ACS client")
+		acs.isEnabled = proto.Bool(true)
+		return true
 	}
 
 	desc, err := metadata.New().Get(ctx)

@@ -1,0 +1,15 @@
+#!/bin/sh -e
+
+if [ "$1" = "configure" ]; then
+  mkdir -p /etc/google-extension-manager
+  if [ ! -f /etc/google-extension-manager/gem.cfg ]; then
+    cp -a /usr/share/google-extension-manager/gem.cfg /etc/google-extension-manager/gem.cfg
+  fi
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable google-extension-manager.service >/dev/null 2>&1 || true
+    if [ -s /etc/google-extension-manager/machine_id ] || grep -Eq '^[[:space:]]*instance_id[[:space:]]*=[[:space:]]*[^[:space:]#;]' /etc/google-extension-manager/gem.cfg 2>/dev/null; then
+      systemctl restart google-extension-manager.service >/dev/null 2>&1 || true
+    fi
+  fi
+fi
