@@ -51,6 +51,16 @@ var setHostname = func(context.Context, string) error {
 	return fmt.Errorf("setting hostnames in guest-agent is not supported on windows")
 }
 
+// fqdnHostname returns the hostname to use when setting the FQDN. Unlike linux
+// the hostname is not read from the OS because:
+// 1) The hostname is always managed on Windows (albeit not by the agent: see
+// https://github.com/GoogleCloudPlatform/compute-image-windows/blob/master/sysprep/activate_instance.ps1)
+// 2) Windows truncates hostnames to 15 characters when they are set so we
+// cannot rely on the OS to report the full hostname.
+func fqdnHostname(hostname string) (string, error) {
+	return hostname, nil
+}
+
 func notifyIPInterfaceChange(family uint32, callbackPtr uintptr, callerContext unsafe.Pointer, initialNotif bool, handle *uintptr) error {
 	notify := 0
 	if initialNotif {

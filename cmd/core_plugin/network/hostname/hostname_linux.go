@@ -40,6 +40,12 @@ func initPlatform(context.Context) error { return nil }
 
 func closePlatform() {}
 
+// fqdnHostname returns the hostname to use when setting the FQDN. The hostname
+// is read from the OS in case we are configured to manage only the fqdn.
+func fqdnHostname(string) (string, error) {
+	return os.Hostname()
+}
+
 var setHostname = func(ctx context.Context, hostname string) error {
 	if err := syscallSethostname([]byte(hostname)); err != nil {
 		return err

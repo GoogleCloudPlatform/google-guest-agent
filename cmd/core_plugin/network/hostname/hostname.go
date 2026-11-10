@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"runtime"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -38,6 +37,12 @@ const (
 	// ReconfigureHostnameCommand is the command id registered for hostname
 	// configuration.
 	ReconfigureHostnameCommand = "agent.hostname.reconfigurehostname"
+	// statusHostnameFailed is the ReconfigureHostnameResponse.Status bit set
+	// when setting the hostname failed.
+	statusHostnameFailed = 1
+	// statusFQDNFailed is the ReconfigureHostnameResponse.Status bit set when
+	// setting the fqdn failed.
+	statusFQDNFailed = 2
 )
 
 var (
@@ -54,7 +59,7 @@ type ReconfigureHostnameRequest struct {
 
 // ReconfigureHostnameResponse is the structure of responses from the
 // ReconfigureHostnameCommand.
-// Status code meanings:
+// Status is a bitmask of statusHostnameFailed and statusFQDNFailed:
 // 0: everything ok
 // 1: error setting hostname
 // 2: error setting fqdn
@@ -126,14 +131,18 @@ func moduleClose(ctx context.Context) {
 
 // ReconfigureHostname takes a ReconfigureHostnameRequest as a []byte-encoded
 // json blob and returns a ReconfigureHostnameResponse []byte-encoded json blob.
+// The hostname and fqdn are configured independently; a failure in one does
+// not prevent the other from being attempted. Each failure sets its own bit in
+// resp.Status (statusHostnameFailed, statusFQDNFailed) and appends its message
+// to resp.StatusMessage so the caller can tell which part failed.
 func ReconfigureHostname(ctx context.Context, _ []byte) ([]byte, error) {
 	var resp ReconfigureHostnameResponse
 	if cfg.Retrieve().Unstable.SetHostname {
 		if disallowedConfigurations[hostname] {
-			resp.Status++
+			resp.Status |= statusHostnameFailed
 			resp.StatusMessage += fmt.Sprintf("Disallowed hostname: %q", hostname)
 		} else if err := setHostname(ctx, hostname); err != nil {
-			resp.Status++
+			resp.Status |= statusHostnameFailed
 			resp.StatusMessage += err.Error()
 		} else {
 			resp.Hostname = hostname
@@ -141,25 +150,14 @@ func ReconfigureHostname(ctx context.Context, _ []byte) ([]byte, error) {
 	}
 	if cfg.Retrieve().Unstable.SetFQDN {
 		galog.V(1).Debugf("SetFQDN is enabled.")
-		h := hostname
-		var err error
-		if runtime.GOOS != "windows" {
-			// Get the hostname from the OS in case we are configured to manage only the
-			// fqdn. Don't do this on windows because:
-			// 1) The hostname is always managed on Windows (albeit not by the agent: see
-			// https://github.com/GoogleCloudPlatform/compute-image-windows/blob/master/sysprep/activate_instance.ps1)
-			// 2) Windows truncates hostnames to 15 characters when they are set so we
-			// cannot rely on the OS to report the full hostname.
-			h, err = os.Hostname()
-		}
 		if disallowedConfigurations[fqdn] {
-			err = fmt.Errorf("Disallowed fqdn: %q", fqdn)
-		}
-		if err == nil {
-			err = setFQDN(ctx, h, fqdn)
-		}
-		if err != nil {
-			resp.Status += 2
+			resp.Status |= statusFQDNFailed
+			resp.StatusMessage += fmt.Sprintf("Disallowed fqdn: %q", fqdn)
+		} else if h, err := fqdnHostname(hostname); err != nil {
+			resp.Status |= statusFQDNFailed
+			resp.StatusMessage += fmt.Sprintf("Failed to determine hostname for fqdn %q: %v", fqdn, err)
+		} else if err := setFQDN(ctx, h, fqdn); err != nil {
+			resp.Status |= statusFQDNFailed
 			resp.StatusMessage += err.Error()
 		} else {
 			resp.Fqdn = fqdn
