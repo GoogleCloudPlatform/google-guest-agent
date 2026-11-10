@@ -17,7 +17,11 @@ package client
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -655,5 +659,141 @@ func TestIsACSEnabled(t *testing.T) {
 				t.Errorf("isACSEnabled() = %t, want %t", got, tc.want)
 			}
 		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestIsACSEnabledMDSEnabledConfig(t *testing.T) {
+	t.Setenv("TEST_UNDECLARED_OUTPUTS_DIR", "")
+
+	tests := []struct {
+		name            string
+		mdsEnabled      bool
+		acsEndpoint     string
+		acsHost         string
+		mdsJSON         string
+		wantEnabled     bool
+		wantMDSRequests int
+	}{
+		{
+			name:            "mds_disabled_without_endpoint_or_host_disables_acs",
+			mdsEnabled:      false,
+			mdsJSON:         `{"universe":{"universe-domain":"apis-tpczero.goog"}}`,
+			wantEnabled:     false,
+			wantMDSRequests: 0,
+		},
+		{
+			name:            "mds_disabled_with_endpoint_bypasses_mds",
+			mdsEnabled:      false,
+			acsEndpoint:     "acs.example.internal:443",
+			mdsJSON:         `{"universe":{"universe-domain":"apis-tpczero.goog"}}`,
+			wantEnabled:     true,
+			wantMDSRequests: 0,
+		},
+		{
+			name:            "mds_disabled_with_host_bypasses_mds",
+			mdsEnabled:      false,
+			acsHost:         "/tmp/acs.sock",
+			mdsJSON:         `{"universe":{"universe-domain":"apis-tpczero.goog"}}`,
+			wantEnabled:     true,
+			wantMDSRequests: 0,
+		},
+		{
+			name:            "mds_enabled_with_service_account",
+			mdsEnabled:      true,
+			mdsJSON:         `{"universe":{"universe-domain":"googleapis.com"},"instance":{"serviceAccounts":{"default":{"email":"sa@example.com"}}}}`,
+			wantEnabled:     true,
+			wantMDSRequests: 1,
+		},
+		{
+			name:            "mds_enabled_without_service_account",
+			mdsEnabled:      true,
+			mdsJSON:         `{"universe":{"universe-domain":"googleapis.com"},"instance":{}}`,
+			wantEnabled:     false,
+			wantMDSRequests: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := cfg.Load(nil); err != nil {
+				t.Fatalf("cfg.Load(nil) error = %v, want nil", err)
+			}
+			cfg.Retrieve().Core.ACSClient = true
+			cfg.Retrieve().Core.MDSEnabled = tc.mdsEnabled
+			cfg.Retrieve().ACS.Endpoint = tc.acsEndpoint
+			cfg.Retrieve().ACS.Host = tc.acsHost
+
+			mdsRequests := 0
+			origTransport := http.DefaultTransport
+			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Host == "169.254.169.254" {
+					mdsRequests++
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Metadata-Flavor": []string{"Google"}},
+					Body:       io.NopCloser(strings.NewReader(tc.mdsJSON)),
+				}, nil
+			})
+			t.Cleanup(func() {
+				http.DefaultTransport = origTransport
+			})
+
+			helper := &acsHelper{}
+			got := helper.isACSEnabled(t.Context())
+			if got != tc.wantEnabled {
+				t.Errorf("isACSEnabled(ctx) = %t, want %t", got, tc.wantEnabled)
+			}
+			if mdsRequests != tc.wantMDSRequests {
+				t.Errorf("isACSEnabled(ctx) made %d GCE MDS requests, want %d", mdsRequests, tc.wantMDSRequests)
+			}
+			if helper.isEnabled == nil || *helper.isEnabled != tc.wantEnabled {
+				t.Errorf("helper.isEnabled = %v, want %t", helper.isEnabled, tc.wantEnabled)
+			}
+		})
+	}
+}
+
+func TestConnectMDSDisabledBlocksGCEMetadataInit(t *testing.T) {
+	t.Setenv("TEST_UNDECLARED_OUTPUTS_DIR", "")
+	t.Setenv("ACS_ALLOW_VSOCK", "false")
+
+	mdsRequests := 0
+	mdsTrap := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mdsRequests++
+		http.Error(w, "GCE MDS disabled", http.StatusNotFound)
+	}))
+	t.Cleanup(mdsTrap.Close)
+	t.Setenv("GCE_METADATA_HOST", mdsTrap.Listener.Addr().String())
+
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		mdsRequests++
+		return nil, fmt.Errorf("unexpected outbound HTTP call to %s", req.URL.String())
+	})
+	t.Cleanup(func() {
+		http.DefaultTransport = origTransport
+	})
+
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) error = %v, want nil", err)
+	}
+	cfg.Retrieve().Core.ACSClient = true
+	cfg.Retrieve().Core.MDSEnabled = false
+	cfg.Retrieve().ACS.Endpoint = "acs.example.internal:443"
+
+	helper := &acsHelper{}
+	err := helper.connect(t.Context())
+	if err == nil {
+		t.Fatalf("connect(ctx) with MDSEnabled=false and non-VSOCK endpoint = nil, want error until off-GCP MetadataInitFunc is provided")
+	}
+	if mdsRequests != 0 {
+		t.Errorf("connect(ctx) made %d GCE MDS HTTP requests, want 0", mdsRequests)
 	}
 }

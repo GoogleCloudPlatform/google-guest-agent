@@ -34,6 +34,9 @@ const (
 	// GuestAgentCompatManager is the name of the guest agent compat manager
 	// daemon.
 	GuestAgentCompatManager = "google-guest-compat-manager"
+	// GoogleExtensionManager is the name of the standalone extension manager
+	// daemon.
+	GoogleExtensionManager = "google-extension-manager"
 )
 
 func init() {

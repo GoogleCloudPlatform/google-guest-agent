@@ -61,6 +61,9 @@ type Options struct {
 	// InitCloudLoggingImmediately is a flag to initialize cloud logging
 	// immediately.
 	InitCloudLoggingImmediately bool
+	// DisableSerialLogger skips initializing the hardware serial port logger on
+	// Windows for standalone off-GCP processes.
+	DisableSerialLogger bool
 }
 
 const (
@@ -95,6 +98,16 @@ const (
 	// plugin manager.
 	ManagerLogPrefix = "GCEGuestAgentManager"
 
+	// GEMCloudLoggingLogID is the logId used for cloud logging for the standalone
+	// extension manager.
+	GEMCloudLoggingLogID = "GoogleExtensionManager"
+	// GEMLocalLoggerIdent is the ident used for local loggers for the standalone
+	// extension manager.
+	GEMLocalLoggerIdent = "google_extension_manager"
+	// GEMLogPrefix is a human readable prefix added to all log entries for the
+	// standalone extension manager.
+	GEMLogPrefix = "GoogleExtensionManager"
+
 	// The following are MIG labels added to the cloud logging logs.
 	// MIGNameLabel is the MIG name label.
 	migNameLabel = `compute.googleapis.com/instance_group_manager/name`
@@ -106,7 +119,7 @@ const (
 
 // Init initializes the logger.
 func Init(ctx context.Context, opts Options) error {
-	enabledLoggers, err := initPlatformLogger(ctx, opts.Ident, opts.Prefix)
+	enabledLoggers, err := initPlatformLogger(ctx, opts.Ident, opts.Prefix, opts.DisableSerialLogger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize platform logger: %w", err)
 	}

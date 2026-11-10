@@ -24,7 +24,7 @@ import (
 
 // initPlatformLogger is the linux implementation of platform logger
 // initialization.
-func initPlatformLogger(ctx context.Context, ident string, _ string) ([]galog.Backend, error) {
+func initPlatformLogger(ctx context.Context, ident string, _ string, _ bool) ([]galog.Backend, error) {
 	galog.V(2).Debugf("Initializing syslog logger")
 	return []galog.Backend{galog.NewSyslogBackend(ident)}, nil
 }
