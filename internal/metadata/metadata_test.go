@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -710,5 +711,187 @@ func TestWindowsKeysUnmarshalJSONError(t *testing.T) {
 	var desc descriptor
 	if err := json.Unmarshal([]byte(key), &desc); err == nil {
 		t.Errorf("json.Unmarshal(%s) succeeded, want error", key)
+	}
+}
+
+type loggedMetadataEntry struct {
+	qualifiedKey string
+	hint         string
+}
+
+func TestRejectAllowOnDomainControllerInMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		payloads []string
+		wantLogs []loggedMetadataEntry
+	}{
+		{
+			name: "instance_hyphen_key_logged_once_across_polls",
+			payloads: []string{
+				`{"instance":{"attributes":{"allow-on-domain-controller":"true","enable-oslogin":"true"}}}`,
+				`{"instance":{"attributes":{"allow-on-domain-controller":"true","enable-oslogin":"true"}}}`,
+			},
+			wantLogs: []loggedMetadataEntry{
+				{
+					qualifiedKey: instanceMetadataSection + "/" + allowOnDomainControllerHyphenKey,
+					hint:         allowOnDomainControllerHint,
+				},
+			},
+		},
+		{
+			name: "project_underscore_key_logged_once",
+			payloads: []string{
+				`{"project":{"attributes":{"allow_on_domain_controller":"true"}},"instance":{"attributes":{"enable-oslogin":"true"}}}`,
+				`{"project":{"attributes":{"allow_on_domain_controller":"true"}},"instance":{"attributes":{"enable-oslogin":"true"}}}`,
+			},
+			wantLogs: []loggedMetadataEntry{
+				{
+					qualifiedKey: projectMetadataSection + "/" + allowOnDomainControllerUnderscoreKey,
+					hint:         allowOnDomainControllerHint,
+				},
+			},
+		},
+		{
+			name: "same_key_in_instance_then_project_logged_per_section",
+			payloads: []string{
+				`{"instance":{"attributes":{"allow-on-domain-controller":"true","enable-oslogin":"true"}}}`,
+				`{"project":{"attributes":{"allow-on-domain-controller":"true"}},"instance":{"attributes":{"allow-on-domain-controller":"true","enable-oslogin":"true"}}}`,
+			},
+			wantLogs: []loggedMetadataEntry{
+				{
+					qualifiedKey: instanceMetadataSection + "/" + allowOnDomainControllerHyphenKey,
+					hint:         allowOnDomainControllerHint,
+				},
+				{
+					qualifiedKey: projectMetadataSection + "/" + allowOnDomainControllerHyphenKey,
+					hint:         allowOnDomainControllerHint,
+				},
+			},
+		},
+		{
+			name: "boolean_json_value_rejected_without_breaking_other_attributes",
+			payloads: []string{
+				`{"instance":{"attributes":{"allow-on-domain-controller":true,"enable-oslogin":"true"}}}`,
+			},
+			wantLogs: []loggedMetadataEntry{
+				{
+					qualifiedKey: instanceMetadataSection + "/" + allowOnDomainControllerHyphenKey,
+					hint:         allowOnDomainControllerHint,
+				},
+			},
+		},
+		{
+			name: "absent_or_null_key_not_logged",
+			payloads: []string{
+				`{"instance":{"attributes":{"enable-oslogin":"true"}}}`,
+				`{"instance":{"attributes":{"allow-on-domain-controller":null,"enable-oslogin":"true"}}}`,
+			},
+			wantLogs: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var loggedKeys sync.Map
+			var gotLogs []loggedMetadataEntry
+			logKey := func(qualifiedKey, hint string) {
+				gotLogs = append(gotLogs, loggedMetadataEntry{qualifiedKey: qualifiedKey, hint: hint})
+			}
+
+			for _, payload := range tc.payloads {
+				desc, err := unmarshalDescriptor(payload, &loggedKeys, logKey)
+				if err != nil {
+					t.Fatalf("unmarshalDescriptor(%s) failed: %v", payload, err)
+				}
+				if !desc.OSLoginEnabled() {
+					t.Errorf("unmarshalDescriptor(%s) did not preserve sibling enable-oslogin attribute", payload)
+				}
+			}
+
+			if diff := cmp.Diff(tc.wantLogs, gotLogs, cmp.AllowUnexported(loggedMetadataEntry{})); diff != "" {
+				t.Errorf("logged disallowed metadata entries diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestUnmarshalDescriptorRecordsLoggedMetadataKey(t *testing.T) {
+	wantQualifiedKey := instanceMetadataSection + "/" + allowOnDomainControllerHyphenKey
+	loggedMetadataKeys.Delete(wantQualifiedKey)
+	t.Cleanup(func() {
+		loggedMetadataKeys.Delete(wantQualifiedKey)
+	})
+
+	desc, err := UnmarshalDescriptor(`{"instance":{"attributes":{"allow-on-domain-controller":"true","enable-oslogin":"true"}}}`)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor() failed unexpectedly: %v", err)
+	}
+	if !desc.OSLoginEnabled() {
+		t.Errorf("UnmarshalDescriptor() did not preserve sibling enable-oslogin attribute")
+	}
+	if _, ok := loggedMetadataKeys.Load(wantQualifiedKey); !ok {
+		t.Errorf("UnmarshalDescriptor() did not record %q in loggedMetadataKeys", wantQualifiedKey)
+	}
+}
+
+func TestUnmarshalDescriptorInvalidPayload(t *testing.T) {
+	for _, invalidPayload := range []string{
+		`{"instance":false}`,
+		`{"instance":{"attributes":{"windows-keys":false}}}`,
+	} {
+		if _, err := UnmarshalDescriptor(invalidPayload); err == nil {
+			t.Errorf("UnmarshalDescriptor(%s) succeeded, want error", invalidPayload)
+		}
+	}
+}
+
+func TestDisallowedMetadataKeysAreDiscarded(t *testing.T) {
+	withoutDisallowed := `{
+		"project": {
+			"attributes": {
+				"enable-oslogin": "true",
+				"ssh-keys": "projuser:ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ projuser@example.com"
+			}
+		},
+		"instance": {
+			"attributes": {
+				"hostname": "vm.example.internal",
+				"enable-windows-ssh": "true"
+			}
+		}
+	}`
+	withDisallowed := `{
+		"project": {
+			"attributes": {
+				"allow-on-domain-controller": "true",
+				"allow_on_domain_controller": "true",
+				"enable-oslogin": "true",
+				"ssh-keys": "projuser:ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ projuser@example.com"
+			}
+		},
+		"instance": {
+			"attributes": {
+				"allow-on-domain-controller": "true",
+				"allow_on_domain_controller": "true",
+				"hostname": "vm.example.internal",
+				"enable-windows-ssh": "true"
+			}
+		}
+	}`
+
+	var cleanLogs, disallowedLogs sync.Map
+	noopLog := func(string, string) {}
+	wantDesc, err := unmarshalDescriptor(withoutDisallowed, &cleanLogs, noopLog)
+	if err != nil {
+		t.Fatalf("unmarshalDescriptor(withoutDisallowed) failed: %v", err)
+	}
+	gotDesc, err := unmarshalDescriptor(withDisallowed, &disallowedLogs, noopLog)
+	if err != nil {
+		t.Fatalf("unmarshalDescriptor(withDisallowed) failed: %v", err)
+	}
+
+	allowAllUnexported := cmp.Exporter(func(reflect.Type) bool { return true })
+	if diff := cmp.Diff(wantDesc, gotDesc, allowAllUnexported); diff != "" {
+		t.Errorf("disallowed metadata keys altered parsed Descriptor (-want +got):\n%s", diff)
 	}
 }
