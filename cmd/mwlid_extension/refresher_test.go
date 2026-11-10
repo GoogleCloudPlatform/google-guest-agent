@@ -1369,3 +1369,232 @@ func TestWatchIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestIsContentDir(t *testing.T) {
+	dir := t.TempDir()
+	sep := string(filepath.Separator)
+	prefix := filepath.Join(dir, "workload-spiffe-contents")
+
+	tests := []struct {
+		desc string
+		path string
+		want bool
+	}{
+		{desc: "valid", path: prefix + "-2026-11-09T22-39-29Z", want: true},
+		{desc: "empty", path: "", want: false},
+		{desc: "relative", path: "workload-spiffe-contents-1", want: false},
+		{desc: "prefix_itself", path: prefix, want: false},
+		{desc: "similar_name_without_dash", path: prefix + "evil", want: false},
+		{desc: "other_dir", path: filepath.Join(t.TempDir(), "workload-spiffe-contents-1"), want: false},
+		{desc: "nested", path: filepath.Join(prefix+"-1", "sub"), want: false},
+		{desc: "dotdot_escape", path: prefix + "-1" + sep + ".." + sep + ".." + sep + "victim", want: false},
+		{desc: "dotdot_resolving_inside", path: dir + sep + "x" + sep + ".." + sep + "workload-spiffe-contents-1", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			if got := isContentDir(prefix, tc.path); got != tc.want {
+				t.Errorf("isContentDir(%q, %q) = %t, want %t", prefix, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// newRotationTestJob returns a refresher job that writes valid credentials and
+// output options rooted at dir.
+func newRotationTestJob(t *testing.T, dir string) (*RefresherJob, outputOpts) {
+	t.Helper()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+	mdsClient := &mdsTestClient{
+		spiffe:  "spiffe://12345.global.67890.workload.id.goog/ns/NAMESPACE_ID/sa/MANAGED_IDENTITY_ID",
+		certPem: "-----BEGIN CERTIFICATE-----datahere-----END CERTIFICATE-----",
+		pvtPem:  "-----BEGIN PRIVATE KEY-----datahere-----END PRIVATE KEY-----",
+		domain1: "12345.global.67890.workload.id.goog",
+		pem1:    "-----BEGIN CERTIFICATE-----datahere1-----END CERTIFICATE-----",
+		domain2: "PEER_SPIFFE_TRUST_DOMAIN_2_IGNORE",
+		pem2:    "-----BEGIN CERTIFICATE-----datahere2-----END CERTIFICATE-----",
+		enabled: "true",
+	}
+	out := outputOpts{
+		contentDirPrefix:  filepath.Join(dir, "workload-spiffe-contents"),
+		tempSymlinkPrefix: filepath.Join(dir, "workload-spiffe-symlink"),
+		symlink:           filepath.Join(dir, "workload-spiffe-credentials"),
+	}
+	return &RefresherJob{mdsClient: mdsClient}, out
+}
+
+// mkdirWithFile creates dir with a file named "keep" in it, and returns the
+// path of the file.
+func mkdirWithFile(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("os.MkdirAll(%q) failed: %v", dir, err)
+	}
+	f := filepath.Join(dir, "keep")
+	if err := os.WriteFile(f, []byte("keep"), 0644); err != nil {
+		t.Fatalf("os.WriteFile(%q) failed: %v", f, err)
+	}
+	return f
+}
+
+// mustSymlink creates link pointing at target.
+func mustSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("os.Symlink(%q, %q) failed: %v", target, link, err)
+	}
+}
+
+func TestRefreshCredsOldTarget(t *testing.T) {
+	sep := string(filepath.Separator)
+
+	tests := []struct {
+		desc string
+		// setup prepares the output directory and returns the paths that must
+		// still exist and the paths that must be gone after the refresh.
+		setup   func(t *testing.T, root string, out outputOpts) (keep, gone []string)
+		wantErr bool
+	}{
+		{
+			desc: "target_outside_prefix_not_deleted",
+			setup: func(t *testing.T, root string, out outputOpts) ([]string, []string) {
+				victim := mkdirWithFile(t, filepath.Join(root, "victim"))
+				mustSymlink(t, filepath.Dir(victim), out.symlink)
+				return []string{victim}, nil
+			},
+		},
+		{
+			desc: "target_with_dotdot_not_deleted",
+			setup: func(t *testing.T, root string, out outputOpts) ([]string, []string) {
+				victim := mkdirWithFile(t, filepath.Join(root, "victim"))
+				decoy := mkdirWithFile(t, out.contentDirPrefix+"-0")
+				mustSymlink(t, filepath.Dir(decoy)+sep+".."+sep+".."+sep+"victim", out.symlink)
+				return []string{victim, decoy}, nil
+			},
+		},
+		{
+			desc: "valid_old_content_dir_deleted",
+			setup: func(t *testing.T, root string, out outputOpts) ([]string, []string) {
+				old := mkdirWithFile(t, out.contentDirPrefix+"-0")
+				mustSymlink(t, filepath.Dir(old), out.symlink)
+				return nil, []string{filepath.Dir(old)}
+			},
+		},
+		{
+			desc: "old_content_dir_is_link_only_link_removed",
+			setup: func(t *testing.T, root string, out outputOpts) ([]string, []string) {
+				victim := mkdirWithFile(t, filepath.Join(root, "victim"))
+				old := out.contentDirPrefix + "-0"
+				mustSymlink(t, filepath.Dir(victim), old)
+				mustSymlink(t, old, out.symlink)
+				return []string{victim}, []string{old}
+			},
+		},
+		{
+			desc: "symlink_path_is_non_empty_dir_not_deleted",
+			setup: func(t *testing.T, root string, out outputOpts) ([]string, []string) {
+				return []string{mkdirWithFile(t, out.symlink)}, nil
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			root := t.TempDir()
+			j, out := newRotationTestJob(t, filepath.Join(root, "secrets"))
+			if err := os.Mkdir(filepath.Dir(out.symlink), 0755); err != nil {
+				t.Fatalf("os.Mkdir() failed: %v", err)
+			}
+			keep, gone := tc.setup(t, root, out)
+
+			err := j.refreshCreds(context.Background(), out, "1")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("refreshCreds(ctx, %+v) = %v, want error: %t", out, err, tc.wantErr)
+			}
+			for _, p := range keep {
+				if _, err := os.Lstat(p); err != nil {
+					t.Errorf("os.Lstat(%q) = %v after refresh, want it to still exist", p, err)
+				}
+			}
+			for _, p := range gone {
+				if _, err := os.Lstat(p); !os.IsNotExist(err) {
+					t.Errorf("os.Lstat(%q) = %v after refresh, want not exist error", p, err)
+				}
+			}
+			if tc.wantErr {
+				return
+			}
+			want := out.contentDirPrefix + "-1"
+			if got, err := os.Readlink(out.symlink); err != nil || got != want {
+				t.Errorf("os.Readlink(%q) = (%q, %v), want (%q, nil)", out.symlink, got, err, want)
+			}
+		})
+	}
+}
+
+func TestRefreshCredsContentDirIsLink(t *testing.T) {
+	root := t.TempDir()
+	j, out := newRotationTestJob(t, filepath.Join(root, "secrets"))
+	if err := os.Mkdir(filepath.Dir(out.symlink), 0755); err != nil {
+		t.Fatalf("os.Mkdir() failed: %v", err)
+	}
+	victim := filepath.Join(root, "victim")
+	if err := os.Mkdir(victim, 0755); err != nil {
+		t.Fatalf("os.Mkdir(%q) failed: %v", victim, err)
+	}
+	mustSymlink(t, victim, out.contentDirPrefix+"-1")
+
+	if err := j.refreshCreds(context.Background(), out, "1"); err == nil {
+		t.Errorf("refreshCreds(ctx, %+v) succeeded with the content dir a link, want error", out)
+	}
+	if entries, err := os.ReadDir(victim); err != nil || len(entries) != 0 {
+		t.Errorf("os.ReadDir(%q) = (%v, %v), want no entries written through the link", victim, entries, err)
+	}
+}
+
+// TestRefreshCredsNoConfigStatus tests that a refresh that doesn't write new
+// credentials still creates the secrets directory but leaves the existing
+// symlink and content directory alone.
+func TestRefreshCredsNoConfigStatus(t *testing.T) {
+	for _, existingLink := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_link_%t", existingLink), func(t *testing.T) {
+			outDir := filepath.Join(t.TempDir(), "secrets")
+			j, out := newRotationTestJob(t, outDir)
+			j.mdsClient.(*mdsTestClient).throwErrOn = configStatusKey
+
+			oldDir := out.contentDirPrefix + "-0"
+			if existingLink {
+				mkdirWithFile(t, oldDir)
+				mustSymlink(t, oldDir, out.symlink)
+			}
+
+			if err := j.refreshCreds(context.Background(), out, "1"); err != nil {
+				t.Fatalf("refreshCreds(ctx, %+v) failed unexpectedly: %v", out, err)
+			}
+			if fi, err := os.Lstat(outDir); err != nil || !fi.IsDir() {
+				t.Errorf("os.Lstat(%q) = (%v, %v), want an existing directory", outDir, fi, err)
+			}
+			for _, p := range []string{out.contentDirPrefix + "-1", out.tempSymlinkPrefix + "-1"} {
+				if _, err := os.Lstat(p); !os.IsNotExist(err) {
+					t.Errorf("os.Lstat(%q) = %v, want not exist error", p, err)
+				}
+			}
+			got, err := os.Readlink(out.symlink)
+			if !existingLink {
+				if !os.IsNotExist(err) {
+					t.Errorf("os.Readlink(%q) = (%q, %v), want not exist error", out.symlink, got, err)
+				}
+				return
+			}
+			if err != nil || got != oldDir {
+				t.Errorf("os.Readlink(%q) = (%q, %v), want (%q, nil)", out.symlink, got, err, oldDir)
+			}
+			if _, err := os.Stat(filepath.Join(oldDir, "keep")); err != nil {
+				t.Errorf("old content dir file missing after refresh: %v", err)
+			}
+		})
+	}
+}
