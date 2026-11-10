@@ -30,6 +30,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
@@ -141,6 +142,12 @@ func (sn *Module) IsManaging(ctx context.Context, opts *service.Options) (bool, 
 	return false, fmt.Errorf("failed to check interface state using plain text output: %w", err)
 }
 
+// isManagedState reports whether the networkctl interface state indicates that
+// systemd-networkd is actively managing or configuring the interface.
+func isManagedState(state string) bool {
+	return state == "configured" || state == "configuring"
+}
+
 // interfaceConfiguredText checks if the interface is configured by
 // systemd-networkd using its plain text output.
 func (sn *Module) interfaceConfiguredText(ctx context.Context, iface string) (bool, error) {
@@ -157,8 +164,12 @@ func (sn *Module) interfaceConfiguredText(ctx context.Context, iface string) (bo
 
 	for _, line := range strings.Split(res.Output, "\n") {
 		for _, key := range sn.networkCtlKeys {
-			if strings.Contains(line, key+":") {
-				return strings.Contains(line, "configured"), nil
+			if idx := strings.Index(line, key+":"); idx != -1 {
+				val := line[idx+len(key)+1:]
+				tokens := strings.FieldsFunc(val, func(r rune) bool {
+					return unicode.IsSpace(r) || r == '(' || r == ')'
+				})
+				return slices.ContainsFunc(tokens, isManagedState), nil
 			}
 		}
 	}
@@ -166,7 +177,7 @@ func (sn *Module) interfaceConfiguredText(ctx context.Context, iface string) (bo
 	return false, fmt.Errorf("could not determine interface state(plain text output), none of %v keys are present", sn.networkCtlKeys)
 }
 
-// interfaceConfiguredJson checks if the interface is configured by
+// interfaceConfiguredJSON checks if the interface is configured by
 // systemd-networkd using its json output if supported.
 func (sn *Module) interfaceConfiguredJSON(ctx context.Context, iface string) (bool, error) {
 	// Check systemd network configuration.
@@ -194,7 +205,8 @@ func (sn *Module) interfaceConfiguredJSON(ctx context.Context, iface string) (bo
 		if !found {
 			continue
 		}
-		return state == "configured", nil
+		stateStr, ok := state.(string)
+		return ok && isManagedState(stateStr), nil
 	}
 
 	return false, fmt.Errorf("could not determine interface state(json output), none of %v keys are present", sn.networkCtlKeys)
