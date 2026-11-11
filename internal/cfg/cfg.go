@@ -66,6 +66,8 @@ log_file =
 on_demand_plugins = true
 acs_client = true
 enable_local_plugins = true
+mds_enabled = true
+agent_name = GCEGuestAgent
 
 [Telemetry]
 metric_collection_enabled = true
@@ -318,6 +320,13 @@ type Core struct {
 	// EnableLocalPlugins determines if the core plugin should be launched
 	// using a hardcoded config, or by dynamically reading the config from disk.
 	EnableLocalPlugins bool `ini:"enable_local_plugins,omitempty"`
+	// MDSEnabled determines if GCE metadata server checks, watchers, and
+	// MDS-backed ACS authentication are enabled. Standalone off-GCP binaries set
+	// this to false.
+	MDSEnabled bool `ini:"mds_enabled,omitempty"`
+	// AgentName is the agent identity reported to Agent Control Plane in
+	// AgentInfo responses.
+	AgentName string `ini:"agent_name,omitempty"`
 	// Version defines the version of the running binary. Its for internal use
 	// only. Value is set dynamically when config is loaded in main. Any values
 	// provided via config file or anything will be overridden.
@@ -501,22 +510,35 @@ func applyTemplate(templateStr string, data map[string]string, buffer io.Writer)
 	return nil
 }
 
-func defaultDataSources(extraDefaults []byte) []any {
+func configFileSources(extraDefaults []byte, configFile string) []any {
 	var res []any
-
 	if len(extraDefaults) > 0 {
 		res = append(res, extraDefaults)
 	}
+	return append(res,
+		configFile,
+		configFile+".distro",
+		configFile+".template",
+	)
+}
 
-	return append(res, []any{
-		defaultConfigFile,
-		defaultConfigFile + ".distro",
-		defaultConfigFile + ".template",
-	}...)
+func defaultDataSources(extraDefaults []byte) []any {
+	return configFileSources(extraDefaults, defaultConfigFile)
 }
 
 // Load loads default configuration and the configuration from default config files.
 func Load(extraDefaults []byte) error {
+	return loadFromSources(dataSources(extraDefaults))
+}
+
+// LoadWithConfigFile loads default configuration merged with extraDefaults and
+// the specified configFile hierarchy (.distro, .template), bypassing the GCE
+// guest agent default config path.
+func LoadWithConfigFile(extraDefaults []byte, configFile string) error {
+	return loadFromSources(configFileSources(extraDefaults, configFile))
+}
+
+func loadFromSources(sources []any) error {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 	opts := ini.LoadOptions{
@@ -530,7 +552,6 @@ func Load(extraDefaults []byte) error {
 		return fmt.Errorf("unable to apply %v to config template: %w", defaultConfigValues, err)
 	}
 
-	sources := dataSources(extraDefaults)
 	galog.V(3).Debugf("Loading configuration from sources: %v", sources)
 	cfg, err := ini.LoadSources(opts, buffer.Bytes(), sources...)
 	if err != nil {

@@ -58,9 +58,9 @@ func (w *Watcher) Events() []string {
 func (w *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
 	skipGDUUnverseCheck := os.Getenv("SKIP_GDU_UNIVERSE_CHECK") != ""
 
-	// In test environment we don't want to check GDU universe as we know the test
-	// is running in GDU universe.
-	if !skipGDUUnverseCheck && !w.checkedGDUUniverse {
+	// In test environment or standalone non-MDS mode we skip checking GDU
+	// universe via metadata server.
+	if cfg.Retrieve().Core.MDSEnabled && !skipGDUUnverseCheck && !w.checkedGDUUniverse {
 		// Only enable ACS watcher in GDU universe.
 		runningInGDU := metadata.New().IsGDUUniverse(ctx)
 		galog.Infof("Running in GDU universe: %t", runningInGDU)
@@ -81,6 +81,10 @@ func (w *Watcher) Run(ctx context.Context, evType string) (bool, any, error) {
 	msg, err := client.Watch(ctx)
 	if err != nil {
 		return true, nil, fmt.Errorf("unable to receive new messages on ACS channel: %w", err)
+	}
+	if msg == nil {
+		galog.V(2).Debugf("ACS client watch returned nil message, removing watcher")
+		return false, nil, nil
 	}
 
 	return true, msg, nil

@@ -17,7 +17,6 @@
 package logger
 
 import (
-	"context"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/galog"
@@ -25,21 +24,29 @@ import (
 )
 
 func TestInitPlatformLoggerLinux(t *testing.T) {
-	ctx := context.Background()
-	backends, err := initPlatformLogger(ctx, "test", "")
-	if err != nil {
-		t.Errorf("initPlatformLogger(%v, %v) = %v, want nil", ctx, "test", err)
-	}
+	for _, disableSerial := range []bool{false, true} {
+		name := "serial_enabled"
+		if disableSerial {
+			name = "serial_disabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			backends, err := initPlatformLogger(ctx, "test", "", disableSerial)
+			if err != nil {
+				t.Fatalf("initPlatformLogger(ctx, %q, %q, %t) error = %v, want nil", "test", "", disableSerial, err)
+			}
 
-	if len(backends) != 1 {
-		t.Errorf("initPlatformLogger(%v, %v) = %v, want %v", ctx, "test", backends, 1)
-	}
+			if len(backends) != 1 {
+				t.Errorf("len(initPlatformLogger(ctx, %q, %q, %t)) = %d, want 1", "test", "", disableSerial, len(backends))
+			}
 
-	expectedID := "log-backend,syslog"
-	backendContains := func(backend galog.Backend) bool {
-		return backend.ID() == expectedID
-	}
-	if !slices.ContainsFunc(backends, backendContains) {
-		t.Errorf("initPlatformLogger(%v, %v) = %v, want %v", ctx, "test", backends, expectedID)
+			expectedID := "log-backend,syslog"
+			backendContains := func(backend galog.Backend) bool {
+				return backend.ID() == expectedID
+			}
+			if !slices.ContainsFunc(backends, backendContains) {
+				t.Errorf("initPlatformLogger(ctx, %q, %q, %t) = %v, want backend %q", "test", "", disableSerial, backends, expectedID)
+			}
+		})
 	}
 }

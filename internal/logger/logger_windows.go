@@ -34,7 +34,7 @@ const (
 
 // initPlatformLogger is the windows implementation of platform logger
 // initialization.
-func initPlatformLogger(ctx context.Context, ident string, prefix string) ([]galog.Backend, error) {
+func initPlatformLogger(ctx context.Context, ident string, prefix string, disableSerial bool) ([]galog.Backend, error) {
 	var res []galog.Backend
 	// TODO: b/379339223 - Move SetPrefix() to common logger initialization.
 	galog.SetPrefix(prefix)
@@ -45,6 +45,10 @@ func initPlatformLogger(ctx context.Context, ident string, prefix string) ([]gal
 		return nil, fmt.Errorf("failed to create event log: %w", err)
 	}
 	res = append(res, eventLogger)
+
+	if disableSerial {
+		return res, nil
+	}
 
 	serialOpts := &galog.SerialOptions{
 		Baud: galog.DefaultSerialBaud,

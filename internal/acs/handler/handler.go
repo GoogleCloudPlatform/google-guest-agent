@@ -99,7 +99,7 @@ func (f *dataFetchers) handleMessage(ctx context.Context, eventType string, data
 
 	var resp proto.Message
 	msg, ok := event.Data.(*acpb.MessageBody)
-	if !ok {
+	if !ok || msg == nil {
 		galog.Warnf("ACS watcher sent invalid data of type %T, ignoring", event.Data)
 		return true, true, nil
 	}
@@ -150,8 +150,12 @@ func (f *dataFetchers) handleMessage(ctx context.Context, eventType string, data
 
 // agentInfo returns the AgentInfo proto message.
 func (f *dataFetchers) agentInfo() *acppb.AgentInfo {
+	name := cfg.Retrieve().Core.AgentName
+	if name == "" {
+		name = "GCEGuestAgent"
+	}
 	return &acppb.AgentInfo{
-		Name:         "GCEGuestAgent",
+		Name:         name,
 		Architecture: runtime.GOARCH,
 		AgentCapabilities: []acppb.AgentInfo_AgentCapability{
 			acppb.AgentInfo_GET_AGENT_INFO,

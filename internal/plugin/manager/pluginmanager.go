@@ -348,6 +348,7 @@ func (m *PluginManager) RemoveAllDynamicPlugins(ctx context.Context) error {
 
 	go func() {
 		wg.Wait()
+		eventWg.Wait()
 		baseStateDir := baseState()
 		if file.Exists(baseStateDir, file.TypeDir) {
 			if err := os.RemoveAll(baseStateDir); err != nil {
