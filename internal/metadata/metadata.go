@@ -31,7 +31,7 @@ import (
 
 const (
 	// defaultMetadataURL is the default endpoint used to connect to Metadata server.
-	defaultMetadataURL = "http://169.254.169.254/computeMetadata/v1/"
+	defaultMetadataURL = "http://metadata.google.internal/computeMetadata/v1/"
 	// defaultEtag is the default etag used when none is set.
 	defaultEtag = "NONE"
 
