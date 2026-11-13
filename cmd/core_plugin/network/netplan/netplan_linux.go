@@ -109,10 +109,10 @@ func (sn *serviceNetplan) IsManaging(ctx context.Context, opts *service.Options)
 
 // setOSFlags sets the OS specific flags for the netplan service.
 func (sn *serviceNetplan) setOSFlags(osInfo osinfo.OSInfo) {
-	// Debian 12 has a pretty generic matching netplan configuration for gce,
-	// until we have that changed we are adjusting the configuration so we can
-	// override it.
-	if osInfo.OS == "debian" && osInfo.Version.Major == 12 {
+	// Debian 12 and newer have a pretty generic matching netplan configuration
+	// for GCE, until we have that changed we are adjusting the configuration so
+	// we can override it.
+	if osInfo.OS == "debian" && osInfo.Version.Major >= 12 {
 		sn.ethernetNamePrefix = debian12EthernetNamePrefix
 	}
 
@@ -355,6 +355,19 @@ func (sn *serviceNetplan) writeDropin(nics []*nic.Configuration) (bool, error) {
 		dropin.Network.Ethernets[key] = ne
 	}
 
+	// If no ethernet interfaces are managed, remove the drop-in file if present.
+	if len(dropin.Network.Ethernets) == 0 {
+		fPath := sn.ethernetDropinFile()
+		if !file.Exists(fPath, file.TypeFile) {
+			return false, nil
+		}
+		galog.Debugf("No ethernet interfaces configured, removing drop-in file: %s.", fPath)
+		if err := os.Remove(fPath); err != nil {
+			return false, fmt.Errorf("error removing netplan dropin: %w", err)
+		}
+		return true, nil
+	}
+
 	update, err := sn.write(dropin, sn.ethernetDropinFile())
 	if err != nil {
 		return false, fmt.Errorf("error writing netplan dropin: %w", err)
@@ -426,8 +439,9 @@ func (sn *serviceNetplan) Rollback(ctx context.Context, opts *service.Options, a
 	var rolledBack bool
 
 	// Rollback the backend's drop-in files.
+	dropinPrefix := sn.addPrefix(backendDropinPrefix, true)
 	for _, backend := range backends {
-		if err := backend.RollbackDropins(opts.FilteredNICConfigs(), backendDropinPrefix, active); err != nil {
+		if err := backend.RollbackDropins(opts.FilteredNICConfigs(), dropinPrefix, active); err != nil {
 			return rolledBack, err
 		}
 	}
@@ -489,8 +503,8 @@ func (sn *serviceNetplan) restoreDefaultConfig(ctx context.Context) error {
 	}
 
 	osDesc := sn.osInfoReader()
-	if osDesc.OS != "debian" || osDesc.Version.Major != 12 {
-		galog.Debugf("Skipping restore of default netplan configuration for non-Debian 12.")
+	if osDesc.OS != "debian" || osDesc.Version.Major < 12 {
+		galog.Debugf("Skipping restore of default netplan configuration on %q (version %d); only applies to Debian 12 or newer.", osDesc.OS, osDesc.Version.Major)
 		return nil
 	}
 

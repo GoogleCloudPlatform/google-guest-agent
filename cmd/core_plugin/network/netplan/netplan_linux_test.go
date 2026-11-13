@@ -655,15 +655,210 @@ func TestSetup(t *testing.T) {
 	}
 }
 
+func TestSetupNoManagedNICs(t *testing.T) {
+	networkdModule := networkd.DefaultModule()
+	trueVal := true
+	falseVal := false
+
+	type testCase struct {
+		name               string
+		writeFile          bool
+		readOnlyDir        bool
+		noReload           bool
+		wantErr            bool
+		ethernetNamePrefix string
+		nics               []*nic.Configuration
+		wantDropin         *netplanDropin
+	}
+
+	tests := []testCase{
+		{
+			name:      "no-existing-dropin-skips-write-and-reload",
+			writeFile: false,
+			noReload:  true,
+		},
+		{
+			name:      "existing-dropin-removed-and-reloaded",
+			writeFile: true,
+			noReload:  false,
+		},
+		{
+			name:               "existing-dropin-with-prefix-removed-and-reloaded",
+			writeFile:          true,
+			noReload:           false,
+			ethernetNamePrefix: debian12EthernetNamePrefix,
+		},
+		{
+			name:               "secondary-nic-managed-when-primary-disabled",
+			writeFile:          false,
+			noReload:           false,
+			ethernetNamePrefix: debian12EthernetNamePrefix,
+			nics: []*nic.Configuration{
+				{
+					Index:        0,
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface0" },
+					},
+				},
+				{
+					Index:        1,
+					SupportsIPv6: true,
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface1" },
+					},
+				},
+			},
+			wantDropin: &netplanDropin{
+				Network: netplanNetwork{
+					Version: netplanConfigVersion,
+					Ethernets: map[string]netplanEthernet{
+						"a-iface1": {
+							Match:          netplanMatch{Name: "iface1"},
+							DHCPv4:         &trueVal,
+							DHCP4Overrides: &netplanDHCPOverrides{UseDomains: &falseVal},
+							DHCPv6:         &trueVal,
+							DHCP6Overrides: &netplanDHCPOverrides{UseDomains: &falseVal},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if os.Geteuid() != 0 {
+		tests = append(tests, testCase{
+			name:        "fail-remove-existing-dropin",
+			writeFile:   true,
+			readOnlyDir: true,
+			noReload:    true,
+			wantErr:     true,
+		})
+	}
+
+	ctx := context.Background()
+	if err := cfg.Load([]byte("[NetworkInterfaces]\nmanage_primary_nic = false\n")); err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldRunner := run.Client
+			mockRunner := &runMock{
+				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+					return &run.Result{}, nil
+				},
+			}
+			run.Client = mockRunner
+			execLookPath = func(string) (string, error) {
+				return "netplan", nil
+			}
+			t.Cleanup(func() {
+				execLookPath = exec.LookPath
+				run.Client = oldRunner
+			})
+
+			svc := &serviceNetplan{
+				ethernetDropinIdentifier: netplanDropinIdentifier,
+				ethernetSuffix:           netplanEthernetSuffix,
+				ethernetNamePrefix:       tc.ethernetNamePrefix,
+				backend: &testBackend{
+					WriteDropinsCb: func([]*nic.Configuration, string) (bool, error) {
+						return false, nil
+					},
+					ReloadCb: networkdModule.Reload,
+				},
+				backendReload:    true,
+				forceNoOpBackend: true,
+				netplanConfigDir: filepath.Join(t.TempDir(), "netplan"),
+			}
+
+			if tc.writeFile {
+				dropinFPath := svc.ethernetDropinFile()
+				dropinDir := filepath.Dir(dropinFPath)
+				if err := os.MkdirAll(dropinDir, 0755); err != nil {
+					t.Fatalf("Failed to create test directory: %v", err)
+				}
+				key := svc.addPrefix("iface", false)
+				dropinFile := netplanDropin{
+					Network: netplanNetwork{
+						Version: netplanConfigVersion,
+						Ethernets: map[string]netplanEthernet{
+							key: {
+								Match:  netplanMatch{Name: "iface"},
+								DHCPv4: &trueVal,
+							},
+						},
+					},
+				}
+				if _, err := svc.write(dropinFile, dropinFPath); err != nil {
+					t.Fatalf("Failed to write test data: %v", err)
+				}
+				if tc.readOnlyDir {
+					if err := os.Chmod(dropinDir, 0555); err != nil {
+						t.Fatalf("Failed to chmod test directory: %v", err)
+					}
+					t.Cleanup(func() {
+						_ = os.Chmod(dropinDir, 0755)
+					})
+				}
+			}
+
+			nics := tc.nics
+			if nics == nil {
+				nics = []*nic.Configuration{
+					{
+						Index: 0,
+						Interface: &ethernet.Interface{
+							NameOp: func() string { return "iface" },
+						},
+					},
+				}
+			}
+			opts := service.NewOptions(nil, nics)
+
+			err := svc.Setup(ctx, opts, false)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Setup() error = %v, wantErr %t", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+
+			if tc.wantDropin != nil {
+				content, err := os.ReadFile(svc.ethernetDropinFile())
+				if err != nil {
+					t.Fatalf("Failed to read netplan dropin file: %v", err)
+				}
+				var got netplanDropin
+				if err := yaml.Unmarshal(content, &got); err != nil {
+					t.Fatalf("Failed to unmarshal netplan dropin file: %v", err)
+				}
+				if diff := cmp.Diff(tc.wantDropin, &got); diff != "" {
+					t.Errorf("Setup() returned diff (-want +got):\n%s", diff)
+				}
+			} else if file.Exists(svc.ethernetDropinFile(), file.TypeFile) {
+				t.Errorf("Ethernet dropin file %q exists, want it to not exist", svc.ethernetDropinFile())
+			}
+
+			if tc.noReload != (len(mockRunner.seenOpts) == 0) {
+				t.Errorf("Setup() called commands %d times, want noReload=%t\nCommands: %+v", len(mockRunner.seenOpts), tc.noReload, mockRunner.seenOpts)
+			}
+		})
+	}
+}
+
 func TestRollback(t *testing.T) {
 	tests := []struct {
-		name     string
-		opts     *service.Options
-		backend  *testBackend
-		runner   *runMock
-		data     string
-		vlanData string
-		wantErr  bool
+		name               string
+		opts               *service.Options
+		backend            *testBackend
+		runner             *runMock
+		data               string
+		vlanData           string
+		ethernetNamePrefix string
+		wantPrefix         string
+		wantErr            bool
 	}{
 		{
 			name: "fail-rollback-backend-dropins",
@@ -682,7 +877,8 @@ func TestRollback(t *testing.T) {
 					return nil
 				},
 			},
-			wantErr: true,
+			wantPrefix: backendDropinPrefix,
+			wantErr:    true,
 		},
 		{
 			name: "fail-rollback-dropins",
@@ -701,7 +897,8 @@ func TestRollback(t *testing.T) {
 					return nil
 				},
 			},
-			wantErr: false,
+			wantPrefix: backendDropinPrefix,
+			wantErr:    false,
 		},
 		{
 			name: "success",
@@ -720,9 +917,33 @@ func TestRollback(t *testing.T) {
 					return nil
 				},
 			},
-			data:     "test-data",
-			vlanData: "test-vlan-data",
-			wantErr:  false,
+			data:       "test-data",
+			vlanData:   "test-vlan-data",
+			wantPrefix: backendDropinPrefix,
+			wantErr:    false,
+		},
+		{
+			name: "success-with-prefix",
+			opts: service.NewOptions(nil, []*nic.Configuration{
+				&nic.Configuration{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "iface" },
+					},
+				},
+			}),
+			backend: &testBackend{
+				RollbackDropinsCb: func([]*nic.Configuration, string, bool) error {
+					return nil
+				},
+				ReloadCb: func(context.Context, int) error {
+					return nil
+				},
+			},
+			data:               "test-data",
+			vlanData:           "test-vlan-data",
+			ethernetNamePrefix: debian12EthernetNamePrefix,
+			wantPrefix:         backendDropinPrefix + "-" + debian12EthernetNamePrefix,
+			wantErr:            false,
 		},
 	}
 
@@ -736,6 +957,12 @@ func TestRollback(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			var gotPrefix string
+			origRollbackCb := tc.backend.RollbackDropinsCb
+			tc.backend.RollbackDropinsCb = func(nics []*nic.Configuration, prefix string, active bool) error {
+				gotPrefix = prefix
+				return origRollbackCb(nics, prefix, active)
+			}
 
 			oldBackends := backends
 			backends = []netplanBackend{tc.backend}
@@ -756,6 +983,7 @@ func TestRollback(t *testing.T) {
 				backend:                  tc.backend,
 				ethernetDropinIdentifier: netplanDropinIdentifier,
 				ethernetSuffix:           netplanEthernetSuffix,
+				ethernetNamePrefix:       tc.ethernetNamePrefix,
 				forceNoOpBackend:         true,
 				backendReload:            true,
 				netplanConfigDir:         filepath.Join(t.TempDir(), "netplan"),
@@ -793,6 +1021,9 @@ func TestRollback(t *testing.T) {
 			_, err := svc.Rollback(ctx, tc.opts, false)
 			if (err == nil) == tc.wantErr {
 				t.Errorf("Setup() = %v, want error? %v", err, tc.wantErr)
+			}
+			if gotPrefix != tc.wantPrefix {
+				t.Errorf("Rollback() passed dropinPrefix = %q, want %q", gotPrefix, tc.wantPrefix)
 			}
 		})
 	}
@@ -890,10 +1121,38 @@ func TestSetOSFlags(t *testing.T) {
 			wantOSInfoReader:     osinfo.Read,
 		},
 		{
+			name: "debian-11",
+			os: osinfo.OSInfo{
+				OS:      "debian",
+				Version: osinfo.Ver{Major: 11},
+			},
+			wantPriority:           defaultPriority,
+			wantNetplanConfigDir:   defaultNetplanConfigDir,
+			wantEthernetSuffix:     netplanEthernetSuffix,
+			wantBackendReload:      true,
+			wantEthernetNamePrefix: "",
+			wantConfigPath:         defaultConfigPath,
+			wantOSInfoReader:       osinfo.Read,
+		},
+		{
 			name: "debian-12",
 			os: osinfo.OSInfo{
 				OS:      "debian",
 				Version: osinfo.Ver{Major: 12},
+			},
+			wantPriority:           defaultPriority,
+			wantNetplanConfigDir:   defaultNetplanConfigDir,
+			wantEthernetSuffix:     netplanEthernetSuffix,
+			wantBackendReload:      true,
+			wantEthernetNamePrefix: debian12EthernetNamePrefix,
+			wantConfigPath:         defaultConfigPath,
+			wantOSInfoReader:       osinfo.Read,
+		},
+		{
+			name: "debian-13",
+			os: osinfo.OSInfo{
+				OS:      "debian",
+				Version: osinfo.Ver{Major: 13},
 			},
 			wantPriority:           defaultPriority,
 			wantNetplanConfigDir:   defaultNetplanConfigDir,
@@ -981,6 +1240,14 @@ func TestRestoreDefaultConfig(t *testing.T) {
 			},
 		},
 		{
+			name:       "debian-11-not-restored",
+			restoreCfg: true,
+			osInfo: osinfo.OSInfo{
+				OS:      "debian",
+				Version: osinfo.Ver{Major: 11},
+			},
+		},
+		{
 			name:       "file-exists",
 			restoreCfg: true,
 			osInfo: osinfo.OSInfo{
@@ -997,6 +1264,17 @@ func TestRestoreDefaultConfig(t *testing.T) {
 			osInfo: osinfo.OSInfo{
 				OS:      "debian",
 				Version: osinfo.Ver{Major: 12},
+			},
+			createFile:      false,
+			wantFileCreated: true,
+			wantFileContent: defaultConfig,
+		},
+		{
+			name:       "debian-13-file-does-not-exist-expect-restore",
+			restoreCfg: true,
+			osInfo: osinfo.OSInfo{
+				OS:      "debian",
+				Version: osinfo.Ver{Major: 13},
 			},
 			createFile:      false,
 			wantFileCreated: true,
