@@ -16,9 +16,13 @@ package metadata
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"regexp"
+	"strconv"
 
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/plugin/config"
+	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ssh"
 )
 
@@ -599,6 +603,47 @@ func (desc *Descriptor) HasServiceAccount() bool {
 	return len(desc.Instance().internal.ServiceAccounts) > 0
 }
 
+const (
+	// DefaultIsCorePluginEnabled is the default value for the core plugin
+	// enabled configuration knob.
+	DefaultIsCorePluginEnabled = true
+)
+
+var (
+	// CorePluginEnabledConfigFile is the path to the file that contains the
+	// core plugin enabled or not configuration.
+	CorePluginEnabledConfigFile = defaultCorePluginEnabledConfigFile
+	corePluginEnabledExp        = regexp.MustCompile(`(?m)^\s*enabled\s*=\s*(\w+)\s*$`)
+)
+
+// IsCorePluginEnabled returns whether the core plugin is enabled or not. In
+// case of any error, it defaults to [DefaultIsCorePluginEnabled].
+func IsCorePluginEnabled() bool {
+	data, err := os.ReadFile(CorePluginEnabledConfigFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			galog.Debugf("Config file [%q] doesn't exist, defaulting IsCorePluginEnabled to %t", CorePluginEnabledConfigFile, DefaultIsCorePluginEnabled)
+		} else {
+			galog.Warnf("Failed to read config file [%q]: %v, defaulting IsCorePluginEnabled to %t", CorePluginEnabledConfigFile, err, DefaultIsCorePluginEnabled)
+		}
+		return DefaultIsCorePluginEnabled
+	}
+
+	matches := corePluginEnabledExp.FindStringSubmatch(string(data))
+	if len(matches) != 2 {
+		galog.Warnf("Parsed content [%q] from config file [%q] doesn't match expected format, defaulting IsCorePluginEnabled to %t", string(data), CorePluginEnabledConfigFile, DefaultIsCorePluginEnabled)
+		return DefaultIsCorePluginEnabled
+	}
+
+	enableCorePlugin, err := strconv.ParseBool(matches[1])
+	if err != nil {
+		galog.Warnf("Invalid boolean [%q] in config file [%q]: %v, defaulting IsCorePluginEnabled to %t", matches[1], CorePluginEnabledConfigFile, err, DefaultIsCorePluginEnabled)
+		return DefaultIsCorePluginEnabled
+	}
+
+	return enableCorePlugin
+}
+
 // HasCorePluginEnabled returns whether the Core Plugin is enabled or not based
 // on MDS descriptor. If neither instance or project level metadata is set, it
 // defaults to *true*.
@@ -610,5 +655,5 @@ func (desc *Descriptor) HasCorePluginEnabled() bool {
 		return *desc.Project().Attributes().EnableCorePlugin()
 	}
 
-	return config.IsCorePluginEnabled()
+	return IsCorePluginEnabled()
 }

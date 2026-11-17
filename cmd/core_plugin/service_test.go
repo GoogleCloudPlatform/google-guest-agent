@@ -16,76 +16,173 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
-	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 )
 
-func TestHandleVMEventError(t *testing.T) {
-	ctx := context.Background()
+type fakeRunner struct {
+	err     error
+	onRun   func(context.Context)
+	called  bool
+	modules []*manager.Module
+}
+
+func (f *fakeRunner) Run(ctx context.Context) error {
+	f.called = true
+	if f.onRun != nil {
+		f.onRun(ctx)
+	}
+	return f.err
+}
+
+func (f *fakeRunner) ListModules() []*manager.Module {
+	return f.modules
+}
+
+func TestSetup(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly: %v", err)
 	}
 
-	req := `{"Command":2}`
-	if err := handleVMEvent(ctx, []byte(req)); err == nil {
-		t.Errorf("handleVMEvent(ctx, %s) = nil, want error", req)
+	origEarly := earlyStage
+	origLate := lateStage
+	t.Cleanup(func() {
+		earlyStage = origEarly
+		lateStage = origLate
+		events.FetchManager().RemoveWatcher(context.Background(), metadata.NewWatcher())
+	})
+
+	tests := []struct {
+		name           string
+		earlyErr       error
+		cancelInEarly  bool
+		lateErr        error
+		wantErr        bool
+		wantErrIs      error
+		wantLateCalled bool
+	}{
+		{
+			name:           "early_stage_error",
+			earlyErr:       errors.New("early error"),
+			wantErr:        true,
+			wantLateCalled: false,
+		},
+		{
+			name:           "context_canceled_after_early_stage",
+			cancelInEarly:  true,
+			wantErr:        true,
+			wantErrIs:      context.Canceled,
+			wantLateCalled: false,
+		},
+		{
+			name:           "late_stage_error",
+			lateErr:        errors.New("late error"),
+			wantErr:        true,
+			wantLateCalled: true,
+		},
+		{
+			name:           "success_after_prior_failures",
+			wantErr:        false,
+			wantLateCalled: true,
+		},
+	}
+
+	// Intentionally avoid per-subtest RemoveWatcher cleanup so the final success
+	// subtest verifies that partial failures or context cancellation during
+	// earlyStage or lateStage clean up the registered metadata watcher rather
+	// than leaking it.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			earlyRunner := &fakeRunner{err: tc.earlyErr}
+			if tc.cancelInEarly {
+				earlyRunner.onRun = func(context.Context) { cancel() }
+			}
+			lateRunner := &fakeRunner{err: tc.lateErr}
+			earlyStage = earlyRunner
+			lateStage = lateRunner
+
+			err := setup(ctx)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("setup(ctx) [earlyErr=%v, cancelInEarly=%t, lateErr=%v] = %v, want error %t", tc.earlyErr, tc.cancelInEarly, tc.lateErr, err, tc.wantErr)
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Errorf("setup(ctx) [case=%s] error = %v, want errors.Is(%v)", tc.name, err, tc.wantErrIs)
+			}
+			if lateRunner.called != tc.wantLateCalled {
+				t.Errorf("setup(ctx) [case=%s] lateStage.Run called = %t, want %t", tc.name, lateRunner.called, tc.wantLateCalled)
+			}
+		})
 	}
 }
 
-func TestApply(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	pluginServer = &PluginServer{cancel: cancel}
-	t.Cleanup(func() {
-		pluginServer = nil
-		cancel()
-	})
-
+func TestSetupDuplicateWatcherError(t *testing.T) {
 	if err := cfg.Load(nil); err != nil {
 		t.Fatalf("cfg.Load(nil) failed unexpectedly: %v", err)
 	}
 
+	ctx := t.Context()
+	if err := events.FetchManager().AddWatcher(ctx, metadata.NewWatcher()); err != nil {
+		t.Fatalf("AddWatcher(ctx, metadata.NewWatcher()) failed unexpectedly: %v", err)
+	}
+	t.Cleanup(func() {
+		events.FetchManager().RemoveWatcher(context.Background(), metadata.NewWatcher())
+	})
+
+	if err := setup(ctx); err == nil {
+		t.Errorf("setup(ctx) = nil, want error when metadata watcher is already added")
+	}
+}
+
+func TestDisplayModules(t *testing.T) {
+	origEarly := earlyStage
+	origLate := lateStage
+	t.Cleanup(func() {
+		earlyStage = origEarly
+		lateStage = origLate
+	})
+
 	tests := []struct {
-		desc          string
-		req           string
-		wantErr       bool
-		cancelContext bool
+		name         string
+		earlyModules []*manager.Module
+		lateModules  []*manager.Module
 	}{
 		{
-			desc:    "invalid_request",
-			req:     `{"Command":2}`,
-			wantErr: true,
+			name:         "both_stages_populated",
+			earlyModules: []*manager.Module{{ID: "test-early"}},
+			lateModules:  []*manager.Module{{ID: "test-late"}},
 		},
 		{
-			desc:    "invalid_command",
-			req:     `{"Command":"unknown"}`,
-			wantErr: true,
+			name:        "empty_early_stage",
+			lateModules: []*manager.Module{{ID: "test-late"}},
 		},
 		{
-			desc: "valid_request_nothandled",
-			req:  `{"Command":"VmEvent", "Event":"startup"}`,
+			name:         "empty_late_stage",
+			earlyModules: []*manager.Module{{ID: "test-early"}},
 		},
 		{
-			desc:          "valid_request",
-			req:           `{"Command":"VmEvent", "Event":"shutdown"}`,
-			cancelContext: true,
+			name: "both_stages_empty",
 		},
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.desc, func(t *testing.T) {
-			req := &pb.ApplyRequest{
-				ServiceConfig: &pb.ApplyRequest_StringConfig{StringConfig: tc.req},
-			}
-			_, err := pluginServer.Apply(ctx, req)
-			if (err != nil) != tc.wantErr {
-				t.Errorf("Apply(ctx, %s) = error %v, want error %t", tc.req, err, tc.wantErr)
-			}
+		t.Run(tc.name, func(t *testing.T) {
+			earlyStage = &fakeRunner{modules: tc.earlyModules}
+			lateStage = &fakeRunner{modules: tc.lateModules}
 
-			ctxClosed := (ctx.Err() != nil)
-			if tc.cancelContext != ctxClosed {
-				t.Errorf("Apply(ctx, %s) = context closed %t, want %t", tc.req, ctxClosed, tc.cancelContext)
+			code, err := displayModules()
+			if err != nil {
+				t.Errorf("displayModules() [case=%s] returned unexpected error: %v", tc.name, err)
+			}
+			if code != 0 {
+				t.Errorf("displayModules() [case=%s] = %d, want 0", tc.name, code)
 			}
 		})
 	}

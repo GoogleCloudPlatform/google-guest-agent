@@ -1,44 +1,20 @@
 PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
-	cmd/guest_net_telemetry/proto/network_stats_report.pb.go \
 	internal/acp/proto/agent_controlplane.pb.go \
-	cmd/mwlid_extension/proto/mwlid/workload_identity.pb.go \
 	pkg/proto/plugin_comm.pb.go
 
 GO_BINARIES = \
 	cmd/core_plugin/core_plugin \
-	cmd/ggactl/ggactl_plugin \
 	cmd/google_authorized_keys/google_authorized_keys \
-	cmd/google_guest_agent/google_guest_agent \
-	cmd/google_guest_compat_manager/google_guest_compat_manager \
 	cmd/gce_metadata_script_runner/gce_metadata_script_runner \
 	cmd/metadata_script_runner_compat/gce_compat_metadata_script_runner \
-	cmd/google_authorized_keys_compat/google_authorized_keys_compat \
-	cmd/guest_telemetry_extension/guest_telemetry \
-	cmd/mwlid_extension/mwlid_extension
-
-LINUX_BINPB_FILES = \
-  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.binpb \
-	build/configs/usr/lib/google/guest_agent/GuestNetTelemetry/manifest.binpb \
-	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.binpb \
-	build/configs/usr/lib/google/guest_agent/ManagedWorkloadIdentityExtension/manifest.binpb
-
-
-WINDOWS_BINPB_FILES = \
-  build/configs/usr/lib/google/guest_agent/GuestAgentCorePlugin/manifest.windows.binpb \
-	build/configs/usr/lib/google/guest_agent/GuestTelemetryExtension/manifest.windows.binpb \
-	build/configs/usr/lib/google/guest_agent/ManagedWorkloadIdentityExtension/manifest.windows.binpb
+	cmd/google_authorized_keys_compat/google_authorized_keys_compat
 
 GO_TPM_TOOLS_URL = https://github.com/google/go-tpm-tools
-MWLID_PROTO_URL = https://github.com/GoogleCloudPlatform/managed-workload-identity
 
 GOOS ?= "linux"
 VERSION ?= "dev"
-
-ifeq ($(findstring linux,$(GOOS)),linux)
-GO_BINARIES += cmd/guest_net_telemetry/guest_net_telemetry
-endif
 
 # Create a temporary directory if ARTIFACTS is not provided.
 ifeq ($(ARTIFACTS),)
@@ -54,28 +30,12 @@ fetch-go-tpm-tools:
 	$(Q)git -C proto_deps/go-tpm-tools pull 2> /dev/null || \
 		git clone $(GO_TPM_TOOLS_URL) proto_deps/go-tpm-tools
 
-fetch-mwlid-proto:
-	$(Q)echo "Making proto dependencies dir..."
-	$(Q)mkdir -p proto_deps
-	$(Q)echo "Cloning/updating mwlid-proto..."
-	$(Q)git -C proto_deps/mwlid pull 2> /dev/null || \
-		git clone $(MWLID_PROTO_URL) proto_deps/mwlid
-	$(Q)mkdir -p cmd/mwlid_extension/proto/mwlid
-	$(Q)cp proto_deps/mwlid/proto/v1/workload-identity.proto cmd/mwlid_extension/proto/mwlid/workload_identity.proto
-
 SOURCE = $(subst .pb.go,.proto,$(@))
-FILENAME = $(notdir $(SOURCE))
 
-# The conditional -M flag.
-# This variable will be set to a value only for workload_identity.proto as this
-# proto is not managed within guest-agent repo and needs to be compiled in
-# separate directory. This is no-op for all other protos.
-M_FLAG = $(if $(filter workload_identity.proto,$(FILENAME)),--go_opt=M$(FILENAME)=/mwlid --go-grpc_opt=M$(FILENAME)=/mwlid,)
-
-$(PBGO_FILES): fetch-go-tpm-tools fetch-mwlid-proto
+$(PBGO_FILES): fetch-go-tpm-tools
 	$(Q)echo "[GEN] $(SOURCE)"
 	$(Q)protoc --go_out=$(dir $(@)) --go-grpc_out=$(dir $(@)) --proto_path=proto_deps \
-		--experimental_allow_proto3_optional --proto_path=$(dir $(@)) $(M_FLAG) $(SOURCE)
+		--experimental_allow_proto3_optional --proto_path=$(dir $(@)) $(SOURCE)
 
 print-go-env:
 	$(Q)echo "golang build environment:"
@@ -90,17 +50,9 @@ $(GO_BINARIES): print-go-env
 
 gen-pbgo: $(PBGO_FILES)
 
-gen-binpb: $(LINUX_BINPB_FILES) $(WINDOWS_BINPB_FILES)
-
-TXTTOBIN = $(subst .binpb,.txtpb,$(@))
-
-$(LINUX_BINPB_FILES) $(WINDOWS_BINPB_FILES):
-	$(Q)echo "[GEN] $(@)"
-	$(Q)cat $(TXTTOBIN) | protoc --encode agent_controlplane.ConfigurePluginStates.ConfigurePlugin internal/acp/proto/agent_controlplane.proto > $(@)
-
 build-go-binaries: $(GO_BINARIES)
 
-go-unit-tests: $(PBGO_FILES) $(BINPB_FILES)
+go-unit-tests: $(PBGO_FILES)
 	$(Q)echo "Running go unit tests..."
 	$(Q)$(eval DEST := $(ARTIFACTS_DIR))
 	$(Q)go test -v -coverprofile=$(DEST)/coverage.out ./... | tee -a $(DEST)/go-test.log
@@ -109,7 +61,7 @@ go-unit-tests: $(PBGO_FILES) $(BINPB_FILES)
 
 clean-pbgo:
 	$(Q)echo "Cleaning up all generated pb.go and _grpc.pb.go files..."
-	$(Q)find . -type f \( -name "*.pb.go" -o -name "*_grpc.pb.go" \) -not -path "./vendor/*" -not -path "./cmd/guest_telemetry_extension/*" \
+	$(Q)find . -type f \( -name "*.pb.go" -o -name "*_grpc.pb.go" \) -not -path "./vendor/*" \
 		-exec echo "[CLEAN] {}" \; \
 		-delete
 	$(Q)rm -Rf proto_deps
@@ -117,10 +69,6 @@ clean-pbgo:
 clean-go-binaries:
 	$(Q)echo "Cleaning up go binaries..."
 	$(Q)rm -f $(GO_BINARIES)
-
-clean-binpb:
-	$(Q)echo "Cleaning up binpb files..."
-	$(Q)rm -f $(LINUX_BINPB_FILES) $(WINDOWS_BINPB_FILES)
 
 # go-lint runs golint on all packages but ignores proto_deps as it contains
 # generated code and third party dependencies.

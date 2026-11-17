@@ -16,4 +16,4 @@ REM limitations under the License.
 REM Run shutdown scripts that should happen as soon as the instance
 REM begins to power down
 
-"C:\Program Files\Google\Compute Engine\agent\ggactl.exe" "guestagent" "vmevent" "shutdown"
+"C:\Program Files\Google\Compute Engine\agent\GCEMetadataScriptRunner.exe" "shutdown"

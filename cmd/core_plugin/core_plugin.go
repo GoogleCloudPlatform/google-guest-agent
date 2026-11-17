@@ -27,10 +27,11 @@ import (
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/manager"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/early"
-	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/core_plugin/stages/late"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/daemon"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/logger"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/service"
 )
 
 var (
@@ -49,14 +50,8 @@ var (
 	}
 	// version is the version of the binary.
 	version = "unknown"
-	// protocol is the protocol to use tcp/uds.
-	protocol string
-	// address is the address to start server listening on.
-	address string
 	// listModules is a flag that forces the plugin to list the modules and exit.
 	listModules bool
-	// errorLogFile is the path to the error log file.
-	errorLogFile string
 	// loggerInitialized is a flag that indicates if the logger has been
 	// initialized. This is used to make sure we don't log anything before the
 	// logger is initialized.
@@ -87,26 +82,21 @@ func setupFlags() {
 		}
 	}
 
-	// Log flags. When running in a plugin context these flags will be propagated
-	// by the guest agent's plugin manager.
+	// Log flags.
 	flag.StringVar(&logOpts.LogFile, "logfile", cfg.Retrieve().Core.LogFile, "path to the log file")
 	flag.BoolVar(&logOpts.LogToStderr, "logtostderr", false, "write logs to stderr")
 	flag.BoolVar(&logOpts.LogToCloudLogging, "logtocloud", enableCloudLogging, "write logs to cloud logging")
 	flag.IntVar(&logOpts.Level, "loglevel", cfg.Retrieve().Core.LogLevel, "log level: "+galog.ValidLevels())
 	flag.IntVar(&logOpts.Verbosity, "logverbosity", cfg.Retrieve().Core.LogVerbosity, "log verbosity")
-	flag.StringVar(&protocol, "protocol", "", "protocol to use uds/tcp")
-	flag.StringVar(&address, "address", "", "address to start server listening on")
 	flag.BoolVar(&listModules, "listmodules", false, "list available modules and exit")
-	flag.StringVar(&errorLogFile, "errorlogfile", "", "path to the fatal error log file")
-
-	// Ident is propagated by the guest agent's plugin manager so all the logs can
-	// be consolidated in the same syslog/event log bucket.
 	flag.StringVar(&logOpts.Ident, "ident", logOpts.Ident, "ident used to record local system log entries")
 
 	flag.Parse()
 }
 
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Loads the default config definitions and merges them with the user defined
 	// ones.
 	if err := cfg.Load(nil); err != nil {
@@ -114,7 +104,7 @@ func main() {
 	}
 	// Set the version of the binary as soon as config is loaded for any other
 	// modules to use. Setting value explicitly after cfg load makes sure version
-	// is as expected and its not coming from instance config or any other files.
+	// is as expected and it's not coming from instance config or any other files.
 	cfg.Retrieve().Core.Version = version
 
 	// Setup flag pointers and parse the provided values. setupFlags() depends on
@@ -124,7 +114,7 @@ func main() {
 
 	// Initialize the logger.
 	logOpts.ProgramVersion = version
-	if err := logger.Init(context.Background(), logOpts); err != nil {
+	if err := logger.Init(ctx, logOpts); err != nil {
 		logAndExit(fmt.Sprintf("Failed to initialize logger: %v", err))
 	}
 	loggerInitialized.Store(true)
@@ -138,12 +128,23 @@ func main() {
 		os.Exit(exitCode)
 	}
 
-	// Start the plugin server, the plugin actual entry point is implemented on
-	// behalf of the Start() operation. The plugin is not considered started until
-	// a "start" rpc call is issued, the application "main" context is defined by
-	// plugin's Start() operation.
-	if err := initPluginServer(); err != nil {
-		logAndExit(fmt.Sprintf("Failed to start plugin server: %v", err))
+	if err := service.Init(ctx, func() {
+		galog.Info("Core Plugin Leaving (canceling context)...")
+		galog.Shutdown(galogShutdownTimeout)
+		cancel()
+	}, daemon.GuestAgent); err != nil {
+		logAndExit(fmt.Sprintf("Failed to initialize service manager: %v", err))
+	}
+
+	if err := setup(ctx); err != nil {
+		logAndExit(fmt.Sprintf("Failed to setup core plugin: %v", err))
+	}
+
+	// This kind of runs for a life-time of process. It returns when all watchers
+	// are done or context is closed. MDS watcher is never removed and keeps the
+	// runner alive for the process's life-time.
+	if err := events.FetchManager().Run(ctx); err != nil {
+		logAndExit(fmt.Sprintf("Failed to run event manager: %v", err))
 	}
 }
 
@@ -162,8 +163,8 @@ Late stage modules:
 		EarlyModules []*manager.Module
 		LateModules  []*manager.Module
 	}{
-		early.Retrieve().ListModules(),
-		late.Retrieve().ListModules(),
+		earlyStage.ListModules(),
+		lateStage.ListModules(),
 	}
 
 	t, err := template.New("").Parse(tmpl)
@@ -181,24 +182,9 @@ Late stage modules:
 	return 0, nil
 }
 
-// logAndExit logs the message and exits the core-plugin. This is a helper
-// function which also writes the message to the error log file which is
-// captured by the guest agent and sent to the ACS. This is not using galog as
-// we want to capture only fatal errors and not every log message here.
-// Also, it doesn't support file rotation yet which mean file will grow
-// indefinitely. Galog file logger will be used only if user has enabled it.
+// logAndExit logs the message and exits the core-plugin.
 func logAndExit(msg string) {
-	var err error
-	if errorLogFile != "" {
-		// Ignore the error if logger is not initialized. As we are exiting anyways
-		// and there's nothing we can do about the error.
-		err = os.WriteFile(errorLogFile, []byte(msg), 0644)
-	}
-
 	if loggerInitialized.Load() {
-		if err != nil {
-			galog.Errorf("Failed to write error log file %q: %v", errorLogFile, err)
-		}
 		galog.Fatal(msg)
 	}
 
