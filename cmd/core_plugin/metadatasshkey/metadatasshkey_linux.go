@@ -82,7 +82,6 @@ func defaultDeprovisionUnusedUsers(ctx context.Context, config *cfg.Sections, ac
 
 		if err := updateSSHKeys(ctx, guserAccount, nil); err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove user %s's ssh keys: %w", guser, err))
-			continue
 		}
 		if err := accounts.RemoveUserFromGroup(ctx, guserAccount, supplementalGroups[googleSudoersGroup]); err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove user %s from %s: %w", guser, googleSudoersGroup, err))
@@ -92,10 +91,30 @@ func defaultDeprovisionUnusedUsers(ctx context.Context, config *cfg.Sections, ac
 	return errs
 }
 
+const googleComment = "# Added by Google"
+
+func parseUserKeys(contents []byte, gComment string) []string {
+	var isGoogle bool
+	var userKeys []string
+	for _, key := range strings.Split(string(contents), "\n") {
+		if key == "" {
+			continue
+		}
+		if isGoogle {
+			isGoogle = false
+			continue
+		}
+		if key == gComment {
+			isGoogle = true
+			continue
+		}
+		userKeys = append(userKeys, key)
+	}
+	return userKeys
+}
+
 // write SSH keys to the user's $HOME/.ssh/authorized_keys file
 func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) error {
-	gComment := "# Added by Google"
-
 	if user.HomeDir == "" {
 		return fmt.Errorf("user %s has no homedir set", user.Username)
 	}
@@ -126,29 +145,13 @@ func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) erro
 		return err
 	}
 
-	var isGoogle bool
-	var userKeys []string
-	for _, key := range strings.Split(string(authorizedKeysContents), "\n") {
-		if key == "" {
-			continue
-		}
-		if isGoogle {
-			isGoogle = false
-			continue
-		}
-		if key == gComment {
-			isGoogle = true
-			continue
-		}
-		userKeys = append(userKeys, key)
-	}
-
+	userKeys := parseUserKeys(authorizedKeysContents, googleComment)
 	authorizedKeysOutput := strings.Join(userKeys, "\n")
 	if len(userKeys) > 0 {
 		authorizedKeysOutput += "\n"
 	}
 	for _, k := range keys {
-		authorizedKeysOutput += fmt.Sprintf("%s\n%s\n", gComment, k)
+		authorizedKeysOutput += fmt.Sprintf("%s\n%s\n", googleComment, k)
 	}
 
 	writeOpts := file.Options{
@@ -175,6 +178,9 @@ func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) erro
 		return fmt.Errorf("failed to add user %s to %s: %w", user.Username, googleSudoersGroup, err)
 	}
 
+	if err := selinuxRestoreCon(ctx, sshPath); err != nil {
+		return err
+	}
 	return selinuxRestoreCon(ctx, authorizedKeysPath)
 }
 
