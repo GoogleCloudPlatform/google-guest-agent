@@ -277,6 +277,17 @@ func (m *Manager) RemoveWatcher(ctx context.Context, watcher Watcher) {
 	m.watchersMutex.Lock()
 	_, found := m.watchersMap[id]
 	delete(m.watchersMap, id)
+	if found && !m.running.Load() {
+		var keep []*WatcherEventType
+		for _, curr := range m.watcherEvents {
+			if curr.watcher.ID() != id {
+				keep = append(keep, curr)
+			}
+		}
+		m.watcherEvents = keep
+		m.watchersMutex.Unlock()
+		return
+	}
 	m.watchersMutex.Unlock()
 
 	if !found {

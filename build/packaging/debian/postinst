@@ -2,8 +2,15 @@
 
 if [ "$1" = "configure" ]; then
   if [ ! -f /etc/default/instance_configs.cfg ]; then
-      cp -a "/usr/share/${DPKG_MAINTSCRIPT_PACKAGE}/instance_configs.cfg" /etc/default/
+    cp -a "/usr/share/${DPKG_MAINTSCRIPT_PACKAGE}/instance_configs.cfg" /etc/default/
   fi
-  systemctl enable 'google-guest-agent.service' > /dev/null || true
-  systemctl restart 'google-guest-agent.service' > /dev/null || true
+  systemctl enable 'google-guest-agent.service' > /dev/null 2>&1 || true
+  systemctl enable 'google-startup-scripts.service' > /dev/null 2>&1 || true
+  systemctl enable 'google-shutdown-scripts.service' > /dev/null 2>&1 || true
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload > /dev/null 2>&1 || true
+    systemctl restart 'google-guest-agent.service' > /dev/null 2>&1 || true
+  fi
 fi
+
+#DEBHELPER#

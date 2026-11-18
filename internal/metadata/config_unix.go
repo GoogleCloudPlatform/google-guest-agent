@@ -12,10 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//go:build windows
+//go:build unix
 
-package config
+package metadata
 
 // defaultCorePluginEnabledConfigFile is the default path to the file that
 // contains the core plugin enabled or not configuration.
-const defaultCorePluginEnabledConfigFile = `C:\ProgramData\Google\Compute Engine\google-guest-agent\core-plugin-enabled`
+const defaultCorePluginEnabledConfigFile = "/etc/google-guest-agent/core-plugin-enabled"

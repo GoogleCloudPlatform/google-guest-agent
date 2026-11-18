@@ -12,5 +12,29 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-Stop-Service GCEAgent -Verbose
-& sc.exe delete GCEAgent
+function Remove-ServiceSafely {
+    param (
+        [string]$ServiceName
+    )
+    $service = Get-Service $ServiceName -ErrorAction SilentlyContinue
+    if ($service) {
+        if ($service.Status -ne 'Stopped') {
+            try {
+                Stop-Service $ServiceName -Force -ErrorAction Stop
+            } catch {
+                Write-Warning "Failed to stop service $ServiceName : $_"
+            }
+        }
+        try {
+            $output = & sc.exe delete $ServiceName 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "sc.exe delete failed for $ServiceName : $output"
+            }
+        } catch {
+            Write-Warning "Failed to delete service $ServiceName : $_"
+        }
+    }
+}
+
+# Stop and delete GCEAgent.
+Remove-ServiceSafely -ServiceName 'GCEAgent'

@@ -4,7 +4,7 @@
 //  you may not use this file except in compliance with the License.
 //  You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 //  Unless required by applicable law or agreed to in writing, software
 //  distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,18 +12,10 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-//go:build unix
+//go:build windows
 
-package manager
+package metadata
 
-import (
-	"strings"
-)
-
-// isSameExecutablePath checks if the executable path is the same as the plugin
-// entry path. If the pathname has been unlinked/deleted, the /proc returned
-// executable path will contain the string '(deleted)' appended to the original
-// pathname.
-func (p *Plugin) isSameExecutablePath(executable string) bool {
-	return p.EntryPath == strings.TrimSuffix(executable, " (deleted)")
-}
+// defaultCorePluginEnabledConfigFile is the default path to the file that
+// contains the core plugin enabled or not configuration.
+const defaultCorePluginEnabledConfigFile = `C:\ProgramData\Google\Compute Engine\google-guest-agent\core-plugin-enabled`
