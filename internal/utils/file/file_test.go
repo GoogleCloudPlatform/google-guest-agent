@@ -18,6 +18,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -350,6 +351,299 @@ func TestSaferWriteFile(t *testing.T) {
 	// Windows will always return 0666 for all files.
 	if runtime.GOOS != "windows" && i.Mode().Perm() != 0644 {
 		t.Errorf("SaferWriteFile(%s) set incorrect permissions, os.Stat(%s) = %o, want %o", f, f, i.Mode().Perm(), 0o644)
+	}
+}
+
+func dirEntryNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("os.ReadDir(%q) = %v", dir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+type cancelOnSyncFile struct {
+	*os.File
+	cancel context.CancelFunc
+}
+
+func (f *cancelOnSyncFile) Sync() error {
+	f.cancel()
+	return f.File.Sync()
+}
+
+type faultTempFile struct {
+	*os.File
+	chmodErr   error
+	syncErr    error
+	closeErr   error
+	closeCalls int
+}
+
+func (f *faultTempFile) Chmod(mode os.FileMode) error {
+	if f.chmodErr != nil {
+		return f.chmodErr
+	}
+	return f.File.Chmod(mode)
+}
+
+func (f *faultTempFile) Sync() error {
+	if f.syncErr != nil {
+		return f.syncErr
+	}
+	return f.File.Sync()
+}
+
+func (f *faultTempFile) Close() error {
+	f.closeCalls++
+	err := f.File.Close()
+	if f.closeErr != nil {
+		return f.closeErr
+	}
+	return err
+}
+
+func readOnlyCreateTemp(dir, pattern string) (tempFile, error) {
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
+	ro, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return ro, nil
+}
+
+func TestSaferWriteFileWithOwner(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Chown is not supported on Windows")
+	}
+
+	f := filepath.Join(t.TempDir(), "file")
+	opts := Options{
+		Perm:  0600,
+		Owner: &GUID{UID: os.Getuid(), GID: os.Getgid()},
+	}
+	if err := SaferWriteFile(t.Context(), []byte("owned-data"), f, opts); err != nil {
+		t.Fatalf("SaferWriteFile(%q) = %v, want nil", f, err)
+	}
+
+	got, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) = %v", f, err)
+	}
+	if string(got) != "owned-data" {
+		t.Errorf("os.ReadFile(%q) = %q, want %q", f, got, "owned-data")
+	}
+}
+
+func TestSaferWriteFileMkdirError(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("file"), 0644); err != nil {
+		t.Fatalf("os.WriteFile(%q) = %v", blocker, err)
+	}
+
+	target := filepath.Join(blocker, "target")
+	if err := SaferWriteFile(t.Context(), []byte("data"), target, Options{Perm: 0600}); err == nil {
+		t.Fatalf("SaferWriteFile(%q) = nil, want mkdir error", target)
+	}
+}
+
+func TestSaferWriteFileCreateTempError(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "bad\x00name")
+	if err := SaferWriteFile(t.Context(), []byte("data"), target, Options{Perm: 0600}); err == nil {
+		t.Fatalf("SaferWriteFile(%q) = nil, want create temp error", target)
+	}
+
+	if gotNames := dirEntryNames(t, dir); len(gotNames) != 0 {
+		t.Errorf("SaferWriteFile(%q) left entries %v in %q, want empty", target, gotNames, dir)
+	}
+}
+
+func TestSaferWriteFileCanceledContext(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("existing"), 0644); err != nil {
+		t.Fatalf("os.WriteFile(%q) = %v", target, err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := SaferWriteFile(ctx, []byte("new-data"), target, Options{Perm: 0600})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SaferWriteFile(%q) = %v, want %v", target, err, context.Canceled)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) = %v", target, err)
+	}
+	if string(got) != "existing" {
+		t.Errorf("os.ReadFile(%q) = %q, want %q", target, got, "existing")
+	}
+
+	if diff := cmp.Diff([]string{"target"}, dirEntryNames(t, dir)); diff != "" {
+		t.Errorf("SaferWriteFile(%q) left entries in %q (-want +got):\n%s", target, dir, diff)
+	}
+}
+
+func TestSaferWriteFileCleansUpTempOnContextCancel(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("existing"), 0644); err != nil {
+		t.Fatalf("os.WriteFile(%q) = %v", target, err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	createTemp := func(d, pattern string) (tempFile, error) {
+		f, err := os.CreateTemp(d, pattern)
+		if err != nil {
+			return nil, err
+		}
+		return &cancelOnSyncFile{File: f, cancel: cancel}, nil
+	}
+
+	err := saferWriteFile(ctx, []byte("new-data"), target, Options{Perm: 0600}, createTemp)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("saferWriteFile(%q) = %v, want %v", target, err, context.Canceled)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) = %v", target, err)
+	}
+	if string(got) != "existing" {
+		t.Errorf("os.ReadFile(%q) = %q, want %q", target, got, "existing")
+	}
+
+	if diff := cmp.Diff([]string{"target"}, dirEntryNames(t, dir)); diff != "" {
+		t.Errorf("saferWriteFile(%q) left entries in %q (-want +got):\n%s", target, dir, diff)
+	}
+}
+
+func TestSaferWriteFileCleansUpTempOnWriteError(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+
+	err := saferWriteFile(t.Context(), []byte("data"), target, Options{Perm: 0600}, readOnlyCreateTemp)
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) || pathErr.Op != "write" {
+		t.Fatalf("saferWriteFile(%q) = %v, want *os.PathError with Op=\"write\"", target, err)
+	}
+
+	if gotNames := dirEntryNames(t, dir); len(gotNames) != 0 {
+		t.Errorf("saferWriteFile(%q) left entries %v in %q, want empty", target, gotNames, dir)
+	}
+}
+
+func TestSaferWriteFileCleansUpTempOnFileOpError(t *testing.T) {
+	errInjected := errors.New("injected file error")
+	tests := []struct {
+		name     string
+		chmodErr error
+		syncErr  error
+		closeErr error
+	}{
+		{name: "chmod_error", chmodErr: errInjected},
+		{name: "sync_error", syncErr: errInjected},
+		{name: "sync_and_close_error", syncErr: errInjected, closeErr: errInjected},
+		{name: "close_error", closeErr: errInjected},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "target")
+			if err := os.WriteFile(target, []byte("existing"), 0644); err != nil {
+				t.Fatalf("os.WriteFile(%q) = %v", target, err)
+			}
+
+			var fault *faultTempFile
+			createTemp := func(d, pattern string) (tempFile, error) {
+				f, err := os.CreateTemp(d, pattern)
+				if err != nil {
+					return nil, err
+				}
+				fault = &faultTempFile{
+					File:     f,
+					chmodErr: tc.chmodErr,
+					syncErr:  tc.syncErr,
+					closeErr: tc.closeErr,
+				}
+				return fault, nil
+			}
+
+			err := saferWriteFile(t.Context(), []byte("new-data"), target, Options{Perm: 0600}, createTemp)
+			if !errors.Is(err, errInjected) {
+				t.Fatalf("saferWriteFile(%q) = %v, want error wrapping %v", target, err, errInjected)
+			}
+			if fault == nil || fault.closeCalls != 1 {
+				gotCalls := 0
+				if fault != nil {
+					gotCalls = fault.closeCalls
+				}
+				t.Errorf("saferWriteFile(%q) closed temp file %d times, want 1", target, gotCalls)
+			}
+
+			got, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("os.ReadFile(%q) = %v", target, err)
+			}
+			if string(got) != "existing" {
+				t.Errorf("os.ReadFile(%q) = %q, want %q", target, got, "existing")
+			}
+
+			if diff := cmp.Diff([]string{"target"}, dirEntryNames(t, dir)); diff != "" {
+				t.Errorf("saferWriteFile(%q) left entries in %q (-want +got):\n%s", target, dir, diff)
+			}
+		})
+	}
+}
+
+func TestSaferWriteFileCleansUpTempOnRenameError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "target")
+	if err := os.Mkdir(blocker, 0755); err != nil {
+		t.Fatalf("os.Mkdir(%q) = %v", blocker, err)
+	}
+
+	err := SaferWriteFile(t.Context(), []byte("data"), blocker, Options{Perm: 0600})
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) {
+		t.Fatalf("SaferWriteFile(%q) = %v, want *os.LinkError", blocker, err)
+	}
+
+	if diff := cmp.Diff([]string{"target"}, dirEntryNames(t, dir)); diff != "" {
+		t.Errorf("SaferWriteFile(%q) left entries in %q (-want +got):\n%s", blocker, dir, diff)
+	}
+}
+
+func TestSaferWriteFileCleansUpTempOnChownError(t *testing.T) {
+	if runtime.GOOS != "windows" && os.Geteuid() == 0 {
+		t.Skip("skipping non-root chown failure test when running as root")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	opts := Options{Perm: 0600, Owner: &GUID{UID: 0, GID: 0}}
+	if err := SaferWriteFile(t.Context(), []byte("data"), target, opts); err == nil {
+		t.Fatalf("SaferWriteFile(%q, Owner={0,0}) = nil, want error", target)
+	}
+
+	if gotNames := dirEntryNames(t, dir); len(gotNames) != 0 {
+		t.Errorf("SaferWriteFile(%q) left entries %v in %q, want empty", target, gotNames, dir)
 	}
 }
 
