@@ -29,7 +29,6 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
-	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
 )
 
 var (
@@ -82,7 +81,6 @@ func defaultDeprovisionUnusedUsers(ctx context.Context, config *cfg.Sections, ac
 
 		if err := updateSSHKeys(ctx, guserAccount, nil); err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove user %s's ssh keys: %w", guser, err))
-			continue
 		}
 		if err := accounts.RemoveUserFromGroup(ctx, guserAccount, supplementalGroups[googleSudoersGroup]); err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove user %s from %s: %w", guser, googleSudoersGroup, err))
@@ -92,43 +90,12 @@ func defaultDeprovisionUnusedUsers(ctx context.Context, config *cfg.Sections, ac
 	return errs
 }
 
-// write SSH keys to the user's $HOME/.ssh/authorized_keys file
-func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) error {
-	gComment := "# Added by Google"
+const googleComment = "# Added by Google"
 
-	if user.HomeDir == "" {
-		return fmt.Errorf("user %s has no homedir set", user.Username)
-	}
-	if user.Shell == "/sbin/nologin" {
-		return nil
-	}
-
-	galog.V(2).Debugf("Updating keys for user %s to %v", user.Username, keys)
-
-	sshPath := filepath.Join(user.HomeDir, ".ssh")
-	if !file.Exists(sshPath, file.TypeDir) {
-		if err := os.Mkdir(sshPath, 0700); err != nil {
-			return err
-		}
-		if err := os.Chown(sshPath, user.UnixUID(), user.UnixGID()); err != nil {
-			return err
-		}
-	}
-	authorizedKeysPath := filepath.Join(sshPath, "authorized_keys")
-	// Remove empty file.
-	if len(keys) == 0 {
-		os.Remove(authorizedKeysPath)
-		return nil
-	}
-
-	authorizedKeysContents, err := os.ReadFile(authorizedKeysPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
+func parseUserKeys(contents []byte, gComment string) []string {
 	var isGoogle bool
 	var userKeys []string
-	for _, key := range strings.Split(string(authorizedKeysContents), "\n") {
+	for _, key := range strings.Split(string(contents), "\n") {
 		if key == "" {
 			continue
 		}
@@ -142,26 +109,24 @@ func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) erro
 		}
 		userKeys = append(userKeys, key)
 	}
+	return userKeys
+}
 
-	authorizedKeysOutput := strings.Join(userKeys, "\n")
-	if len(userKeys) > 0 {
-		authorizedKeysOutput += "\n"
+// updateSSHKeys writes SSH keys to the user's $HOME/.ssh/authorized_keys file.
+func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) error {
+	if user.HomeDir == "" {
+		return fmt.Errorf("user %s has no homedir set", user.Username)
 	}
-	for _, k := range keys {
-		authorizedKeysOutput += fmt.Sprintf("%s\n%s\n", gComment, k)
-	}
-
-	writeOpts := file.Options{
-		Perm: 0600,
-		Owner: &file.GUID{
-			UID: user.UnixUID(),
-			GID: user.UnixGID(),
-		},
+	if user.Shell == "/sbin/nologin" {
+		return nil
 	}
 
-	galog.V(2).Debugf("Writing authorized_keys file for user %s", user.Username)
-	if err := file.SaferWriteFile(ctx, []byte(authorizedKeysOutput), authorizedKeysPath, writeOpts); err != nil {
-		return fmt.Errorf("failed to write authorized_keys file: %w", err)
+	galog.V(2).Debugf("Updating keys for user %s to %v", user.Username, keys)
+	if err := writeSSHKeysPinned(user.HomeDir, user.UnixUID(), user.UnixGID(), keys); err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return nil
 	}
 
 	// Always ensure we have the user added to google-sudoers group, that ensures
@@ -175,7 +140,11 @@ func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) erro
 		return fmt.Errorf("failed to add user %s to %s: %w", user.Username, googleSudoersGroup, err)
 	}
 
-	return selinuxRestoreCon(ctx, authorizedKeysPath)
+	sshPath := filepath.Join(user.HomeDir, ".ssh")
+	if err := selinuxRestoreCon(ctx, sshPath); err != nil {
+		return err
+	}
+	return selinuxRestoreCon(ctx, filepath.Join(sshPath, "authorized_keys"))
 }
 
 // selinuxRestoreCon restores selinux context using the restorecon binary.
