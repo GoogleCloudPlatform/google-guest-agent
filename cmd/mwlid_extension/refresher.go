@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -274,7 +276,7 @@ func (j *RefresherJob) writeCredsFromMDS(ctx context.Context, contentDir, symlin
 	}
 
 	galog.Debugf("Creating timestamp contents dir %s", contentDir)
-	if err := os.MkdirAll(contentDir, 0755); err != nil {
+	if err := os.Mkdir(contentDir, 0755); err != nil {
 		return fmt.Errorf("error creating contents dir: %w", err)
 	}
 
@@ -325,6 +327,13 @@ func (j *RefresherJob) writeCredsFromMDS(ctx context.Context, contentDir, symlin
 func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now string) error {
 	contentDir, tempSymlink := j.generateTmpDirNames(opts, now)
 
+	// Make sure the secrets directory is only writable by privileged users
+	// before anything is created in it.
+	secretsDir := filepath.Dir(opts.contentDirPrefix)
+	if err := ensureSecureDir(secretsDir); err != nil {
+		return fmt.Errorf("error securing %q: %w", secretsDir, err)
+	}
+
 	// Scheduled job [isEnabled] could return true if we did not successfully
 	// determine the service status. In this case we should check the service
 	// status again before proceeding.
@@ -338,6 +347,14 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 		}
 	} else {
 		galog.Debugf("Not refreshing workload certificates, service is not enabled")
+		return nil
+	}
+
+	// Credentials may not have been written, for example if the workload
+	// certificate config status is unavailable. Only rotate the symlink to a
+	// content dir that exists.
+	if _, err := os.Lstat(contentDir); errors.Is(err, fs.ErrNotExist) {
+		galog.Debugf("No new content dir %q was created, not rotating symlink %q", contentDir, opts.symlink)
 		return nil
 	}
 
@@ -368,19 +385,32 @@ func (j *RefresherJob) refreshCreds(ctx context.Context, opts outputOpts, now st
 		return fmt.Errorf("error rotating target link: %w", err)
 	}
 
-	// Clean up previous contents dir.
+	// Clean up previous contents dir. Only content dirs created by the refresher
+	// are removed; RemoveAll removes a link without following it.
 	newTarget, err := os.Readlink(opts.symlink)
 	if err != nil {
 		return fmt.Errorf("error reading new symlink: %w, unable to remove old symlink target", err)
 	}
-	if oldTarget != newTarget {
-		galog.Infof("Removing old content dir %s", oldTarget)
-		if err := os.RemoveAll(oldTarget); err != nil {
-			return fmt.Errorf("failed to remove old symlink target: %w", err)
+	if oldTarget != "" && oldTarget != newTarget {
+		if !isContentDir(opts.contentDirPrefix, oldTarget) {
+			galog.Warnf("Not removing previous symlink target %q: not a content dir", oldTarget)
+		} else {
+			galog.Infof("Removing old content dir %s", oldTarget)
+			if err := os.RemoveAll(oldTarget); err != nil {
+				return fmt.Errorf("failed to remove old symlink target: %w", err)
+			}
 		}
 	}
 
 	return nil
+}
+
+// isContentDir reports whether path is a content dir created for prefix, that
+// is a clean, absolute prefix-<suffix> path in the same directory as prefix.
+func isContentDir(prefix, path string) bool {
+	return filepath.IsAbs(path) && path == filepath.Clean(path) &&
+		filepath.Dir(path) == filepath.Dir(prefix) &&
+		strings.HasPrefix(filepath.Base(path), filepath.Base(prefix)+"-")
 }
 
 // newClient returns a cached client if present, otherwise creates a new grpc
@@ -546,7 +576,7 @@ func (j *RefresherJob) refreshCredsWithGRPC(ctx context.Context, contentDir stri
 		return fmt.Errorf("failed to get workload trust bundles: %w", err)
 	}
 
-	if err := os.MkdirAll(contentDir, 0755); err != nil {
+	if err := os.Mkdir(contentDir, 0755); err != nil {
 		return fmt.Errorf("error creating contents dir: %w", err)
 	}
 
