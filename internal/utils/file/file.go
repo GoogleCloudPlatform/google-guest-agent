@@ -191,11 +191,37 @@ func Exists(fpath string, ftype Type) bool {
 	return false
 }
 
-// SaferWriteFile writes to a temporary file and then replaces the expected
-// output file.
-// This prevents other processes from reading partial content while the writer
-// is still writing.
+// SaferWriteFile writes content to a temporary file in outputFile's directory,
+// syncs it, and renames it over outputFile so readers do not observe partial
+// writes.
+//
+// outputFile's parent directory and its ancestors are resolved by path and must
+// be trusted (not writable by opts.Owner or other untrusted users).
 func SaferWriteFile(ctx context.Context, content []byte, outputFile string, opts Options) error {
+	return saferWriteFile(ctx, content, outputFile, opts, osCreateTemp)
+}
+
+type tempFile interface {
+	io.WriteCloser
+	Name() string
+	Chown(uid, gid int) error
+	Chmod(mode os.FileMode) error
+	Sync() error
+}
+
+func osCreateTemp(dir, pattern string) (tempFile, error) {
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func saferWriteFile(ctx context.Context, content []byte, outputFile string, opts Options, createTemp func(dir, pattern string) (tempFile, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	dir := filepath.Dir(outputFile)
 	name := filepath.Base(outputFile)
 
@@ -203,24 +229,60 @@ func SaferWriteFile(ctx context.Context, content []byte, outputFile string, opts
 		return fmt.Errorf("unable to create required directories %q: %w", dir, err)
 	}
 
-	tmp, err := os.CreateTemp(dir, name+"*")
+	tmp, err := createTemp(dir, name+"*")
 	if err != nil {
 		return fmt.Errorf("unable to create temporary file under %q: %w", dir, err)
 	}
+	tmpName := tmp.Name()
+	removeTmp := func() {
+		if err := os.Remove(tmpName); err != nil {
+			galog.Warnf("Failed to remove temporary file %q: %v", tmpName, err)
+		}
+	}
+	cleanup := func() {
+		if err := tmp.Close(); err != nil {
+			galog.Warnf("Failed to close temporary file %q: %v", tmpName, err)
+		}
+		removeTmp()
+	}
 
-	if err := os.Chmod(tmp.Name(), opts.Perm); err != nil {
-		return fmt.Errorf("unable to set permissions on temporary file %q: %w", dir, err)
+	if _, err := tmp.Write(content); err != nil {
+		cleanup()
+		return fmt.Errorf("writing temporary file: %w", err)
+	}
+
+	if opts.Owner != nil {
+		if err := tmp.Chown(opts.Owner.UID, opts.Owner.GID); err != nil {
+			cleanup()
+			return fmt.Errorf("setting ownership of temporary file: %w", err)
+		}
+	}
+
+	if err := tmp.Chmod(opts.Perm); err != nil {
+		cleanup()
+		return fmt.Errorf("setting permissions on temporary file: %w", err)
+	}
+
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("syncing temporary file: %w", err)
 	}
 
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to close temporary file: %w", err)
+		removeTmp()
+		return fmt.Errorf("closing temporary file: %w", err)
 	}
 
-	if err := WriteFile(ctx, content, tmp.Name(), opts); err != nil {
-		return fmt.Errorf("unable to write to a temporary file %q: %w", tmp.Name(), err)
+	if err := ctx.Err(); err != nil {
+		removeTmp()
+		return err
 	}
 
-	return os.Rename(tmp.Name(), outputFile)
+	if err := os.Rename(tmpName, outputFile); err != nil {
+		removeTmp()
+		return err
+	}
+	return nil
 }
 
 // WriteFile creates parent directories if required and writes content to the
