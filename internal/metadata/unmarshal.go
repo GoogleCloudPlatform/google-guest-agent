@@ -18,13 +18,26 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/GoogleCloudPlatform/galog"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/ssh"
 )
 
+const (
+	allowOnDomainControllerHyphenKey     = "allow-on-domain-controller"
+	allowOnDomainControllerUnderscoreKey = "allow_on_domain_controller"
+	allowOnDomainControllerHint          = "allow_on_domain_controller can only be set in the [Accounts] section of instance_configs.cfg"
+	instanceMetadataSection              = "instance"
+	projectMetadataSection               = "project"
+)
+
+// loggedMetadataKeys tracks disallowed metadata keys that have already been
+// logged so 60s metadata Watch longpolls do not spam error logs.
+var loggedMetadataKeys sync.Map
+
 // descriptor wraps/holds all the metadata keys, the structure reflects the json
-// descriptor returned with metadata call with alt=jason. This is the internal
+// descriptor returned with metadata call with alt=json. This is the internal
 // representation used to parse the json formatted output of metadata server.
 type descriptor struct {
 	Instance instance
@@ -32,13 +45,80 @@ type descriptor struct {
 	Universe gcpUniverse
 }
 
-// UnmarshalDescriptor unmarshals a jason into Descriptor.
-func UnmarshalDescriptor(jsonData string) (*Descriptor, error) {
-	var data descriptor
-	if err := json.Unmarshal([]byte(jsonData), &data); err != nil {
+// disallowedAttributes captures metadata keys that are intentionally excluded
+// from VM and project metadata so we can log a clear error when present.
+type disallowedAttributes struct {
+	AllowOnDomainControllerHyphen     *json.RawMessage `json:"allow-on-domain-controller"`
+	AllowOnDomainControllerUnderscore *json.RawMessage `json:"allow_on_domain_controller"`
+}
+
+// disallowedDescriptor mirrors the top-level metadata JSON sections that can
+// carry instance or project attributes.
+type disallowedDescriptor struct {
+	Instance struct {
+		Attributes disallowedAttributes `json:"attributes"`
+	} `json:"instance"`
+	Project struct {
+		Attributes disallowedAttributes `json:"attributes"`
+	} `json:"project"`
+}
+
+type disallowedKeyEntry struct {
+	key  string
+	raw  *json.RawMessage
+	hint string
+}
+
+func rejectDisallowedAttributes(section string, attrs disallowedAttributes, loggedKeys *sync.Map, logKey func(qualifiedKey, hint string)) {
+	entries := []disallowedKeyEntry{
+		{
+			key:  allowOnDomainControllerHyphenKey,
+			raw:  attrs.AllowOnDomainControllerHyphen,
+			hint: allowOnDomainControllerHint,
+		},
+		{
+			key:  allowOnDomainControllerUnderscoreKey,
+			raw:  attrs.AllowOnDomainControllerUnderscore,
+			hint: allowOnDomainControllerHint,
+		},
+	}
+	for _, entry := range entries {
+		if entry.raw == nil {
+			continue
+		}
+		qualifiedKey := section + "/" + entry.key
+		if _, alreadyLogged := loggedKeys.LoadOrStore(qualifiedKey, true); !alreadyLogged {
+			logKey(qualifiedKey, entry.hint)
+		}
+	}
+}
+
+func logIgnoredMetadataKey(qualifiedKey, hint string) {
+	galog.Errorf("Ignoring %q in metadata: %s", qualifiedKey, hint)
+}
+
+// unmarshalDescriptor parses disallowedDescriptor separately from descriptor
+// instead of rejecting inside attributes.UnmarshalJSON so rejection knows
+// whether the key came from "instance" or "project" metadata and tests can
+// inject loggedKeys and logKey without package-level mutable hooks.
+func unmarshalDescriptor(jsonData string, loggedKeys *sync.Map, logKey func(qualifiedKey, hint string)) (*Descriptor, error) {
+	rawBytes := []byte(jsonData)
+	var disallowed disallowedDescriptor
+	if err := json.Unmarshal(rawBytes, &disallowed); err != nil {
 		return nil, err
 	}
+	var data descriptor
+	if err := json.Unmarshal(rawBytes, &data); err != nil {
+		return nil, err
+	}
+	rejectDisallowedAttributes(projectMetadataSection, disallowed.Project.Attributes, loggedKeys, logKey)
+	rejectDisallowedAttributes(instanceMetadataSection, disallowed.Instance.Attributes, loggedKeys, logKey)
 	return newDescriptor(data), nil
+}
+
+// UnmarshalDescriptor unmarshals a JSON string into Descriptor.
+func UnmarshalDescriptor(jsonData string) (*Descriptor, error) {
+	return unmarshalDescriptor(jsonData, &loggedMetadataKeys, logIgnoredMetadataKey)
 }
 
 // UnmarshalJSON unmarshals b into Descriptor. This is the internal
