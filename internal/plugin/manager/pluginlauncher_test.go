@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/retry"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/utils/file"
+	pb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -121,6 +123,7 @@ type testRunner struct {
 	seenCommand   string
 	pid           int
 	shouldFail    bool
+	onStart       func(run.Options) error
 }
 
 func setupFakeRunner(t *testing.T) *testRunner {
@@ -150,6 +153,11 @@ func (tr *testRunner) Start(ctx context.Context, opts run.Options) (*run.Result,
 	}
 	tr.seenArguments = opts.Args
 	tr.seenCommand = opts.Name
+	if tr.onStart != nil {
+		if err := tr.onStart(opts); err != nil {
+			return nil, err
+		}
+	}
 	return &run.Result{Pid: tr.pid}, nil
 }
 
@@ -371,5 +379,189 @@ func TestIsUDSSupported(t *testing.T) {
 	}
 	if !file.Exists(connectionsDir, file.TypeDir) {
 		t.Errorf("file.Exists(%s, file.TypeDir) = true, want false", connectionsDir)
+	}
+}
+
+func TestSocketRetryPolicyDefaults(t *testing.T) {
+	want := retry.Policy{
+		MaxAttempts:    24,
+		BackoffFactor:  1.5,
+		Jitter:         25 * time.Millisecond,
+		MaximumBackoff: time.Second,
+	}
+	if diff := cmp.Diff(want, socketRetryPolicy); diff != "" {
+		t.Errorf("socketRetryPolicy mismatch (-want +got):\n%s", diff)
+	}
+	var totalBudget time.Duration
+	interval := float64(socketRetryPolicy.Jitter)
+	for attempt := 0; attempt < socketRetryPolicy.MaxAttempts-1; attempt++ {
+		d := time.Duration(interval)
+		if d > socketRetryPolicy.MaximumBackoff {
+			d = socketRetryPolicy.MaximumBackoff
+		}
+		totalBudget += d
+		interval *= socketRetryPolicy.BackoffFactor
+	}
+	if totalBudget < 15*time.Second || totalBudget > 16*time.Second {
+		t.Errorf("socketRetryPolicy total wait budget = %v, want in [15s, 16s]", totalBudget)
+	}
+}
+
+func TestLauncherStepDelayedUDSSocket(t *testing.T) {
+	t.Cleanup(eventWg.Wait)
+	if err := cfg.Load([]byte{}); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	stateDir := t.TempDir()
+	connDir := t.TempDir()
+	cfg.Retrieve().Plugin.StateDir = stateDir
+	cfg.Retrieve().Plugin.SocketConnectionsDir = connDir
+	cfg.Retrieve().Core.ACSClient = false
+
+	setupConstraintTestClient(t)
+	tr := setupFakeRunner(t)
+
+	ts := &testPluginServer{ctrs: make(map[string]int), seenStartReq: make(map[string]*pb.StartRequest)}
+	srv := newTestPluginGRPCServer(ts)
+
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{}))
+	t.Cleanup(wg.Wait)
+	t.Cleanup(srv.Stop)
+	t.Cleanup(cancel)
+
+	addr := filepath.Join(connDir, "pluginDelayed_rev1.sock")
+	tr.onStart = func(run.Options) error {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-time.After(30 * time.Millisecond):
+			case <-ctx.Done():
+				return
+			}
+			lis, err := net.Listen(udsProtocol, addr)
+			if err != nil {
+				return
+			}
+			_ = srv.Serve(lis)
+		}()
+		return nil
+	}
+
+	entryPath := filepath.Join(t.TempDir(), "core_plugin")
+	step := launchStep{entryPath: entryPath, startAttempts: 3, protocol: udsProtocol}
+	plugin := &Plugin{
+		Name:        "pluginDelayed",
+		Revision:    "rev1",
+		InstallPath: filepath.Dir(entryPath),
+		RuntimeInfo: &RuntimeInfo{},
+		Manifest: &Manifest{
+			StartTimeout:           5 * time.Second,
+			PluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+		},
+	}
+
+	start := time.Now()
+	if err := step.Run(ctx, plugin); err != nil {
+		t.Fatalf("launchStep.Run() failed unexpectedly: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if got := plugin.State(); got != acmpb.CurrentPluginStates_RUNNING {
+		t.Errorf("plugin.State() = %v, want %v", got, acmpb.CurrentPluginStates_RUNNING)
+	}
+	// With a 25ms socket poll interval and a 30ms socket creation delay, launch
+	// should complete in ~50ms rather than sleeping a full 1s on the first miss.
+	if elapsed >= 900*time.Millisecond {
+		t.Errorf("launchStep.Run() took %v waiting for delayed UDS socket, want < 900ms", elapsed)
+	}
+}
+
+func TestLauncherStepUDSTimeoutFallbackToTCP(t *testing.T) {
+	t.Cleanup(eventWg.Wait)
+	if err := cfg.Load([]byte{}); err != nil {
+		t.Fatalf("cfg.Load() failed unexpectedly with error: %v", err)
+	}
+
+	origSocketPolicy := socketRetryPolicy
+	socketRetryPolicy = retry.Policy{MaxAttempts: 2, BackoffFactor: 1, Jitter: time.Millisecond}
+	t.Cleanup(func() { socketRetryPolicy = origSocketPolicy })
+
+	stateDir := t.TempDir()
+	connDir := t.TempDir()
+	cfg.Retrieve().Plugin.StateDir = stateDir
+	cfg.Retrieve().Plugin.SocketConnectionsDir = connDir
+	cfg.Retrieve().Core.ACSClient = false
+
+	setupConstraintTestClient(t)
+	psMock := &mockPsClient{alive: true}
+	setupMockPsClient(t, psMock)
+	tr := setupFakeRunner(t)
+	tr.pid = -5555
+
+	ts := &testPluginServer{ctrs: make(map[string]int), seenStartReq: make(map[string]*pb.StartRequest)}
+	srv := newTestPluginGRPCServer(ts)
+
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+	t.Cleanup(srv.Stop)
+
+	var launchCount int
+	tr.onStart = func(opts run.Options) error {
+		launchCount++
+		var protoArg, addrArg string
+		for _, arg := range opts.Args {
+			if after, ok := strings.CutPrefix(arg, "--protocol="); ok {
+				protoArg = after
+			}
+			if after, ok := strings.CutPrefix(arg, "--address="); ok {
+				addrArg = after
+			}
+		}
+		if protoArg == tcpProtocol {
+			tr.pid = -6666
+			lis, err := net.Listen(tcpProtocol, addrArg)
+			if err != nil {
+				return err
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = srv.Serve(lis)
+			}()
+		}
+		return nil
+	}
+
+	ctx := context.WithValue(context.Background(), client.OverrideConnection, &fakeACS{})
+	entryPath := filepath.Join(t.TempDir(), "core_plugin")
+	step := launchStep{entryPath: entryPath, startAttempts: 3, protocol: udsProtocol}
+	plugin := &Plugin{
+		Name:        "pluginFallback",
+		Revision:    "rev1",
+		InstallPath: filepath.Dir(entryPath),
+		RuntimeInfo: &RuntimeInfo{},
+		Manifest: &Manifest{
+			StartTimeout:           5 * time.Second,
+			PluginInstallationType: acmpb.PluginInstallationType_LOCAL_INSTALLATION,
+		},
+	}
+
+	if err := step.Run(ctx, plugin); err != nil {
+		t.Fatalf("launchStep.Run() failed unexpectedly on TCP fallback: %v", err)
+	}
+	if launchCount != 2 {
+		t.Errorf("launchStep.Run() launchCount = %d, want 2 (UDS attempt then TCP fallback)", launchCount)
+	}
+	if diff := cmp.Diff([]int{-5555}, psMock.killedPIDs); diff != "" {
+		t.Errorf("launchStep.Run() killed PIDs mismatch (-want +got):\n%s", diff)
+	}
+	if plugin.Protocol != tcpProtocol {
+		t.Errorf("launchStep.Run() plugin.Protocol = %q, want %q", plugin.Protocol, tcpProtocol)
+	}
+	if got := plugin.State(); got != acmpb.CurrentPluginStates_RUNNING {
+		t.Errorf("launchStep.Run() plugin.State() = %v, want %v", got, acmpb.CurrentPluginStates_RUNNING)
 	}
 }

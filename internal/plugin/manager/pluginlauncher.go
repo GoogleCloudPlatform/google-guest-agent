@@ -41,6 +41,17 @@ const (
 	tcpProtocol = "tcp"
 )
 
+var (
+	// socketRetryPolicy is the retry policy used when waiting for a plugin's UDS
+	// socket file to exist after launch. Overridden in tests.
+	socketRetryPolicy = retry.Policy{
+		MaxAttempts:    defaultConnectTimeoutTries,
+		BackoffFactor:  defaultSocketCheckBackoffFactor,
+		Jitter:         defaultSocketCheckInterval,
+		MaximumBackoff: defaultSocketCheckMaxBackoff,
+	}
+)
+
 // launchStep implements the plugin launch.
 type launchStep struct {
 	// entryPath is the path to binary to launch plugin.
@@ -116,8 +127,7 @@ func (l *launchStep) Run(ctx context.Context, p *Plugin) error {
 	// timeout is reached. If the timeout is reached, we try to relaunch the
 	// plugin using TCP.
 	if p.Protocol == udsProtocol {
-		socketPolicy := retry.Policy{MaxAttempts: defaultConnectTimeoutTries, BackoffFactor: 1, Jitter: time.Second * 1}
-		if err := retry.Run(ctx, socketPolicy, func() error {
+		if err := retry.Run(ctx, socketRetryPolicy, func() error {
 			if file.Exists(p.Address, file.TypeFile) {
 				return nil
 			}

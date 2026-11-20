@@ -35,10 +35,12 @@ type mockPsClient struct {
 	cpuUsage    float64
 	exe         string
 	procKilled  bool
+	killedPIDs  []int
 }
 
 func (m *mockPsClient) KillProcess(pid int, mode ps.KillMode) error {
 	m.procKilled = true
+	m.killedPIDs = append(m.killedPIDs, pid)
 	return nil
 }
 

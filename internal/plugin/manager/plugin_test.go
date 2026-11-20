@@ -71,6 +71,12 @@ func startTestServer(t *testing.T, testServer *testPluginServer, protocol, addr 
 	return addr
 }
 
+func newTestPluginGRPCServer(testServer *testPluginServer) *grpc.Server {
+	srv := grpc.NewServer()
+	pb.RegisterGuestAgentPluginServer(srv, testServer)
+	return srv
+}
+
 type testPluginServer struct {
 	mu           sync.Mutex
 	code         int32

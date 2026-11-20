@@ -44,9 +44,19 @@ const (
 	// waiting for a response forever.
 	defaultApplyRPCTimeout  = time.Second * 5
 	defaultStatusRPCTimeout = time.Second * 2
+	// defaultSocketCheckInterval is the initial interval before the first retry
+	// when waiting for a plugin UDS socket file to exist.
+	defaultSocketCheckInterval = 25 * time.Millisecond
+	// defaultSocketCheckMaxBackoff caps the exponential backoff interval when
+	// waiting for a plugin UDS socket file to exist.
+	defaultSocketCheckMaxBackoff = time.Second
+	// defaultSocketCheckBackoffFactor is the exponential multiplier applied to
+	// defaultSocketCheckInterval on each retry.
+	defaultSocketCheckBackoffFactor = 1.5
 	// defaultConnectTimeoutTries is the default number of tries for connecting to
-	// a plugin. The plugin manager will wait for one second between each try.
-	defaultConnectTimeoutTries = 15
+	// a plugin (~15.83s total wait budget with 25ms initial interval, 1.5x
+	// backoff, and 1s cap).
+	defaultConnectTimeoutTries = 24
 )
 
 // Plugin struct represents the plugin information.
