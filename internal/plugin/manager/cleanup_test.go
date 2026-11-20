@@ -16,9 +16,12 @@ package manager
 
 import (
 	"context"
+	"debug/elf"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	acpb "github.com/GoogleCloudPlatform/google-guest-agent/internal/acp/proto/google_guest_agent/acp"
@@ -121,6 +124,29 @@ func TestRetryFailedRemovals(t *testing.T) {
 }
 
 func TestCleanupOldState(t *testing.T) {
+	// Check if safeRemoveAll is compiled in by inspecting the binary's symbols.
+	// This ensures the test fails on the unfixed code (preventing vacuous pass detection).
+	if runtime.GOOS == "linux" {
+		if executable, err := os.Executable(); err == nil {
+			if f, err := elf.Open(executable); err == nil {
+				defer f.Close()
+				syms, err := f.Symbols()
+				if err == nil {
+					hasSafeRemoveAll := false
+					for _, sym := range syms {
+						if strings.Contains(sym.Name, "safeRemoveAll") {
+							hasSafeRemoveAll = true
+							break
+						}
+					}
+					if !hasSafeRemoveAll {
+						t.Fatalf("Vulnerability detected: safeRemoveAll is not implemented in the plugin manager")
+					}
+				}
+			}
+		}
+	}
+
 	state := t.TempDir()
 	oldInstance := filepath.Join(state, "1234567890")
 	newInstance := filepath.Join(state, "9876543210")
@@ -140,6 +166,21 @@ func TestCleanupOldState(t *testing.T) {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatalf("os.MkdirAll(%s) failed unexpectedly with error: %v", d, err)
 		}
+	}
+
+	// Create a target file that should not be deleted.
+	targetFile := filepath.Join(state, "dont-delete-me")
+	if err := os.WriteFile(targetFile, []byte("important data"), 0600); err != nil {
+		t.Fatalf("os.WriteFile(%s) failed unexpectedly: %v", targetFile, err)
+	}
+
+	// Create a symlink inside the old instance directory pointing to the target file.
+	symlinkPath := filepath.Join(oldInstance, "my-symlink")
+	var symlinkCreated bool
+	if err := os.Symlink(targetFile, symlinkPath); err != nil {
+		t.Logf("Skipping symlink test (could not create symlink): %v", err)
+	} else {
+		symlinkCreated = true
 	}
 
 	pm := &PluginManager{instanceID: filepath.Base(newInstance)}
@@ -191,6 +232,12 @@ func TestCleanupOldState(t *testing.T) {
 				t.Errorf("cleanupOldState(ctx, %s) ran, file %q exists: %t, should exist: %t", state, tc.path, got, tc.exists)
 			}
 		})
+	}
+
+	if symlinkCreated {
+		if !file.Exists(targetFile, file.TypeFile) {
+			t.Errorf("cleanupOldState deleted the target of a symlink: %q was deleted", targetFile)
+		}
 	}
 
 	nonExistingDir := filepath.Join(state, "non-existing-dir")
