@@ -118,7 +118,7 @@ func TestDeprovisionUnusedUsers(t *testing.T) {
 			googleUsers:            []string{"user1"},
 			want:                   []error{cmpopts.AnyError},
 			wantDeprovisioned:      nil,
-			wantRemovedFromSudoers: nil,
+			wantRemovedFromSudoers: []string{"user1"},
 		},
 		{
 			name: "deprovision_remove_success",
@@ -735,6 +735,208 @@ func TestSelinuxRestoreCon(t *testing.T) {
 
 			if command != tc.wantCommand {
 				t.Errorf("selinuxRestoreCon(%q) ran command %q, want %q", tc.fpath, command, tc.wantCommand)
+			}
+		})
+	}
+}
+
+func initTestSudoersConfig(t *testing.T) {
+	t.Helper()
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("cfg.Load(nil) = %v, want nil", err)
+	}
+	swapForTest(t, &supplementalGroups, map[string]*accounts.Group{
+		googleSudoersGroup: {Name: googleSudoersGroup},
+	})
+	swapForTest(t, &cfg.Retrieve().Accounts.GroupAddCmd, "true {group}")
+	swapForTest(t, &cfg.Retrieve().Accounts.GPasswdAddCmd, "true {user} {group}")
+}
+
+func TestParseUserKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents string
+		want     []string
+	}{
+		{
+			name:     "empty",
+			contents: "",
+			want:     nil,
+		},
+		{
+			name:     "manual_keys_only",
+			contents: "ssh-ed25519 AAAA manual1\n# user comment\nssh-rsa BBBB manual2\n",
+			want:     []string{"ssh-ed25519 AAAA manual1", "# user comment", "ssh-rsa BBBB manual2"},
+		},
+		{
+			name:     "google_keys_only",
+			contents: "# Added by Google\nssh-ed25519 AAAA google1\n# Added by Google\nssh-ed25519 BBBB google2\n",
+			want:     nil,
+		},
+		{
+			name:     "mixed_manual_and_google_keys",
+			contents: "ssh-ed25519 AAAA manual1\n# Added by Google\nssh-ed25519 BBBB google1\nssh-rsa CCCC manual2\n",
+			want:     []string{"ssh-ed25519 AAAA manual1", "ssh-rsa CCCC manual2"},
+		},
+		{
+			name:     "trailing_google_comment",
+			contents: "ssh-ed25519 AAAA manual1\n# Added by Google\n",
+			want:     []string{"ssh-ed25519 AAAA manual1"},
+		},
+		{
+			name:     "blank_line_after_google_comment",
+			contents: "# Added by Google\n\nssh-ed25519 BBBB google1\nssh-rsa CCCC manual1\n",
+			want:     []string{"ssh-rsa CCCC manual1"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseUserKeys([]byte(tc.contents), "# Added by Google")
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("parseUserKeys(%q) returned diff (-want +got):\n%s", tc.contents, diff)
+			}
+		})
+	}
+}
+
+func TestUpdateSSHKeysRestoreconAfterWrite(t *testing.T) {
+	initTestSudoersConfig(t)
+	swapForTest(t, &execLookPath, func(string) (string, error) {
+		return "/usr/sbin/restorecon", nil
+	})
+	var gotRestoreconArgs []string
+	defaultRunClient := run.Client
+	run.Client = &mockRunner{
+		callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+			if opts.Name == "/usr/sbin/restorecon" {
+				gotRestoreconArgs = append(gotRestoreconArgs, opts.Args...)
+			}
+			return &run.Result{OutputType: opts.OutputType}, nil
+		},
+	}
+	t.Cleanup(func() { run.Client = defaultRunClient })
+
+	homeDir := filepath.Join(t.TempDir(), "alice")
+	if err := os.Mkdir(homeDir, 0750); err != nil {
+		t.Fatalf("os.Mkdir(%q) = %v", homeDir, err)
+	}
+	u := &accounts.User{Username: "alice", HomeDir: homeDir, UID: "-1", GID: "-1"}
+
+	if err := updateSSHKeys(t.Context(), u, []string{"ssh-ed25519 AAAA key1"}); err != nil {
+		t.Fatalf("updateSSHKeys() = %v, want nil", err)
+	}
+	wantArgs := []string{
+		filepath.Join(homeDir, ".ssh"),
+		filepath.Join(homeDir, ".ssh", "authorized_keys"),
+	}
+	if diff := cmp.Diff(wantArgs, gotRestoreconArgs); diff != "" {
+		t.Errorf("updateSSHKeys() restorecon paths diff (-want +got):\n%s", diff)
+	}
+}
+
+func TestUpdateSSHKeysNoRestoreconOnRemove(t *testing.T) {
+	initTestSudoersConfig(t)
+	swapForTest(t, &execLookPath, func(string) (string, error) {
+		return "/usr/sbin/restorecon", nil
+	})
+	var gotRestoreconArgs []string
+	defaultRunClient := run.Client
+	run.Client = &mockRunner{
+		callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+			if opts.Name == "/usr/sbin/restorecon" {
+				gotRestoreconArgs = append(gotRestoreconArgs, opts.Args...)
+			}
+			return &run.Result{OutputType: opts.OutputType}, nil
+		},
+	}
+	t.Cleanup(func() { run.Client = defaultRunClient })
+
+	homeDir := filepath.Join(t.TempDir(), "alice")
+	sshDir := filepath.Join(homeDir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		t.Fatalf("os.MkdirAll(%q) = %v", sshDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(sshDir, "authorized_keys"), []byte("ssh-ed25519 AAAA key1\n"), 0600); err != nil {
+		t.Fatalf("os.WriteFile() = %v", err)
+	}
+	u := &accounts.User{Username: "alice", HomeDir: homeDir, UID: "-1", GID: "-1"}
+
+	if err := updateSSHKeys(t.Context(), u, nil); err != nil {
+		t.Fatalf("updateSSHKeys(keys=nil) = %v, want nil", err)
+	}
+	if len(gotRestoreconArgs) != 0 {
+		t.Errorf("updateSSHKeys(keys=nil) ran restorecon on %v, want none", gotRestoreconArgs)
+	}
+}
+
+func TestUpdateSSHKeysRestoreconErrorPreservesUpdatedFile(t *testing.T) {
+	errRestorecon := errors.New("restorecon failed")
+	tests := []struct {
+		name             string
+		failBase         string
+		wantRestorePaths []string
+	}{
+		{
+			name:             "ssh_dir_failure",
+			failBase:         ".ssh",
+			wantRestorePaths: []string{".ssh"},
+		},
+		{
+			name:             "authorized_keys_failure",
+			failBase:         "authorized_keys",
+			wantRestorePaths: []string{".ssh", "authorized_keys"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			initTestSudoersConfig(t)
+			swapForTest(t, &execLookPath, func(string) (string, error) {
+				return "/usr/sbin/restorecon", nil
+			})
+			var gotRestoreBases []string
+			defaultRunClient := run.Client
+			run.Client = &mockRunner{
+				callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+					if opts.Name == "/usr/sbin/restorecon" && len(opts.Args) == 1 {
+						base := filepath.Base(opts.Args[0])
+						gotRestoreBases = append(gotRestoreBases, base)
+						if base == tc.failBase {
+							return nil, errRestorecon
+						}
+					}
+					return &run.Result{OutputType: opts.OutputType}, nil
+				},
+			}
+			t.Cleanup(func() { run.Client = defaultRunClient })
+
+			homeDir := filepath.Join(t.TempDir(), "alice")
+			sshDir := filepath.Join(homeDir, ".ssh")
+			akPath := filepath.Join(sshDir, "authorized_keys")
+			if err := os.MkdirAll(sshDir, 0700); err != nil {
+				t.Fatalf("os.MkdirAll(%q) = %v", sshDir, err)
+			}
+			initial := "ssh-ed25519 AAAA manual1\n# Added by Google\nssh-ed25519 BBBB old-key\n"
+			if err := os.WriteFile(akPath, []byte(initial), 0600); err != nil {
+				t.Fatalf("os.WriteFile(%q) = %v", akPath, err)
+			}
+			u := &accounts.User{Username: "alice", HomeDir: homeDir, UID: "-1", GID: "-1"}
+
+			err := updateSSHKeys(t.Context(), u, []string{"ssh-ed25519 CCCC new-key"})
+			if !errors.Is(err, errRestorecon) {
+				t.Fatalf("updateSSHKeys(%q) = %v, want error wrapping %v", homeDir, err, errRestorecon)
+			}
+			if diff := cmp.Diff(tc.wantRestorePaths, gotRestoreBases); diff != "" {
+				t.Errorf("updateSSHKeys(%q) restorecon targets diff (-want +got):\n%s", homeDir, diff)
+			}
+			got, err := os.ReadFile(akPath)
+			if err != nil {
+				t.Fatalf("os.ReadFile(%q) = %v", akPath, err)
+			}
+			want := "ssh-ed25519 AAAA manual1\n# Added by Google\nssh-ed25519 CCCC new-key\n"
+			if string(got) != want {
+				t.Errorf("os.ReadFile(%q) = %q, want %q", akPath, got, want)
 			}
 		})
 	}
