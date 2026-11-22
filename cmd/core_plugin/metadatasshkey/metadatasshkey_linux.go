@@ -99,7 +99,15 @@ func updateSSHKeys(ctx context.Context, user *accounts.User, keys []string) erro
 	if user.HomeDir == "" {
 		return fmt.Errorf("user %s has no homedir set", user.Username)
 	}
-	if user.Shell == "/sbin/nologin" {
+	// Skip users with nologin shell. This covers /sbin/nologin, /usr/sbin/nologin,
+	// and /bin/false.
+	if strings.Contains(user.Shell, "nologin") || user.Shell == "/bin/false" {
+		galog.Warnf("User %s does not allow logins, not updating SSH keys", user.Username)
+		return nil
+	}
+	// Root has UID 0, so we don't want to update SSH keys for root.
+	if user.UnixUID() == 0 {
+		galog.Warnf("User %s has UID 0, not updating SSH keys", user.Username)
 		return nil
 	}
 
