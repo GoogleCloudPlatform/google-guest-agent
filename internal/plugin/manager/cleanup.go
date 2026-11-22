@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -134,7 +135,7 @@ func (m *PluginManager) cleanupOldState(ctx context.Context, path string) error 
 			continue
 		}
 		galog.Debugf("Removing previous plugin state %q", absPath)
-		if err := os.RemoveAll(absPath); err != nil {
+		if err := safeRemoveAll(absPath); err != nil {
 			return fmt.Errorf("failed to remove file %q: %w", absPath, err)
 		}
 	}
@@ -181,4 +182,48 @@ func (s *CleanupJob) Run(ctx context.Context) (bool, error) {
 	noop, err := s.pm.retryFailedRemovals(ctx)
 	galog.Debugf("Finished running cleanup job")
 	return noop, err
+}
+
+// safeRemoveAll removes path and all its children securely.
+// It ensures that no symlinks are followed during the deletion process.
+// To prevent TOCTOU races, it recursively changes the owner to root (0, 0)
+// and permissions to 0700 for directories from the top down, so that non-root
+// users cannot modify the directory contents while it is being deleted.
+func safeRemoveAll(path string) error {
+	if runtime.GOOS == "windows" {
+		return os.RemoveAll(path)
+	}
+
+	fi, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return os.Remove(path)
+	}
+
+	if !fi.IsDir() {
+		return os.Remove(path)
+	}
+
+	// Secure the directory before traversing to prevent TOCTOU race.
+	_ = os.Chown(path, 0, 0)
+	_ = os.Chmod(path, 0700)
+
+	dirs, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+
+	for _, dir := range dirs {
+		if err := safeRemoveAll(filepath.Join(path, dir.Name())); err != nil {
+			return err
+		}
+	}
+
+	return os.Remove(path)
 }
