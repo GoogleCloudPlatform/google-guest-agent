@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/commandlineexecutor"
 	defpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/isvdiscovery/definition/proto"
@@ -573,10 +574,56 @@ func checkCondition(condition *defpb.Condition, vmInfo *VMInfo) (bool, *ProcessI
 	return result, processInfo
 }
 
+// maxCachedRegexps bounds regexCache. The backend can change the rules while
+// the extension runs, so patterns that are no longer used would otherwise
+// accumulate.
+const maxCachedRegexps = 4096
+
+// compiledRegexp is the result of compiling a pattern.
+type compiledRegexp struct {
+	re  *regexp.Regexp
+	err error
+}
+
+// regexCache maps patterns to their compiled form. Each scan matches every
+// condition against every process, and compiling dominates the cost of
+// matching, so patterns are compiled once rather than once per process.
+var regexCache = struct {
+	sync.Mutex
+	m map[string]compiledRegexp
+}{m: make(map[string]compiledRegexp)}
+
+// compileRegex returns the compiled pattern, compiling it at most once while it
+// remains in the cache. Invalid patterns are cached too, with their error.
+//
+// The engine must use Go's regexp package, whose RE2 syntax doesn't support
+// backreferences or lookarounds and whose matching takes time linear in the
+// size of the input. This prevents rules from causing catastrophic
+// backtracking, which a backtracking engine such as PCRE is prone to.
+func compileRegex(pattern string) (*regexp.Regexp, error) {
+	regexCache.Lock()
+	defer regexCache.Unlock()
+	if c, ok := regexCache.m[pattern]; ok {
+		return c.re, c.err
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		slog.Debug("Failed to compile regex", "regex", pattern, "error", err)
+	}
+	if len(regexCache.m) >= maxCachedRegexps {
+		clear(regexCache.m)
+	}
+	regexCache.m[pattern] = compiledRegexp{re: re, err: err}
+	return re, err
+}
+
 func checkStringMatch(pattern string, values []string, vmInfo *VMInfo, isProcess bool) (bool, *ProcessInfo) {
+	re, err := compileRegex(pattern)
+	if err != nil {
+		return false, nil
+	}
 	for i, value := range values {
-		match, err := regexp.MatchString(pattern, value)
-		if err == nil && match {
+		if re.MatchString(value) {
 			if isProcess && vmInfo != nil {
 				return true, &ProcessInfo{
 					Name:     safeGet(vmInfo.ProcessNames, i),
