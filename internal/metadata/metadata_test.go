@@ -23,6 +23,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -720,5 +722,316 @@ func TestWindowsKeysUnmarshalJSONError(t *testing.T) {
 	var desc descriptor
 	if err := json.Unmarshal([]byte(key), &desc); err == nil {
 		t.Errorf("json.Unmarshal(%s) succeeded, want error", key)
+	}
+}
+
+func unwrapType(t reflect.Type) reflect.Type {
+	for {
+		switch t.Kind() {
+		case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+			t = t.Elem()
+		default:
+			return t
+		}
+	}
+}
+
+// hyphenatedJSONTags walks root and returns any struct fields outside the
+// MDS-exempt attributes subtree whose json struct tag name contains a hyphen.
+func hyphenatedJSONTags(root reflect.Type) []string {
+	attrsType := reflect.TypeFor[attributes]()
+	visited := make(map[reflect.Type]bool)
+	var violations []string
+
+	var walk func(t reflect.Type, path string)
+	walk = func(t reflect.Type, path string) {
+		t = unwrapType(t)
+		if t.Kind() != reflect.Struct || t == attrsType || visited[t] {
+			return
+		}
+		visited[t] = true
+		defer delete(visited, t)
+
+		for i := range t.NumField() {
+			field := t.Field(i)
+			if !field.IsExported() && !field.Anonymous {
+				continue
+			}
+			fieldPath := field.Name
+			if path != "" {
+				fieldPath = path + "." + field.Name
+			}
+			tag := field.Tag.Get("json")
+			if tag == "-" {
+				continue
+			}
+			jsonName, _, _ := strings.Cut(tag, ",")
+			if strings.Contains(jsonName, "-") {
+				violations = append(violations, fmt.Sprintf("%s (%q)", fieldPath, jsonName))
+			}
+			walk(field.Type, fieldPath)
+		}
+	}
+
+	walk(root, root.Name())
+	return violations
+}
+
+func TestDescriptorJSONTags(t *testing.T) {
+	if got := hyphenatedJSONTags(reflect.TypeFor[descriptor]()); len(got) > 0 {
+		t.Errorf("hyphenatedJSONTags(descriptor) = %v, want none (GCE MDS camel-cases JSON keys outside attributes)", got)
+	}
+}
+
+// zeroValueFields walks v and returns the paths of any exported struct fields,
+// slice elements, or map values that remain zero-valued or empty.
+func zeroValueFields(v reflect.Value, rootPath string) []string {
+	var missing []string
+	var walk func(val reflect.Value, curPath string)
+	walk = func(val reflect.Value, curPath string) {
+		switch val.Kind() {
+		case reflect.Pointer:
+			if val.IsNil() {
+				missing = append(missing, curPath)
+				return
+			}
+			walk(val.Elem(), curPath)
+		case reflect.Slice, reflect.Array:
+			if val.Len() == 0 {
+				missing = append(missing, curPath)
+				return
+			}
+			if val.Type().Elem().Kind() == reflect.Uint8 {
+				return
+			}
+			for i := range val.Len() {
+				walk(val.Index(i), fmt.Sprintf("%s[%d]", curPath, i))
+			}
+		case reflect.Map:
+			if val.Len() == 0 {
+				missing = append(missing, curPath)
+				return
+			}
+			for _, k := range val.MapKeys() {
+				walk(val.MapIndex(k), fmt.Sprintf("%s[%v]", curPath, k))
+			}
+		case reflect.Struct:
+			typ := val.Type()
+			for i := range val.NumField() {
+				field := typ.Field(i)
+				if !field.IsExported() && !field.Anonymous {
+					continue
+				}
+				if field.Tag.Get("json") == "-" {
+					continue
+				}
+				fieldPath := field.Name
+				if curPath != "" {
+					fieldPath = curPath + "." + field.Name
+				}
+				walk(val.Field(i), fieldPath)
+			}
+		default:
+			if val.IsZero() {
+				missing = append(missing, curPath)
+			}
+		}
+	}
+	walk(v, rootPath)
+	slices.Sort(missing)
+	return missing
+}
+
+func TestUnmarshalFullMDSWireJSON(t *testing.T) {
+	expiry := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	winKeyEntry := fmt.Sprintf(
+		`{"email":"jane@example.com","expireOn":%q,"exponent":"AQAB","modulus":"modulus-b64","userName":"jane","hashFunction":"sha256","addToAdministrators":true,"passwordLength":20}`,
+		expiry,
+	)
+	diagnosticsEntry := `{"signedUrl":"https://storage.googleapis.com/test"}`
+	// Omit legacy "sshKeys" here so it does not mask "block-project-ssh-keys"
+	// (TestBlockProjectKeys and mdsData already cover "sshKeys").
+	attrsJSON := fmt.Sprintf(`{
+      "created-by": "projects/123456/zones/us-central1-a/instanceGroupManagers/test-mig",
+      "hostname": "test-instance.c.test-project.internal",
+      "block-project-ssh-keys": "true",
+      "enable-https-mds-native-cert-store": "true",
+      "disable-https-mds-setup": "true",
+      "enable-guest-agent-core-plugin": "true",
+      "enable-oslogin": "true",
+      "enable-windows-ssh": "true",
+      "enable-oslogin-2fa": "true",
+      "enable-oslogin-sk": "true",
+      "enable-oslogin-certificates": "true",
+      "ssh-keys": "alice:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest alice@example.com",
+      "windows-keys": %s,
+      "diagnostics": %s,
+      "disable-address-manager": "true",
+      "disable-account-manager": "true",
+      "enable-diagnostics": "true",
+      "enable-wsfc": "true",
+      "wsfc-addrs": "10.0.0.50",
+      "wsfc-agent-port": "59998",
+      "disable-guest-telemetry": "true",
+      "disable-dns-probe": "true"
+    }`, strconv.Quote(winKeyEntry), strconv.Quote(diagnosticsEntry))
+
+	// Wire JSON matching GCE MDS MakeCamelCaseUtil output for
+	// GET /computeMetadata/v1/?alt=json&recursive=true: camelCase keys everywhere
+	// except inside "attributes" and direct child keys of "serviceAccounts".
+	fullMDSJSON := fmt.Sprintf(`{
+  "instance": {
+    "id": 1234567890123456789,
+    "name": "test-instance",
+    "machineType": "projects/123456/machineTypes/n2-standard-4",
+    "virtualClock": {
+      "driftToken": "98765"
+    },
+    "identityConfiguration": {
+      "identityUuid": "11111111-2222-3333-4444-555555555555"
+    },
+    "serviceAccounts": {
+      "default": {"aliases":["default"],"email":"123456-compute@developer.gserviceaccount.com","scopes":["https://www.googleapis.com/auth/cloud-platform"]}
+    },
+    "networkInterfaces": [
+      {
+        "forwardedIps": ["10.0.0.10"],
+        "forwardedIpv6s": ["2001:db8::1/128"],
+        "targetInstanceIps": ["10.0.0.20"],
+        "ipAliases": ["10.128.0.0/24"],
+        "mac": "42:01:0a:00:00:02",
+        "dhcpv6Refresh": "refresh-uuid-1"
+      }
+    ],
+    "vlanNetworkInterfaces": {
+      "0": {
+        "10": {
+          "mac": "42:01:0a:00:01:02",
+          "parentInterface": "/computeMetadata/v1/instance/network-interfaces/0/",
+          "vlan": 10,
+          "mtu": 1460,
+          "ip": "10.0.1.2",
+          "ipv6": ["2001:db8:1::2/128"],
+          "gateway": "10.0.1.1",
+          "gatewayIpv6": "fe80::4001:aff:fe00:101"
+        }
+      }
+    },
+    "attributes": %s
+  },
+  "project": {
+    "projectId": "test-project",
+    "numericProjectId": 123456,
+    "attributes": %s
+  },
+  "universe": {
+    "universeDomain": "apis-tpclp.goog"
+  }
+}`, attrsJSON, attrsJSON)
+
+	desc, err := UnmarshalDescriptor(fullMDSJSON)
+	if err != nil {
+		t.Fatalf("UnmarshalDescriptor(fullMDSJSON) failed unexpectedly: %v", err)
+	}
+
+	got := descriptor{
+		Instance: *desc.Instance().internal,
+		Project:  *desc.Project().internal,
+		Universe: *desc.Universe().internal,
+	}
+	if missing := zeroValueFields(reflect.ValueOf(got), "descriptor"); len(missing) > 0 {
+		t.Errorf("UnmarshalDescriptor(fullMDSJSON) left fields unpopulated: %v, want all descriptor fields populated", missing)
+	}
+
+	trueVal := true
+	wantAttrs := attributes{
+		CreatedBy:                 "projects/123456/zones/us-central1-a/instanceGroupManagers/test-mig",
+		Hostname:                  "test-instance.c.test-project.internal",
+		BlockProjectKeys:          true,
+		HTTPSMDSEnableNativeStore: &trueVal,
+		DisableHTTPSMdsSetup:      &trueVal,
+		EnableCorePlugin:          &trueVal,
+		EnableOSLogin:             &trueVal,
+		EnableWindowsSSH:          &trueVal,
+		TwoFactor:                 &trueVal,
+		SecurityKey:               &trueVal,
+		RequireCerts:              &trueVal,
+		SSHKeys: []string{
+			"alice:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest alice@example.com",
+		},
+		WindowsKeys: windowsKeys{
+			{
+				Email:               "jane@example.com",
+				ExpireOn:            expiry,
+				Exponent:            "AQAB",
+				Modulus:             "modulus-b64",
+				UserName:            "jane",
+				HashFunction:        "sha256",
+				AddToAdministrators: &trueVal,
+				PasswordLength:      20,
+			},
+		},
+		Diagnostics:           `{"signedUrl":"https://storage.googleapis.com/test"}`,
+		DisableAddressManager: &trueVal,
+		DisableAccountManager: &trueVal,
+		EnableDiagnostics:     &trueVal,
+		EnableWSFC:            &trueVal,
+		WSFCAddresses:         "10.0.0.50",
+		WSFCAgentPort:         "59998",
+		DisableTelemetry:      true,
+		DisableDNSProbe:       true,
+	}
+	want := descriptor{
+		Instance: instance{
+			ID:          json.Number("1234567890123456789"),
+			Name:        "test-instance",
+			MachineType: "projects/123456/machineTypes/n2-standard-4",
+			VirtualClock: virtualClock{
+				DriftToken: "98765",
+			},
+			IdentityConfiguration: identityConfiguration{
+				IdentityUUID: "11111111-2222-3333-4444-555555555555",
+			},
+			ServiceAccounts: map[string]json.RawMessage{
+				"default": json.RawMessage(`{"aliases":["default"],"email":"123456-compute@developer.gserviceaccount.com","scopes":["https://www.googleapis.com/auth/cloud-platform"]}`),
+			},
+			NetworkInterfaces: []networkInterface{
+				{
+					ForwardedIps:      []string{"10.0.0.10"},
+					ForwardedIpv6s:    []string{"2001:db8::1/128"},
+					TargetInstanceIps: []string{"10.0.0.20"},
+					IPAliases:         []string{"10.128.0.0/24"},
+					Mac:               "42:01:0a:00:00:02",
+					DHCPv6Refresh:     "refresh-uuid-1",
+				},
+			},
+			VlanNetworkInterfaces: map[int]map[int]vlanInterface{
+				0: {
+					10: {
+						Mac:             "42:01:0a:00:01:02",
+						ParentInterface: "/computeMetadata/v1/instance/network-interfaces/0/",
+						Vlan:            10,
+						MTU:             1460,
+						IP:              "10.0.1.2",
+						IPv6:            []string{"2001:db8:1::2/128"},
+						Gateway:         "10.0.1.1",
+						GatewayIPv6:     "fe80::4001:aff:fe00:101",
+					},
+				},
+			},
+			Attributes: wantAttrs,
+		},
+		Project: project{
+			ID:               "test-project",
+			NumericProjectID: json.Number("123456"),
+			Attributes:       wantAttrs,
+		},
+		Universe: gcpUniverse{
+			UniverseDomain: "apis-tpclp.goog",
+		},
+	}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("UnmarshalDescriptor(fullMDSJSON) diff (-want +got):\n%s", diff)
 	}
 }

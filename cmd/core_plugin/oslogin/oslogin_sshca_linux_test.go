@@ -28,6 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/events"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/pipewatcher"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestInputData(t *testing.T) {
@@ -141,7 +142,8 @@ func TestInputData(t *testing.T) {
 }
 
 type mdsTestClient struct {
-	certs *Certificates
+	certs   *Certificates
+	rawJSON string
 }
 
 func (m *mdsTestClient) Get(context.Context) (*metadata.Descriptor, error) {
@@ -151,6 +153,10 @@ func (m *mdsTestClient) Get(context.Context) (*metadata.Descriptor, error) {
 func (m *mdsTestClient) GetKey(ctx context.Context, key string, headers map[string]string) (string, error) {
 	if key != "oslogin/certificates" {
 		return "", fmt.Errorf("non supported key: %q", key)
+	}
+
+	if m.rawJSON != "" {
+		return m.rawJSON, nil
 	}
 
 	if m.certs == nil {
@@ -175,4 +181,30 @@ func (m *mdsTestClient) Watch(context.Context) (*metadata.Descriptor, error) {
 
 func (m *mdsTestClient) WriteGuestAttributes(context.Context, string, string) error {
 	return fmt.Errorf("not implemented")
+}
+
+func TestOSLoginMDSCertificatesWireJSON(t *testing.T) {
+	rawMDSJSON := `{
+  "trustedCertificateAuthorities": [
+    {"publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAITest1"},
+    {"publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQTest2"}
+  ],
+  "nextPageToken": "next-page-token"
+}`
+	client := &mdsTestClient{rawJSON: rawMDSJSON}
+
+	got, err := osloginMDSCertificates(t.Context(), client)
+	if err != nil {
+		t.Fatalf("osloginMDSCertificates(ctx, client) failed unexpectedly: %v", err)
+	}
+
+	want := &Certificates{
+		Certs: []TrustedCert{
+			{PublicKey: "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAITest1"},
+			{PublicKey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQTest2"},
+		},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("osloginMDSCertificates(ctx, client) diff (-want +got):\n%s", diff)
+	}
 }
