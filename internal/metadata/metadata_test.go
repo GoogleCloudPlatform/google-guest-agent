@@ -216,16 +216,26 @@ func TestUniverseDomain(t *testing.T) {
 	}{
 		{
 			"valid_universe_domain",
-			`{"universe": {"universe-domain": "google.com"}}`,
-			"google.com",
+			`{"universe": {"universeDomain": "example-tpc.goog"}}`,
+			"example-tpc.goog",
 		},
 		{
 			"empty_universe_domain",
-			`{"universe": {"universe-domain": ""}}`,
+			`{"universe": {"universeDomain": ""}}`,
+			DefaultUniverseDomain,
+		},
+		{
+			"invalid_universe_domain_key",
+			`{"universe": {"universe-domain": "example-tpc.goog"}}`,
 			DefaultUniverseDomain,
 		},
 		{
 			"missing_universe_domain",
+			`{"universe": {}}`,
+			DefaultUniverseDomain,
+		},
+		{
+			"missing_universe",
 			`{}`,
 			DefaultUniverseDomain,
 		},

@@ -65,9 +65,9 @@ type virtualClock struct {
 
 // gcpUniverse describes the metadata's universe attributes/keys. This is the
 // internal representation used to parse the json formatted output of metadata
-// server.
+// server, which camel-cases the keys (universe-domain is universeDomain).
 type gcpUniverse struct {
-	UniverseDomain string `json:"universe-domain"`
+	UniverseDomain string `json:"universeDomain"`
 }
 
 // instance describes the metadata's instance attributes/keys. This is the
