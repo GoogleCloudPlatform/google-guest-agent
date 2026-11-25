@@ -210,3 +210,70 @@ func TestToString(t *testing.T) {
 		t.Errorf("ToString() got diff (-want +got):\n%s", diff)
 	}
 }
+
+func TestIPForwardingEffectiveIPv6Aliases(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+
+	var nilIPForwarding *IPForwarding
+	if nilIPForwarding.EffectiveIPv6Aliases() {
+		t.Errorf("nil IPForwarding.EffectiveIPv6Aliases() = true, want false")
+	}
+
+	tests := []struct {
+		name  string
+		extra string
+		want  bool
+	}{
+		{
+			name:  "default-inherits-ip-aliases-true",
+			extra: "",
+			want:  defaultIPAliasesEnabled,
+		},
+		{
+			name: "inherits-ip-aliases-false-when-unset",
+			extra: `
+[IpForwarding]
+ip_aliases = false
+`,
+			want: false,
+		},
+		{
+			name: "explicit-ipv6-aliases-false-overrides-ip-aliases-true",
+			extra: `
+[IpForwarding]
+ip_aliases = true
+ipv6_aliases = false
+`,
+			want: false,
+		},
+		{
+			name: "explicit-ipv6-aliases-true-overrides-ip-aliases-false",
+			extra: `
+[IpForwarding]
+ip_aliases = false
+ipv6_aliases = true
+`,
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := Load([]byte(tc.extra)); err != nil {
+				t.Fatalf("Load(%q) failed unexpectedly: %v", tc.extra, err)
+			}
+			got := Retrieve().IPForwarding.EffectiveIPv6Aliases()
+			if got != tc.want {
+				t.Errorf("EffectiveIPv6Aliases() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+
+	// Verify direct struct evaluation as well.
+	if (&IPForwarding{IPAliases: true, IPv6Aliases: boolPtr(false)}).EffectiveIPv6Aliases() {
+		t.Errorf("EffectiveIPv6Aliases() = true, want false when IPv6Aliases is explicitly false")
+	}
+	if !(&IPForwarding{IPAliases: false, IPv6Aliases: boolPtr(true)}).EffectiveIPv6Aliases() {
+		t.Errorf("EffectiveIPv6Aliases() = false, want true when IPv6Aliases is explicitly true")
+	}
+}

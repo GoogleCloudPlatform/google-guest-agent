@@ -402,6 +402,137 @@ func TestNewNicAddressSliceSuccess(t *testing.T) {
 			},
 		},
 		{
+			name: "ipv6aliases",
+			mdsJSON: `
+			{
+				"instance":  {
+					"networkInterfaces": [
+						{
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64",
+								"fd20:1000:1000:1001::/80",
+								"2001:db8:a0b:12f0::1/128"
+							]
+						}
+					]
+				}
+			}`,
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{IPAliases: true}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
+			want: &ExtraAddresses{
+				IPAliases: NewIPAddressMap([]string{
+					"2001:db8:a0b:12f0::/64",
+					"fd20:1000:1000:1001::/80",
+					"2001:db8:a0b:12f0::1/128",
+				}, nil),
+			},
+		},
+		{
+			name: "ipaliases-and-ipv6aliases",
+			mdsJSON: `
+			{
+				"instance":  {
+					"networkInterfaces": [
+						{
+							"ipAliases": [
+								"192.0.2.1/24",
+								"192.0.2.2"
+							],
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64",
+								"fd20:1000:1000:1001::/80"
+							]
+						}
+					]
+				}
+			}`,
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{IPAliases: true}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
+			want: &ExtraAddresses{
+				IPAliases: NewIPAddressMap([]string{
+					"192.0.2.1/24",
+					"192.0.2.2",
+					"2001:db8:a0b:12f0::/64",
+					"fd20:1000:1000:1001::/80",
+				}, nil),
+			},
+		},
+		{
+			name: "ipv6aliases-disabled",
+			mdsJSON: `
+			{
+				"instance":  {
+					"networkInterfaces": [
+						{
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64"
+							]
+						}
+					]
+				}
+			}`,
+			config: &cfg.Sections{IPForwarding: &cfg.IPForwarding{IPAliases: false}, NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true}},
+			want:   &ExtraAddresses{},
+		},
+		{
+			name: "ipv6aliases-disabled-independently-of-ipaliases",
+			mdsJSON: `
+			{
+				"instance":  {
+					"networkInterfaces": [
+						{
+							"ipAliases": [
+								"192.0.2.1/24"
+							],
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64"
+							]
+						}
+					]
+				}
+			}`,
+			config: func() *cfg.Sections {
+				f := false
+				return &cfg.Sections{
+					IPForwarding:      &cfg.IPForwarding{IPAliases: true, IPv6Aliases: &f},
+					NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true},
+				}
+			}(),
+			want: &ExtraAddresses{
+				IPAliases: NewIPAddressMap([]string{
+					"192.0.2.1/24",
+				}, nil),
+			},
+		},
+		{
+			name: "ipv6aliases-enabled-independently-of-ipaliases",
+			mdsJSON: `
+			{
+				"instance":  {
+					"networkInterfaces": [
+						{
+							"ipAliases": [
+								"192.0.2.1/24"
+							],
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64"
+							]
+						}
+					]
+				}
+			}`,
+			config: func() *cfg.Sections {
+				tr := true
+				return &cfg.Sections{
+					IPForwarding:      &cfg.IPForwarding{IPAliases: false, IPv6Aliases: &tr},
+					NetworkInterfaces: &cfg.NetworkInterfaces{IPForwarding: true},
+				}
+			}(),
+			want: &ExtraAddresses{
+				IPAliases: NewIPAddressMap([]string{
+					"2001:db8:a0b:12f0::/64",
+				}, nil),
+			},
+		},
+		{
 			name: "invalid-ip-addresses-only",
 			mdsJSON: `
 			{

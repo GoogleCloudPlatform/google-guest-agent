@@ -19,11 +19,16 @@ package route
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/cfg"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/metadata"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/address"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/ethernet"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/nic"
+	"github.com/GoogleCloudPlatform/google-guest-agent/internal/network/service"
 	"github.com/GoogleCloudPlatform/google-guest-agent/internal/run"
 	"github.com/google/go-cmp/cmp"
 )
@@ -49,6 +54,10 @@ func TestAdd(t *testing.T) {
 	ipAddr, err := address.ParseIP("10.138.15.222")
 	if err != nil {
 		t.Fatalf("ParseIP(%q) = %v, want nil", "10.138.15.222", err)
+	}
+	ipv6AliasAddr, err := address.ParseIP("2001:db8:a0b:12f0::/64")
+	if err != nil {
+		t.Fatalf("ParseIP(%q) = %v, want nil", "2001:db8:a0b:12f0::/64", err)
 	}
 
 	tests := []struct {
@@ -114,6 +123,17 @@ func TestAdd(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "success-ipv6-alias",
+			route: Handle{
+				Table:         "local",
+				Destination:   ipv6AliasAddr,
+				InterfaceName: "eth0",
+				Proto:         "66",
+			},
+			wantCmd: "ip -6 route add to local 2001:db8:a0b:12f0::/64 dev eth0 proto 66",
+			wantErr: false,
+		},
+		{
 			name: "command-error",
 			route: Handle{
 				Table:         "local",
@@ -165,6 +185,10 @@ func TestDelete(t *testing.T) {
 	ipAddr, err := address.ParseIP("10.138.15.222")
 	if err != nil {
 		t.Fatalf("ParseIP(%q) = %v, want nil", "10.138.15.222", err)
+	}
+	ipv6AliasAddr, err := address.ParseIP("2001:db8:a0b:12f0::/64")
+	if err != nil {
+		t.Fatalf("ParseIP(%q) = %v, want nil", "2001:db8:a0b:12f0::/64", err)
 	}
 
 	tests := []struct {
@@ -227,6 +251,17 @@ func TestDelete(t *testing.T) {
 				Proto:         "66",
 			},
 			wantCmd: "ip route delete to local 10.138.15.222 dev eth0 scope host proto 66",
+			wantErr: false,
+		},
+		{
+			name: "success-ipv6-alias",
+			route: Handle{
+				Table:         "local",
+				Destination:   ipv6AliasAddr,
+				InterfaceName: "eth0",
+				Proto:         "66",
+			},
+			wantCmd: "ip -6 route delete to local 2001:db8:a0b:12f0::/64 dev eth0 proto 66",
 			wantErr: false,
 		},
 		{
@@ -456,6 +491,36 @@ func TestFind(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "success-ipv6",
+			opts: Options{
+				Table:  "local",
+				Type:   "local",
+				Proto:  "66",
+				Device: "eth0",
+				IPv6:   true,
+			},
+			data: []string{
+				"local 2001:db8:a0b:12f0::/64 dev eth0 proto 66 metric 1024 pref medium",
+				"local fd20:1000:1000:1001::/80 dev eth0 proto 66 metric 1024 pref medium",
+			},
+			want: []Handle{
+				Handle{
+					Table:         "local",
+					Destination:   parseIP(t, "2001:db8:a0b:12f0::/64"),
+					InterfaceName: "eth0",
+					Proto:         "66",
+				},
+				Handle{
+					Table:         "local",
+					Destination:   parseIP(t, "fd20:1000:1000:1001::/80"),
+					InterfaceName: "eth0",
+					Proto:         "66",
+				},
+			},
+			wantCmd: "ip -6 route list table local type local proto 66 dev eth0",
+			wantErr: false,
+		},
+		{
 			name: "fail-invalid-destination",
 			opts: Options{Table: "local"},
 			data: []string{
@@ -584,6 +649,36 @@ func TestMissingRoutes(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:  "success-ipv6-aliases",
+			iface: "eth0",
+			addresses: []string{
+				"2001:db8:a0b:12f0::/64",
+				"fd20:1000:1000:1001::/80",
+			},
+			runner: &mockRunner{
+				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
+					return &run.Result{}, nil
+				},
+			},
+			want: []Handle{
+				Handle{
+					Table:         "local",
+					Destination:   parseIP("2001:db8:a0b:12f0::/64"),
+					InterfaceName: "eth0",
+					Type:          "local",
+					Proto:         "66",
+				},
+				Handle{
+					Table:         "local",
+					Destination:   parseIP("fd20:1000:1000:1001::/80"),
+					InterfaceName: "eth0",
+					Type:          "local",
+					Proto:         "66",
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name:  "fail-first-query",
 			iface: "eth0",
 			addresses: []string{
@@ -594,7 +689,7 @@ func TestMissingRoutes(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					args := strings.Join(opts.Args, " ")
 
-					if opts.Name == "ip" && args == "route list table local type local dev eth0" {
+					if opts.Name == "ip" && args == "-6 route list table local type local dev eth0" {
 						return nil, fmt.Errorf("failed to find routes")
 					}
 
@@ -655,6 +750,7 @@ func TestMissingRoutes(t *testing.T) {
 			addresses: []string{
 				"2001:db8::68",
 				"2001:db8::69",
+				"2001:db8:a0b:12f0::/64",
 			},
 			runner: &mockRunner{
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
@@ -663,9 +759,10 @@ func TestMissingRoutes(t *testing.T) {
 					data := []string{
 						"local 2001:db8::68 dev eth0 proto kernel scope host",
 						"local 2001:db8::69 dev eth0 proto kernel scope host",
+						"local 2001:db8:a0b:12f0::/64 dev eth0 proto 66 metric 1024 pref medium",
 					}
 
-					if opts.Name == "ip" && args == "route list table local type local dev eth0" {
+					if opts.Name == "ip" && args == "-6 route list table local type local dev eth0" {
 						return &run.Result{Output: strings.Join(data, "\n")}, nil
 					}
 
@@ -718,6 +815,14 @@ func TestExtraRoutes(t *testing.T) {
 		"10.138.15.10",
 		"10.138.15.12",
 	}
+	ipv6RouteTable := []string{
+		"local 2001:db8:a0b:12f0::/64 dev eth0 proto 66 metric 1024 pref medium",
+		"local fd20:1000:1000:1001::/80 dev eth0 proto 66 metric 1024 pref medium",
+	}
+	ipv6RouteTableIPs := []string{
+		"2001:db8:a0b:12f0::/64",
+		"fd20:1000:1000:1001::/80",
+	}
 
 	tests := []struct {
 		name       string
@@ -732,8 +837,12 @@ func TestExtraRoutes(t *testing.T) {
 			name:  "success",
 			iface: "eth0",
 			runner: &mockRunner{
-				callback: func(context.Context, run.Options) (*run.Result, error) {
-					return &run.Result{Output: strings.Join(routeTable, "\n")}, nil
+				callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+					args := strings.Join(opts.Args, " ")
+					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
+						return &run.Result{Output: strings.Join(routeTable, "\n")}, nil
+					}
+					return &run.Result{}, nil
 				},
 			},
 			want: []Handle{
@@ -752,6 +861,33 @@ func TestExtraRoutes(t *testing.T) {
 			},
 		},
 		{
+			name:  "success-ipv6-aliases",
+			iface: "eth0",
+			runner: &mockRunner{
+				callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+					args := strings.Join(opts.Args, " ")
+					if opts.Name == "ip" && args == "-6 route list table local type local proto 66 dev eth0" {
+						return &run.Result{Output: strings.Join(ipv6RouteTable, "\n")}, nil
+					}
+					return &run.Result{}, nil
+				},
+			},
+			want: []Handle{
+				Handle{
+					Table:         "local",
+					Destination:   parseIP("2001:db8:a0b:12f0::/64"),
+					InterfaceName: "eth0",
+					Type:          "local",
+				},
+				Handle{
+					Table:         "local",
+					Destination:   parseIP("fd20:1000:1000:1001::/80"),
+					InterfaceName: "eth0",
+					Type:          "local",
+				},
+			},
+		},
+		{
 			name:  "fail-find-routes",
 			iface: "eth0",
 			runner: &mockRunner{
@@ -762,11 +898,29 @@ func TestExtraRoutes(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:  "fail-find-ipv4-routes",
+			iface: "eth0",
+			runner: &mockRunner{
+				callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+					args := strings.Join(opts.Args, " ")
+					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
+						return nil, fmt.Errorf("failed to find routes")
+					}
+					return &run.Result{}, nil
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name:      "success-no-extra-routes",
 			iface:     "eth0",
-			addresses: routeTableIPs,
+			addresses: append(routeTableIPs, ipv6RouteTableIPs...),
 			runner: &mockRunner{
-				callback: func(context.Context, run.Options) (*run.Result, error) {
+				callback: func(_ context.Context, opts run.Options) (*run.Result, error) {
+					args := strings.Join(opts.Args, " ")
+					if opts.Name == "ip" && args == "-6 route list table local type local proto 66 dev eth0" {
+						return &run.Result{Output: strings.Join(ipv6RouteTable, "\n")}, nil
+					}
 					return &run.Result{Output: strings.Join(routeTable, "\n")}, nil
 				},
 			},
@@ -823,7 +977,7 @@ func TestRemoveRoutes(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					args := strings.Join(opts.Args, " ")
 
-					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "-6 route list table local type local proto 66 dev eth0" {
 						return nil, fmt.Errorf("failed to find routes")
 					}
 
@@ -839,7 +993,7 @@ func TestRemoveRoutes(t *testing.T) {
 				callback: func(ctx context.Context, opts run.Options) (*run.Result, error) {
 					args := strings.Join(opts.Args, " ")
 
-					if opts.Name == "ip" && args == "route list table local type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "route list table local scope host type local proto 66 dev eth0" {
 						return nil, fmt.Errorf("failed to find routes")
 					}
 
@@ -860,7 +1014,7 @@ func TestRemoveRoutes(t *testing.T) {
 						"local 2001:db8::69 dev eth0 proto kernel proto 66",
 					}
 
-					if opts.Name == "ip" && args == "route list table local type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "-6 route list table local type local proto 66 dev eth0" {
 						return &run.Result{Output: strings.Join(data, "\n")}, nil
 					}
 
@@ -877,7 +1031,7 @@ func TestRemoveRoutes(t *testing.T) {
 					args := strings.Join(opts.Args, " ")
 
 					// Return success an no data for ipv6 query.
-					if opts.Name == "ip" && args == "route list table local type local proto 66 dev eth0" {
+					if opts.Name == "ip" && args == "-6 route list table local type local proto 66 dev eth0" {
 						return &run.Result{}, nil
 					}
 
@@ -916,4 +1070,174 @@ func TestRemoveRoutes(t *testing.T) {
 
 	}
 
+}
+
+type testRunner struct {
+	callback     func(ctx context.Context, opts run.Options) (*run.Result, error)
+	seenCommands []string
+}
+
+func (tr *testRunner) WithContext(ctx context.Context, opts run.Options) (*run.Result, error) {
+	tr.seenCommands = append(tr.seenCommands, fmt.Sprintf("%s %s", opts.Name, strings.Join(opts.Args, " ")))
+	if tr.callback == nil {
+		return &run.Result{}, nil
+	}
+	return tr.callback(ctx, opts)
+}
+
+func TestSetup(t *testing.T) {
+	if err := cfg.Load(nil); err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+
+	tests := []struct {
+		name           string
+		mdsJSON        string
+		mockCmdOutputs map[string]string
+		wantCmds       []string
+		forbidCmdSub   []string
+	}{
+		{
+			name: "ipv4-only",
+			mdsJSON: `
+			{
+				"instance": {
+					"networkInterfaces": [
+						{
+							"ipAliases": [
+								"192.0.2.1/24",
+								"192.0.2.2"
+							]
+						}
+					]
+				}
+			}`,
+			mockCmdOutputs: map[string]string{
+				"-6 route list table local type local proto 66 dev eth0":         "",
+				"route list table local scope host type local proto 66 dev eth0": "local 192.0.2.3 dev eth0 proto 66 scope host\n",
+				"-6 route list table local type local dev eth0":                  "",
+				"route list table local scope host type local dev eth0":          "local 192.0.2.2 dev eth0 proto kernel scope host\n",
+			},
+			wantCmds: []string{
+				"ip route delete to local 192.0.2.3 dev eth0",
+				"ip route add to local 192.0.2.0/24 dev eth0 proto 66",
+			},
+			forbidCmdSub: []string{
+				"ip -6 route add",
+				"ip -6 route delete",
+			},
+		},
+		{
+			name: "ipv4-and-ipv6",
+			mdsJSON: `
+			{
+				"instance": {
+					"networkInterfaces": [
+						{
+							"ipAliases": [
+								"192.0.2.1/24",
+								"192.0.2.2"
+							],
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64",
+								"fd20:1000:1000:1001::/80"
+							]
+						}
+					]
+				}
+			}`,
+			mockCmdOutputs: map[string]string{
+				"-6 route list table local type local proto 66 dev eth0":         "local 2001:db8:9999::/64 dev eth0 proto 66 metric 1024 pref medium\nlocal fd20:1000:1000:1001::/80 dev eth0 proto 66 metric 1024 pref medium\n",
+				"route list table local scope host type local proto 66 dev eth0": "local 192.0.2.3 dev eth0 proto 66 scope host\n",
+				"-6 route list table local type local dev eth0":                  "local fd20:1000:1000:1001::/80 dev eth0 proto 66 metric 1024 pref medium\n",
+				"route list table local scope host type local dev eth0":          "local 192.0.2.2 dev eth0 proto kernel scope host\n",
+			},
+			wantCmds: []string{
+				"ip -6 route delete to local 2001:db8:9999::/64 dev eth0",
+				"ip route delete to local 192.0.2.3 dev eth0",
+				"ip route add to local 192.0.2.0/24 dev eth0 proto 66",
+				"ip -6 route add to local 2001:db8:a0b:12f0::/64 dev eth0 proto 66",
+			},
+		},
+		{
+			name: "steady-state-no-op",
+			mdsJSON: `
+			{
+				"instance": {
+					"networkInterfaces": [
+						{
+							"ipAliases": [
+								"192.0.2.0/24",
+								"192.0.2.2"
+							],
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64",
+								"fd20:1000:1000:1001::/80"
+							]
+						}
+					]
+				}
+			}`,
+			mockCmdOutputs: map[string]string{
+				"-6 route list table local type local proto 66 dev eth0":         "local 2001:db8:a0b:12f0::/64 dev eth0 proto 66 metric 1024 pref medium\nlocal fd20:1000:1000:1001::/80 dev eth0 proto 66 metric 1024 pref medium\n",
+				"route list table local scope host type local proto 66 dev eth0": "local 192.0.2.0/24 dev eth0 proto 66 scope host\n",
+				"-6 route list table local type local dev eth0":                  "local 2001:db8:a0b:12f0::/64 dev eth0 proto 66 metric 1024 pref medium\nlocal fd20:1000:1000:1001::/80 dev eth0 proto 66 metric 1024 pref medium\n",
+				"route list table local scope host type local dev eth0":          "local 192.0.2.0/24 dev eth0 proto 66 scope host\nlocal 192.0.2.2 dev eth0 proto kernel scope host\n",
+			},
+			forbidCmdSub: []string{
+				"route add",
+				"route delete",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mds, err := metadata.UnmarshalDescriptor(tc.mdsJSON)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%q) returned an unexpected error: %v", tc.mdsJSON, err)
+			}
+
+			opts := service.NewOptions(nil, []*nic.Configuration{
+				{
+					Interface: &ethernet.Interface{
+						NameOp: func() string { return "eth0" },
+					},
+					ExtraAddresses: address.NewExtraAddresses(mds.Instance().NetworkInterfaces()[0], cfg.Retrieve(), nil),
+				},
+			})
+
+			tr := &testRunner{
+				callback: func(ctx context.Context, runOpts run.Options) (*run.Result, error) {
+					allArgs := strings.Join(runOpts.Args, " ")
+					if out, ok := tc.mockCmdOutputs[allArgs]; ok {
+						return &run.Result{Output: out}, nil
+					}
+					return &run.Result{}, nil
+				},
+			}
+
+			oldClient := run.Client
+			run.Client = tr
+			t.Cleanup(func() { run.Client = oldClient })
+
+			if err := Setup(context.Background(), opts); err != nil {
+				t.Fatalf("Setup() = %v, want nil", err)
+			}
+
+			for _, wantCmd := range tc.wantCmds {
+				if !slices.Contains(tr.seenCommands, wantCmd) {
+					t.Errorf("Setup() did not run expected command %q; seen commands:\n%s", wantCmd, strings.Join(tr.seenCommands, "\n"))
+				}
+			}
+
+			for _, forbidSub := range tc.forbidCmdSub {
+				for _, seenCmd := range tr.seenCommands {
+					if strings.Contains(seenCmd, forbidSub) {
+						t.Errorf("Setup() ran forbidden command %q matching %q; seen commands:\n%s", seenCmd, forbidSub, strings.Join(tr.seenCommands, "\n"))
+					}
+				}
+			}
+		})
+	}
 }

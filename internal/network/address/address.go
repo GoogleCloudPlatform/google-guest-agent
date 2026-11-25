@@ -171,10 +171,19 @@ func NewExtraAddresses(nic *metadata.NetworkInterface, config *cfg.Sections, ign
 		targetInstanceIPs = NewIPAddressMap(nic.TargetInstanceIPs(), ignore)
 	}
 
-	// Map IP aliases if configured, in the cases of IP aliases no ignore rule
-	// is applied.
-	if config.IPForwarding.IPAliases {
-		ipAliases = NewIPAddressMap(nic.IPAliases(), nil)
+	// Map IP aliases and IPv6 aliases if configured, in the cases of IP aliases
+	// no ignore rule is applied.
+	var aliases []string
+	if config.IPForwarding != nil {
+		if config.IPForwarding.IPAliases {
+			aliases = append(aliases, nic.IPAliases()...)
+		}
+		if config.IPForwarding.EffectiveIPv6Aliases() {
+			aliases = append(aliases, nic.IPv6Aliases()...)
+		}
+	}
+	if len(aliases) > 0 {
+		ipAliases = NewIPAddressMap(aliases, nil)
 	}
 
 	// Map forwarded IPs and forwarded IPv6s if configured, ignore addresses

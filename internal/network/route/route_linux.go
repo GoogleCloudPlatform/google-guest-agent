@@ -39,7 +39,10 @@ type routeArgs struct {
 }
 
 // newArgs creates a new routeArgs.
-func newArgs() *routeArgs {
+func newArgs(ipv6 bool) *routeArgs {
+	if ipv6 {
+		return &routeArgs{slice: []string{"-6", "route"}}
+	}
 	return &routeArgs{slice: []string{"route"}}
 }
 
@@ -63,7 +66,7 @@ func (lc *linuxClient) Add(ctx context.Context, route Handle) error {
 		return fmt.Errorf("destination is required")
 	}
 
-	args := newArgs()
+	args := newArgs(route.Destination.IsIPv6())
 	args.add("add")
 	args.add("to", route.Table, route.Destination.String())
 
@@ -101,7 +104,7 @@ func (lc *linuxClient) Delete(ctx context.Context, route Handle) error {
 		return fmt.Errorf("interface name is unspecified")
 	}
 
-	args := newArgs()
+	args := newArgs(route.Destination.IsIPv6())
 	args.add("delete")
 	args.add("to", route.Table, route.Destination.String())
 	args.add("dev", route.InterfaceName)
@@ -133,7 +136,7 @@ func (lc *linuxClient) Find(ctx context.Context, opts Options) ([]Handle, error)
 		return nil, fmt.Errorf("table is required")
 	}
 
-	args := newArgs()
+	args := newArgs(opts.IPv6)
 
 	args.add("list", "table", opts.Table)
 
@@ -276,6 +279,7 @@ func (lc *linuxClient) MissingRoutes(ctx context.Context, iface string, addresse
 		Table:  "local",
 		Type:   "local",
 		Device: iface,
+		IPv6:   true,
 	}
 
 	ipv6Routes, err := lc.Find(ctx, opts)
@@ -287,6 +291,7 @@ func (lc *linuxClient) MissingRoutes(ctx context.Context, iface string, addresse
 		ignoreAddrs = append(ignoreAddrs, route.Destination)
 	}
 
+	opts.IPv6 = false
 	opts.Scope = "host"
 	ipv4Routes, err := lc.Find(ctx, opts)
 	if err != nil {
@@ -336,16 +341,33 @@ func (lc *linuxClient) ExtraRoutes(ctx context.Context, iface string, wantedRout
 		Type:   "local",
 		Device: iface,
 		Proto:  config.IPForwarding.EthernetProtoID,
+		IPv6:   true,
 	}
 
-	allRoutes, err := lc.Find(ctx, opts)
+	ipv6Routes, err := lc.Find(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find routes: %w", err)
+		return nil, fmt.Errorf("failed to find IPv6 routes: %w", err)
 	}
+
+	opts.IPv6 = false
+	opts.Scope = "host"
+	ipv4Routes, err := lc.Find(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find IPv4 routes: %w", err)
+	}
+
+	allRoutes := append(ipv6Routes, ipv4Routes...)
 
 	var res []Handle
+	seen := make(map[string]bool)
 	for _, rt := range allRoutes {
-		if _, ok := wantedRoutes[rt.Destination.String()]; !ok {
+		dest := rt.Destination.String()
+		if seen[dest] {
+			continue
+		}
+		seen[dest] = true
+
+		if _, ok := wantedRoutes[dest]; !ok {
 			res = append(res, Handle{
 				Destination:   rt.Destination,
 				InterfaceName: iface,
@@ -368,6 +390,7 @@ func (lc *linuxClient) RemoveRoutes(ctx context.Context, iface string) error {
 		Type:   "local",
 		Proto:  config.IPForwarding.EthernetProtoID,
 		Device: iface,
+		IPv6:   true,
 	}
 
 	ipv6Routes, err := lc.Find(ctx, opts)
@@ -381,6 +404,7 @@ func (lc *linuxClient) RemoveRoutes(ctx context.Context, iface string) error {
 		}
 	}
 
+	opts.IPv6 = false
 	opts.Scope = "host"
 	ipv4Routes, err := lc.Find(ctx, opts)
 	if err != nil {
