@@ -85,7 +85,7 @@ type instance struct {
 	// if service accounts are present.
 	ServiceAccounts map[string]json.RawMessage
 	// IdentityConfiguration is the identity configuration of the instance.
-	IdentityConfiguration identityConfiguration `json:"identity-configuration"`
+	IdentityConfiguration identityConfiguration `json:"identityConfiguration"`
 }
 
 // networkInterfaces describes the instances network interfaces configurations.
@@ -125,7 +125,7 @@ type vlanInterface struct {
 type identityConfiguration struct {
 	// IdentityUUID is the identity UUID of the instance. This gets changed when
 	// the service account is changed.
-	IdentityUUID string `json:"identity-uuid"`
+	IdentityUUID string `json:"identityUuid"`
 }
 
 // project describes the projects instance's attributes. This is the internal

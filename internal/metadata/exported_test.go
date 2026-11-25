@@ -341,3 +341,55 @@ func TestIsPluginEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestIdentityUUID(t *testing.T) {
+	tests := []struct {
+		name    string
+		mdsData string
+		want    string
+	}{
+		{
+			name:    "identity_uuid_set",
+			mdsData: `{"instance": {"identityConfiguration": {"identityUuid": "identity-1"}}}`,
+			want:    "identity-1",
+		},
+		{
+			name:    "identity_uuid_empty",
+			mdsData: `{"instance": {"identityConfiguration": {"identityUuid": ""}}}`,
+			want:    "",
+		},
+		{
+			name:    "identity_uuid_missing",
+			mdsData: `{"instance": {"identityConfiguration": {}}}`,
+			want:    "",
+		},
+		{
+			name:    "invalid_identity_configuration_key",
+			mdsData: `{"instance": {"identity-configuration": {"identityUuid": "identity-1"}}}`,
+			want:    "",
+		},
+		{
+			name:    "invalid_identity_uuid_key",
+			mdsData: `{"instance": {"identityConfiguration": {"identity-uuid": "identity-1"}}}`,
+			want:    "",
+		},
+		{
+			name:    "identity_configuration_missing",
+			mdsData: `{"instance": {}}`,
+			want:    "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mds, err := UnmarshalDescriptor(test.mdsData)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%q) failed unexpectedly: %v", test.mdsData, err)
+			}
+
+			if got := mds.Instance().IdentityConfiguration().IdentityUUID(); got != test.want {
+				t.Errorf("UnmarshalDescriptor(%q) IdentityUUID() = %q, want %q", test.mdsData, got, test.want)
+			}
+		})
+	}
+}

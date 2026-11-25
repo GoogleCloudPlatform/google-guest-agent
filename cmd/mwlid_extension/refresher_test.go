@@ -1258,16 +1258,16 @@ func (f *fakeMDSClient) WriteGuestAttributes(ctx context.Context, key, value str
 func TestWatchIdentity(t *testing.T) {
 	mdsIdentity1 := `{
 	"instance": {
-		"identity-configuration": {
-			"identity-uuid": "identity-1"
+		"identityConfiguration": {
+			"identityUuid": "identity-1"
 		}
 	}
 }`
 
 	mdsIdentity2 := `{
 	"instance": {
-		"identity-configuration": {
-			"identity-uuid": "identity-2"
+		"identityConfiguration": {
+			"identityUuid": "identity-2"
 		}
 	}
 }`
