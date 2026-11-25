@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/logtest"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_telemetry_extension/internal/trustedfile"
@@ -210,6 +211,128 @@ func TestCheckStringMatchOSName(t *testing.T) {
 	}
 	if gotPInfo.OSName != "linux" {
 		t.Errorf("OSName = %q, want 'linux'", gotPInfo.OSName)
+	}
+}
+
+func TestCompileRegexCachesResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		wantErr bool
+	}{
+		{name: "valid", pattern: `^(?:python[0-9.]*)\s+-m\s+verl\.trainer\.main_ppo\b`},
+		{name: "invalid", pattern: "[", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			re1, err1 := compileRegex(tc.pattern)
+			re2, err2 := compileRegex(tc.pattern)
+			if (err1 != nil) != tc.wantErr || (err2 != nil) != tc.wantErr {
+				t.Fatalf("compileRegex(%q) errors = %v, %v, want error: %v", tc.pattern, err1, err2, tc.wantErr)
+			}
+			if re1 != re2 {
+				t.Errorf("compileRegex(%q) returned %p then %p, want the cached regexp both times", tc.pattern, re1, re2)
+			}
+		})
+	}
+}
+
+func TestCompileRegexEvictsWhenFull(t *testing.T) {
+	clearRegexCache()
+	t.Cleanup(clearRegexCache)
+	for i := range maxCachedRegexps {
+		if _, err := compileRegex(fmt.Sprintf("^pattern%d$", i)); err != nil {
+			t.Fatalf("compileRegex() failed: %v", err)
+		}
+	}
+	if got := regexCacheLen(); got != maxCachedRegexps {
+		t.Fatalf("Cache has %d entries after compiling %d patterns, want %d", got, maxCachedRegexps, maxCachedRegexps)
+	}
+
+	const extra = "^one_more$"
+	re, err := compileRegex(extra)
+	if err != nil {
+		t.Fatalf("compileRegex(%q) failed: %v", extra, err)
+	}
+	if got := regexCacheLen(); got != 1 {
+		t.Errorf("Cache has %d entries after exceeding the limit, want 1", got)
+	}
+	again, err := compileRegex(extra)
+	if err != nil {
+		t.Fatalf("compileRegex(%q) after eviction failed: %v", extra, err)
+	}
+	if again != re {
+		t.Errorf("compileRegex(%q) after eviction returned %p then %p, want the cached regexp both times", extra, re, again)
+	}
+	if !re.MatchString("one_more") {
+		t.Errorf("compileRegex(%q).MatchString(%q) = false, want true", extra, "one_more")
+	}
+}
+
+func regexCacheLen() int {
+	regexCache.Lock()
+	defer regexCache.Unlock()
+	return len(regexCache.m)
+}
+
+// TestCheckStringMatchRejectsBacktrackingSyntax checks that the engine rejects
+// syntax that only a backtracking regex engine supports, so rules can't depend
+// on it.
+func TestCheckStringMatchRejectsBacktrackingSyntax(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		value   string
+	}{
+		{name: "backreference", pattern: `(a+)\1`, value: "aaaa"},
+		{name: "lookahead", pattern: `python(?=3)`, value: "python3"},
+		{name: "negative_lookahead", pattern: `python(?!2)`, value: "python3"},
+		{name: "lookbehind", pattern: `(?<=/)python`, value: "/usr/bin/python"},
+		{name: "possessive_quantifier", pattern: `a++b`, value: "aab"},
+		{name: "atomic_group", pattern: `(?>a+)b`, value: "aab"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := compileRegex(tc.pattern); err == nil {
+				t.Errorf("compileRegex(%q) succeeded, want error", tc.pattern)
+			}
+			if got, _ := checkStringMatch(tc.pattern, []string{tc.value}, nil, true); got {
+				t.Errorf("checkStringMatch(%q, %q) = true, want false", tc.pattern, tc.value)
+			}
+		})
+	}
+}
+
+// TestCheckStringMatchLinearTime guards against catastrophic backtracking, as
+// in the Cloudflare outage of July 2, 2019. A backtracking engine takes time
+// cubic in the input size to reject this input with Cloudflare's regex, which
+// means hours or more for these inputs. Matching with RE2 is linear in the
+// input size, so the time limit is generous to avoid flakiness.
+func TestCheckStringMatchLinearTime(t *testing.T) {
+	// The regex from https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/.
+	const cloudflarePattern = "(?:(?:\\\"|'|\\]|\\}|\\\\|\\d|(?:nan|infinity|true|false|null|undefined|symbol|math)|\\`|\\-|\\+)+[)]*;?((?:\\s|-|~|!|{}|\\|\\||\\+)*.*(?:.*=.*)))"
+	tests := []struct {
+		name    string
+		pattern string
+		value   string
+	}{
+		{name: "cloudflare_no_equals", pattern: cloudflarePattern, value: "1" + strings.Repeat("x", 100_000)},
+		{name: "nested_quantifiers", pattern: `^(a+)+$`, value: strings.Repeat("a", 100_000) + "!"},
+		{name: "overlapping_alternation", pattern: `^(a|a)*$`, value: strings.Repeat("a", 100_000) + "!"},
+		{name: "wildcards_around_literal", pattern: `^.*.*.*=.*$`, value: strings.Repeat("x", 100_000)},
+	}
+	const limit = 10 * time.Second
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			got, _ := checkStringMatch(tc.pattern, []string{tc.value}, nil, true)
+			if elapsed := time.Since(start); elapsed > limit {
+				t.Errorf("checkStringMatch(%q, <%d bytes>) took %v, want less than %v", tc.pattern, len(tc.value), elapsed, limit)
+			}
+			if got {
+				t.Errorf("checkStringMatch(%q, <%d bytes>) = true, want false", tc.pattern, len(tc.value))
+			}
+		})
 	}
 }
 
