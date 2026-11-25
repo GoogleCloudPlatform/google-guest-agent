@@ -96,6 +96,7 @@ type networkInterface struct {
 	ForwardedIpv6s    []string
 	TargetInstanceIps []string
 	IPAliases         []string
+	IPv6Aliases       []string
 	Mac               string
 	DHCPv6Refresh     string
 }

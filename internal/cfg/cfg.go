@@ -366,7 +366,20 @@ type Diagnostics struct {
 type IPForwarding struct {
 	EthernetProtoID   string `ini:"ethernet_proto_id,omitempty"`
 	IPAliases         bool   `ini:"ip_aliases,omitempty"`
+	IPv6Aliases       *bool  `ini:"ipv6_aliases,omitempty"`
 	TargetInstanceIPs bool   `ini:"target_instance_ips,omitempty"`
+}
+
+// EffectiveIPv6Aliases returns IPv6Aliases if explicitly configured, or falls
+// back to IPAliases when unset.
+func (f *IPForwarding) EffectiveIPv6Aliases() bool {
+	if f == nil {
+		return false
+	}
+	if f.IPv6Aliases != nil {
+		return *f.IPv6Aliases
+	}
+	return f.IPAliases
 }
 
 // Instance contains the configurations of Instance section.

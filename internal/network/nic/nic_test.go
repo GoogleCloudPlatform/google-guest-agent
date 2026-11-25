@@ -44,7 +44,10 @@ func TestNewConfig(t *testing.T) {
 					"networkInterfaces": [
 						{
 							"MAC": "00:00:5e:00:53:01",
-							"DHCPv6Refresh": "not-empty"
+							"DHCPv6Refresh": "not-empty",
+							"ipv6Aliases": [
+								"2001:db8:a0b:12f0::/64"
+							]
 						}
 					]
 				}

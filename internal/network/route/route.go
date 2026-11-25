@@ -81,6 +81,8 @@ type Options struct {
 	Proto string
 	// Device is the device of the route.
 	Device string
+	// IPv6 indicates whether the route operation is for IPv6.
+	IPv6 bool
 }
 
 // routeOperations is the interface for a route backend.

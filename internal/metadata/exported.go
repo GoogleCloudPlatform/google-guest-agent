@@ -371,6 +371,11 @@ func (nic *NetworkInterface) IPAliases() []string {
 	return nic.internal.IPAliases
 }
 
+// IPv6Aliases returns the instance network interfaces IPv6 aliases.
+func (nic *NetworkInterface) IPv6Aliases() []string {
+	return nic.internal.IPv6Aliases
+}
+
 // MAC returns the instance network interfaces MAC address.
 func (nic *NetworkInterface) MAC() string {
 	return nic.internal.Mac

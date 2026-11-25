@@ -341,7 +341,6 @@ func TestIsPluginEnabled(t *testing.T) {
 		})
 	}
 }
-
 func TestIdentityUUID(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -389,6 +388,78 @@ func TestIdentityUUID(t *testing.T) {
 
 			if got := mds.Instance().IdentityConfiguration().IdentityUUID(); got != test.want {
 				t.Errorf("UnmarshalDescriptor(%q) IdentityUUID() = %q, want %q", test.mdsData, got, test.want)
+			}
+		})
+	}
+}
+
+func TestNetworkInterfaceIPv6Aliases(t *testing.T) {
+	tests := []struct {
+		name            string
+		mdsData         string
+		wantIPAliases   []string
+		wantIPv6Aliases []string
+	}{
+		{
+			name: "with_ipv4_and_ipv6_aliases",
+			mdsData: `{
+				"instance": {
+					"networkInterfaces": [
+						{
+							"ipAliases": ["10.128.0.0/24", "10.128.1.5"],
+							"ipv6Aliases": ["2001:db8:a0b:12f0::/64", "fd20:1000:1000:1001::/80"]
+						}
+					]
+				}
+			}`,
+			wantIPAliases:   []string{"10.128.0.0/24", "10.128.1.5"},
+			wantIPv6Aliases: []string{"2001:db8:a0b:12f0::/64", "fd20:1000:1000:1001::/80"},
+		},
+		{
+			name: "ipv6_aliases_omitted",
+			mdsData: `{
+				"instance": {
+					"networkInterfaces": [
+						{
+							"ipAliases": ["10.128.0.0/24"]
+						}
+					]
+				}
+			}`,
+			wantIPAliases:   []string{"10.128.0.0/24"},
+			wantIPv6Aliases: nil,
+		},
+		{
+			name: "ipv6_aliases_empty",
+			mdsData: `{
+				"instance": {
+					"networkInterfaces": [
+						{
+							"ipv6Aliases": []
+						}
+					]
+				}
+			}`,
+			wantIPAliases:   nil,
+			wantIPv6Aliases: []string{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			desc, err := UnmarshalDescriptor(tc.mdsData)
+			if err != nil {
+				t.Fatalf("UnmarshalDescriptor(%s) failed unexpectedly: %v", tc.mdsData, err)
+			}
+			nics := desc.Instance().NetworkInterfaces()
+			if len(nics) != 1 {
+				t.Fatalf("len(NetworkInterfaces()) = %d, want 1", len(nics))
+			}
+			if diff := cmp.Diff(tc.wantIPAliases, nics[0].IPAliases()); diff != "" {
+				t.Errorf("IPAliases() returned unexpected diff (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.wantIPv6Aliases, nics[0].IPv6Aliases()); diff != "" {
+				t.Errorf("IPv6Aliases() returned unexpected diff (-want +got):\n%s", diff)
 			}
 		})
 	}
