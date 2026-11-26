@@ -2,6 +2,7 @@ PBGO_FILES = \
 	cmd/core_plugin/agentcrypto/proto/guest_credentials.pb.go \
 	cmd/core_plugin/snapshot/proto/snapshot_service.pb.go \
 	cmd/guest_net_telemetry/proto/network_stats_report.pb.go \
+	cmd/guest_net_telemetry/proto/network_telemetry_config.pb.go \
 	internal/acp/proto/agent_controlplane.pb.go \
 	cmd/mwlid_extension/proto/mwlid/workload_identity.pb.go \
 	pkg/proto/plugin_comm.pb.go
@@ -67,10 +68,13 @@ SOURCE = $(subst .pb.go,.proto,$(@))
 FILENAME = $(notdir $(SOURCE))
 
 # The conditional -M flag.
-# This variable will be set to a value only for workload_identity.proto as this
-# proto is not managed within guest-agent repo and needs to be compiled in
-# separate directory. This is no-op for all other protos.
-M_FLAG = $(if $(filter workload_identity.proto,$(FILENAME)),--go_opt=M$(FILENAME)=/mwlid --go-grpc_opt=M$(FILENAME)=/mwlid,)
+# Set for workload_identity.proto (managed outside guest-agent repo and compiled
+# in a separate directory) and network_telemetry_config.proto (whose import
+# network_stats_report.proto uses a short go_package that is not a valid Go
+# module import path). No-op for all other protos.
+M_FLAG = \
+	$(if $(filter workload_identity.proto,$(FILENAME)),--go_opt=M$(FILENAME)=/mwlid --go-grpc_opt=M$(FILENAME)=/mwlid,) \
+	$(if $(filter network_telemetry_config.proto,$(FILENAME)),--go_opt=Mnetwork_stats_report.proto=github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_stats_report,)
 
 $(PBGO_FILES): fetch-go-tpm-tools fetch-mwlid-proto
 	$(Q)echo "[GEN] $(SOURCE)"

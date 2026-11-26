@@ -12,11 +12,13 @@ package dhcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector"
@@ -61,14 +63,12 @@ const (
 	// unknownTimeSinceBootMs is reported when the interface is unconfigured or
 	// the kernel did not supply an IFA_CACHEINFO creation timestamp.
 	unknownTimeSinceBootMs int64 = -1
-	defaultSysfsNetPath          = "/sys/class/net"
 )
 
 // Collector implements collector.Collector for SOURCE_DHCP.
 type Collector struct {
-	// Optional hooks overriding the Netlink dump and the sysfs root in tests.
+	// DumpIPv4Addrs overrides the Netlink RTM_GETADDR dump in tests.
 	DumpIPv4Addrs func() ([]byte, error)
-	SysfsNetPath  string
 }
 
 // New creates a Collector that reads live kernel Netlink and sysfs state.
@@ -93,26 +93,35 @@ func (c *Collector) dumpIPv4Addrs() ([]byte, error) {
 	return dumpIPv4AddrsNetlink()
 }
 
-// carrierUp reports whether the NIC link is up, treating an unreadable sysfs
-// carrier file (e.g. the interface disappeared mid-cycle) as down.
-func (c *Collector) carrierUp(ifaceName string) bool {
-	base := c.SysfsNetPath
-	if base == "" {
-		base = defaultSysfsNetPath
-	}
-	data, err := os.ReadFile(filepath.Join(base, ifaceName, "carrier"))
+// parseCarrier interprets a sysfs carrier file read. Missing carrier files
+// (os.ErrNotExist, e.g. the interface disappeared mid-cycle) and EINVAL (which
+// the kernel's carrier_show returns while an interface is admin down) report
+// link down without failing collection; any other read error is returned so
+// sysfs failures are visible.
+func parseCarrier(data []byte, err error) (bool, error) {
 	if err != nil {
-		return false
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.EINVAL) {
+			return false, nil
+		}
+		return false, fmt.Errorf("dhcp: %w", err)
 	}
-	return strings.TrimSpace(string(data)) == "1"
+	return strings.TrimSpace(string(data)) == "1", nil
+}
+
+// carrierUp reports whether the NIC link is up.
+func (c *Collector) carrierUp(ifaceName string) (bool, error) {
+	return parseCarrier(os.ReadFile(filepath.Join(collector.SysfsNetPath(), ifaceName, "carrier")))
 }
 
 // Collect queries the kernel IPv4 address table once per cycle and emits one
-// MetricsGroup per non-loopback interface. A failed Netlink dump returns an
-// error rather than an empty result, so a transient kernel error is never
-// reported as a DHCP blackhole.
+// MetricsGroup per device-backed NIC and Dynamic NIC VLAN interface. A failed
+// Netlink dump returns an error rather than an empty result, so a transient
+// kernel error is never reported as a DHCP blackhole.
 func (c *Collector) Collect(_ context.Context) (collector.Output, error) {
-	ifaces := collector.NonLoopbackInterfaces()
+	ifaces, err := collector.Interfaces(collector.InterfaceNIC, collector.InterfaceDynamicNIC)
+	if err != nil {
+		return collector.Output{}, err
+	}
 	if len(ifaces) == 0 {
 		return collector.Output{}, nil
 	}
@@ -129,7 +138,10 @@ func (c *Collector) Collect(_ context.Context) (collector.Output, error) {
 	var groups []*pb.MetricsGroup
 	for _, iface := range ifaces {
 		startTime := collector.Now()
-		carrierUp := c.carrierUp(iface.Name)
+		carrierUp, err := c.carrierUp(iface.Name)
+		if err != nil {
+			return collector.Output{}, err
+		}
 
 		state := StateUnconfigured
 		assignedMs := unknownTimeSinceBootMs

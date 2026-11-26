@@ -5,11 +5,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector"
+	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector/agentevent"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_stats_report"
 )
@@ -17,9 +21,9 @@ import (
 func TestReporterExpectedAtDueAndBatching(t *testing.T) {
 	epoch := time.Unix(1779383000, 0)
 	cEth := &fakeCollector{name: collector.NameEthtool, src: pb.SourceId_SOURCE_ETHTOOL}
-	cSnmp := &fakeCollector{name: collector.NameSNMP, src: pb.SourceId_SOURCE_SNMP}
+	cSNMP := &fakeCollector{name: collector.NameSNMP, src: pb.SourceId_SOURCE_SNMP}
 	cAe := &fakeCollector{name: collector.NameAgentEvent, src: pb.SourceId_SOURCE_AGENT_EVENT}
-	cDhcp := &fakeCollector{name: collector.NameDHCP, src: pb.SourceId_SOURCE_SNMP}
+	cDHCP := &fakeCollector{name: collector.NameDHCP, src: pb.SourceId_SOURCE_SNMP}
 
 	cfg := PluginConfig{
 		Collectors: map[string]CollectorConfig{
@@ -43,7 +47,7 @@ func TestReporterExpectedAtDueAndBatching(t *testing.T) {
 		return cp
 	}
 
-	rep := NewReporter([]collector.Collector{cEth, cSnmp, cDhcp, cAe}, cfg, epoch, func(ctx context.Context, r *pb.NetworkStatsReport, seq int64) {
+	rep := NewReporter([]collector.Collector{cEth, cSNMP, cDHCP, cAe}, cfg, epoch, func(ctx context.Context, r *pb.NetworkStatsReport, seq int64) {
 		mu.Lock()
 		dispatched = append(dispatched, r)
 		mu.Unlock()
@@ -161,6 +165,23 @@ func TestReporterExpectedAtDueAndBatching(t *testing.T) {
 	if gotGroups := len(getDispatched()[2].GetMetrics()); gotGroups != 2 {
 		t.Errorf("dispatched[2] partial flush Metrics groups = %d, want 2 (ethtool + agentevent)", gotGroups)
 	}
+	aeMetrics, ok := findAgentEventMetrics(getDispatched()[2])
+	if !ok {
+		t.Fatalf("dispatched[2] has no SOURCE_AGENT_EVENT group: %v", getDispatched()[2])
+	}
+	for _, timedOut := range []string{collector.NameSNMP, collector.NameDHCP} {
+		if got := aeMetrics[agentevent.CollectorStatusKeyPrefix+timedOut].GetStringValue(); got != "timeout" {
+			t.Errorf("dispatched[2] %s status = %q, want timeout", timedOut, got)
+		}
+		if got := aeMetrics[agentevent.CollectorErrorKeyPrefix+timedOut].GetStringValue(); got == "" {
+			t.Errorf("dispatched[2] %s error is empty on timeout, want non-empty", timedOut)
+		}
+	}
+	for _, okName := range []string{collector.NameEthtool, collector.NameAgentEvent} {
+		if got := aeMetrics[agentevent.CollectorStatusKeyPrefix+okName].GetStringValue(); got != "ok" {
+			t.Errorf("dispatched[2] %s status = %q, want ok", okName, got)
+		}
+	}
 
 	// Send a late straggler for already-flushed due120 and verify it is dropped without reopening due120.
 	in <- collector.Result{
@@ -217,6 +238,111 @@ func TestReporterExpectedAtDueAndBatching(t *testing.T) {
 	}
 	if gotGroups := len(getDispatched()[3].GetMetrics()); gotGroups != 3 {
 		t.Errorf("dispatched[3] (with 1 collector error) Metrics groups = %d, want 3", gotGroups)
+	}
+	errMetrics, ok := findAgentEventMetrics(getDispatched()[3])
+	if !ok {
+		t.Fatalf("dispatched[3] has no SOURCE_AGENT_EVENT group: %v", getDispatched()[3])
+	}
+	if got := errMetrics[agentevent.CollectorStatusKeyPrefix+collector.NameSNMP].GetStringValue(); got != "error" {
+		t.Errorf("dispatched[3] snmp status = %q, want error", got)
+	}
+	if got := errMetrics[agentevent.CollectorErrorKeyPrefix+collector.NameSNMP].GetStringValue(); got != "snmp read error" {
+		t.Errorf("dispatched[3] snmp error = %q, want %q", got, "snmp read error")
+	}
+}
+
+// findAgentEventMetrics returns the metrics of the SOURCE_AGENT_EVENT group in r, and whether r
+// has such a group.
+func findAgentEventMetrics(r *pb.NetworkStatsReport) (map[string]*pb.MetricValue, bool) {
+	for _, g := range r.GetMetrics() {
+		if g.GetSource() == uint64(pb.SourceId_SOURCE_AGENT_EVENT) {
+			return g.GetAgentMetrics(), true
+		}
+	}
+	return nil, false
+}
+
+func TestBuildReport_CollectorStatusFailuresAndTruncation(t *testing.T) {
+	epoch := time.Unix(1779383000, 0)
+	cEth := &fakeCollector{name: collector.NameEthtool, src: pb.SourceId_SOURCE_ETHTOOL}
+	cSNMP := &fakeCollector{name: collector.NameSNMP, src: pb.SourceId_SOURCE_SNMP}
+	cDHCP := &fakeCollector{name: collector.NameDHCP, src: pb.SourceId_SOURCE_DHCP}
+	cfg := PluginConfig{
+		Collectors: map[string]CollectorConfig{
+			collector.NameEthtool: {Enabled: true, Interval: 60 * time.Second},
+			collector.NameSNMP:    {Enabled: true, Interval: 60 * time.Second},
+			collector.NameDHCP:    {Enabled: true, Interval: 60 * time.Second},
+		},
+	}
+	rep := NewReporter([]collector.Collector{cEth, cSNMP, cDHCP}, cfg, epoch, nil)
+
+	// Long UTF-8 error whose byte boundary cuts inside a multi-byte rune ("€" is 3 bytes).
+	longErr := errors.New(strings.Repeat("a", 199) + "€€")
+	deadlineErr := fmt.Errorf("collect snmp: %w", context.DeadlineExceeded)
+	batch := map[string]collector.Result{
+		collector.NameEthtool: {Name: collector.NameEthtool, Err: longErr},
+		collector.NameSNMP:    {Name: collector.NameSNMP, Err: deadlineErr},
+		// collector.NameDHCP intentionally omitted (batch timeout).
+	}
+
+	r, _ := rep.buildReport(epoch, batch)
+	if len(r.GetMetrics()) != 1 {
+		t.Fatalf("buildReport() with all collectors failing len(Metrics) = %d, want 1 (envelope only)", len(r.GetMetrics()))
+	}
+	m, ok := findAgentEventMetrics(r)
+	if !ok {
+		t.Fatalf("buildReport() with all collectors failing has no SOURCE_AGENT_EVENT group: %v", r)
+	}
+
+	if got := m[agentevent.CollectorStatusKeyPrefix+collector.NameEthtool].GetStringValue(); got != agentevent.CollectorStatusError {
+		t.Errorf("buildReport() ethtool status = %q, want %q", got, agentevent.CollectorStatusError)
+	}
+	ethErr := m[agentevent.CollectorErrorKeyPrefix+collector.NameEthtool].GetStringValue()
+	if len(ethErr) > maxCollectorErrorBytes || !utf8.ValidString(ethErr) || len(ethErr) != 199 {
+		t.Errorf("buildReport() ethtool truncated error len=%d validUTF8=%v, want len=199 validUTF8=true", len(ethErr), utf8.ValidString(ethErr))
+	}
+
+	if got := m[agentevent.CollectorStatusKeyPrefix+collector.NameSNMP].GetStringValue(); got != agentevent.CollectorStatusTimeout {
+		t.Errorf("buildReport() snmp DeadlineExceeded status = %q, want %q", got, agentevent.CollectorStatusTimeout)
+	}
+	if got := m[agentevent.CollectorErrorKeyPrefix+collector.NameSNMP].GetStringValue(); !strings.Contains(got, "context deadline exceeded") {
+		t.Errorf("buildReport() snmp error = %q, want to contain %q", got, "context deadline exceeded")
+	}
+
+	if got := m[agentevent.CollectorStatusKeyPrefix+collector.NameDHCP].GetStringValue(); got != agentevent.CollectorStatusTimeout {
+		t.Errorf("buildReport() dhcp missing status = %q, want %q", got, agentevent.CollectorStatusTimeout)
+	}
+}
+
+func TestTruncateError(t *testing.T) {
+	exact200 := strings.Repeat("x", maxCollectorErrorBytes)
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "Nil", err: nil, want: ""},
+		{name: "Short", err: errors.New("boom"), want: "boom"},
+		{name: "Exact200", err: errors.New(exact200), want: exact200},
+		{name: "Over200ASCII", err: errors.New(exact200 + "z"), want: exact200},
+		{name: "StraddlingUTF8Rune", err: errors.New(strings.Repeat("a", 199) + "€€"), want: strings.Repeat("a", 199)},
+		{name: "InvalidUTF8Short", err: errors.New("bad\xffutf8"), want: "bad\uFFFDutf8"},
+		{name: "InvalidUTF8Long", err: errors.New(strings.Repeat("a", 199) + "\xffz"), want: strings.Repeat("a", 199)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateError(tc.err)
+			if !utf8.ValidString(got) {
+				t.Errorf("truncateError(%q) produced invalid UTF-8: %q", tc.err, got)
+			}
+			if len(got) > maxCollectorErrorBytes {
+				t.Errorf("truncateError(%q) len = %d, want <= %d", tc.err, len(got), maxCollectorErrorBytes)
+			}
+			if got != tc.want {
+				t.Errorf("truncateError(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 

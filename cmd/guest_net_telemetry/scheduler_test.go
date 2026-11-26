@@ -3,7 +3,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,5 +110,78 @@ func TestSchedulerPanicRecoveryAndTimeout(t *testing.T) {
 	}
 	if gotSeq1["slow_col"].Err == nil || gotSeq2["slow_col"].Err == nil {
 		t.Errorf("slow_col Result.Err across ticks = (%v, %v), want non-nil context deadline exceeded", gotSeq1["slow_col"].Err, gotSeq2["slow_col"].Err)
+	}
+}
+
+func TestExecuteCollectorOnceTimingLogGate(t *testing.T) {
+	epoch := time.Unix(1779383000, 0)
+	errCollect := errors.New("collect failed")
+
+	tests := []struct {
+		name      string
+		elapsed   time.Duration
+		err       error
+		wantLog   bool
+		wantSub   string
+		wantNoSub string
+	}{
+		{
+			name:    "fast_and_ok",
+			elapsed: slowCollectorLogThreshold - time.Millisecond,
+			wantLog: false,
+		},
+		{
+			name:      "slow_and_ok",
+			elapsed:   slowCollectorLogThreshold,
+			wantLog:   true,
+			wantSub:   "Collector test_col (seq=1) performance: wall_time=1s",
+			wantNoSub: "err=",
+		},
+		{
+			name:    "fast_with_error",
+			elapsed: 10 * time.Millisecond,
+			err:     errCollect,
+			wantLog: true,
+			wantSub: "Collector test_col (seq=1) performance: wall_time=10ms err=collect failed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			now := epoch
+			t.Cleanup(collector.OverrideClock(func() time.Time { return now }))
+
+			var logBuf bytes.Buffer
+			oldWriter := log.Writer()
+			log.SetOutput(&logBuf)
+			t.Cleanup(func() { log.SetOutput(oldWriter) })
+
+			col := &fakeCollector{
+				name: "test_col",
+				src:  pb.SourceId_SOURCE_ETHTOOL,
+				fn: func(context.Context) (collector.Output, error) {
+					now = now.Add(tc.elapsed)
+					return collector.Output{}, tc.err
+				},
+			}
+			cfg := CollectorConfig{Enabled: true, Interval: DefaultInterval, Timeout: DefaultInterval / 2}
+			sched := NewScheduler([]collector.Collector{col}, PluginConfig{}, epoch, make(chan collector.Result, 1))
+
+			sched.executeCollectorOnce(t.Context(), col, cfg, 1, epoch)
+
+			got := logBuf.String()
+			if !tc.wantLog {
+				if got != "" {
+					t.Errorf("executeCollectorOnce(elapsed=%v, err=%v) logged %q, want empty", tc.elapsed, tc.err, got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.wantSub) {
+				t.Errorf("executeCollectorOnce(elapsed=%v, err=%v) logged %q, want substring %q", tc.elapsed, tc.err, got, tc.wantSub)
+			}
+			if tc.wantNoSub != "" && strings.Contains(got, tc.wantNoSub) {
+				t.Errorf("executeCollectorOnce(elapsed=%v, err=%v) logged %q, do not want substring %q", tc.elapsed, tc.err, got, tc.wantNoSub)
+			}
+		})
 	}
 }

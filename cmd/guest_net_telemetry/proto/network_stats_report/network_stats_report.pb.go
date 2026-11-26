@@ -543,7 +543,7 @@ type metricValue_DoubleValue struct {
 }
 
 type metricValue_StringValue struct {
-	StringValue string `protobuf:"bytes,3,opt,name=string_value,json=stringValue,oneof"` // copybara:cpp_string_type
+	StringValue string `protobuf:"bytes,3,opt,name=string_value,json=stringValue,oneof"`
 }
 
 type metricValue_BoolValue struct {
@@ -898,7 +898,7 @@ const file_network_stats_report_proto_rawDesc = "" +
 	"\x0eDRIVER_VERSION\x10\x06\x12\x12\n" +
 	"\x0ePACKET_DROPPED\x10\a\x12\x11\n" +
 	"\rAGENT_STARTED\x10\b\x12\x12\n" +
-	"\x0eKERNEL_VERSION\x10\t*\xb7\x01\n" +
+	"\x0eKERNEL_VERSION\x10\t*\xb9\x01\n" +
 	"\bSourceId\x12\x19\n" +
 	"\x15SOURCE_ID_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSOURCE_ETHTOOL\x10\x01\x12\x14\n" +
@@ -907,7 +907,7 @@ const file_network_stats_report_proto_rawDesc = "" +
 	"\vSOURCE_SNMP\x10\x04\x12\x1a\n" +
 	"\x16SOURCE_PROC_INTERRUPTS\x10\x05\x12\x16\n" +
 	"\x12SOURCE_AGENT_EVENT\x10\x06\x12\x0f\n" +
-	"\vSOURCE_DHCP\x10\a*\x93\x01\n" +
+	"\vSOURCE_DHCP\x10\a0\x02*\x93\x01\n" +
 	"\x11DeviceElementType\x12\x17\n" +
 	"\x13ELEMENT_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13ELEMENT_MAC_ADDRESS\x10\x01\x12\x17\n" +

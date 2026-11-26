@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector"
+	"github.com/google/go-cmp/cmp"
 	"golang.org/x/sys/unix"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_stats_report"
@@ -160,6 +162,13 @@ func TestCollectBlackholeAcquireRenewAndReconfigure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(eth0Dir, "carrier"), []byte("1\n"), 0644); err != nil {
 		t.Fatalf("WriteFile carrier: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(eth0Dir, "device"), 0755); err != nil {
+		t.Fatalf("MkdirAll device: %v", err)
+	}
+	if err := os.Symlink("gve", filepath.Join(eth0Dir, "device", "driver")); err != nil {
+		t.Fatalf("Symlink driver: %v", err)
+	}
+	t.Cleanup(collector.OverrideSysfsNetPath(tmpDir))
 
 	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
 		return []net.Interface{
@@ -170,7 +179,6 @@ func TestCollectBlackholeAcquireRenewAndReconfigure(t *testing.T) {
 	var currentRIB []byte
 	var dumpErr error
 	c := &Collector{
-		SysfsNetPath: tmpDir,
 		DumpIPv4Addrs: func() ([]byte, error) {
 			return currentRIB, dumpErr
 		},
@@ -272,6 +280,13 @@ func TestCollectCarrierDown(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmpDir, "eth0", "carrier"), []byte("0\n"), 0644); err != nil {
 		t.Fatalf("WriteFile carrier: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "eth0", "device"), 0755); err != nil {
+		t.Fatalf("MkdirAll device: %v", err)
+	}
+	if err := os.Symlink("gve", filepath.Join(tmpDir, "eth0", "device", "driver")); err != nil {
+		t.Fatalf("Symlink driver: %v", err)
+	}
+	t.Cleanup(collector.OverrideSysfsNetPath(tmpDir))
 
 	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
 		return []net.Interface{
@@ -280,7 +295,6 @@ func TestCollectCarrierDown(t *testing.T) {
 	}))
 
 	c := &Collector{
-		SysfsNetPath:  tmpDir,
 		DumpIPv4Addrs: func() ([]byte, error) { return nil, nil },
 	}
 	out, err := c.Collect(context.Background())
@@ -289,5 +303,153 @@ func TestCollectCarrierDown(t *testing.T) {
 	}
 	if got := out.Groups[0].GetAgentMetrics()[CarrierUpKey].GetBoolValue(); got {
 		t.Errorf("carrier up = true, want false")
+	}
+
+	t.Run("CarrierENOENT", func(t *testing.T) {
+		noCarrierDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(noCarrierDir, "eth0", "device"), 0755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.Symlink("gve", filepath.Join(noCarrierDir, "eth0", "device", "driver")); err != nil {
+			t.Fatalf("Symlink: %v", err)
+		}
+		t.Cleanup(collector.OverrideSysfsNetPath(noCarrierDir))
+		out, err := c.Collect(t.Context())
+		if err != nil {
+			t.Fatalf("Collect() with missing carrier file err = %v, want nil", err)
+		}
+		if got := out.Groups[0].GetAgentMetrics()[CarrierUpKey].GetBoolValue(); got {
+			t.Errorf("Collect() with missing carrier file %s = true, want false", CarrierUpKey)
+		}
+	})
+
+	t.Run("CarrierReadError", func(t *testing.T) {
+		// Replacing the carrier file with a directory forces a non-ENOENT read error (EISDIR).
+		errDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(errDir, "eth0", "device"), 0755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.Symlink("gve", filepath.Join(errDir, "eth0", "device", "driver")); err != nil {
+			t.Fatalf("Symlink: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(errDir, "eth0", "carrier"), 0755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		t.Cleanup(collector.OverrideSysfsNetPath(errDir))
+		if _, err := c.Collect(t.Context()); err == nil {
+			t.Errorf("Collect() when reading carrier fails = nil error, want non-nil")
+		}
+	})
+
+	t.Run("ListInterfacesError", func(t *testing.T) {
+		t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
+			return nil, errors.New("netlink failed")
+		}))
+		if _, err := c.Collect(t.Context()); err == nil {
+			t.Errorf("Collect() when NonLoopbackInterfaces fails = nil error, want non-nil")
+		}
+	})
+}
+
+func TestParseCarrier(t *testing.T) {
+	cases := []struct {
+		name    string
+		data    []byte
+		err     error
+		want    bool
+		wantErr bool
+	}{
+		{name: "Up", data: []byte("1\n"), want: true},
+		{name: "Down", data: []byte("0\n"), want: false},
+		{name: "ENOENT", err: fmt.Errorf("open carrier: %w", os.ErrNotExist), want: false},
+		{name: "EINVAL", err: fmt.Errorf("read carrier: %w", syscall.EINVAL), want: false},
+		{name: "EIO", err: fmt.Errorf("read carrier: %w", syscall.EIO), wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseCarrier(tc.data, tc.err)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("parseCarrier(%q, %v) err = %v, wantErr = %v", tc.data, tc.err, err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("parseCarrier(%q, %v) = %v, want %v", tc.data, tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCollectFiltersToNICsAndDynamicNICs(t *testing.T) {
+	sysDir := t.TempDir()
+	for ifName, drv := range map[string]string{
+		"eth0": "gve",
+		"eth1": "virtio_net",
+		"eth2": "idpf",
+	} {
+		if err := os.MkdirAll(filepath.Join(sysDir, ifName, "device"), 0755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", ifName, err)
+		}
+		if err := os.Symlink(drv, filepath.Join(sysDir, ifName, "device", "driver")); err != nil {
+			t.Fatalf("Symlink(%s): %v", ifName, err)
+		}
+		if err := os.WriteFile(filepath.Join(sysDir, ifName, "carrier"), []byte("1\n"), 0644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", ifName, err)
+		}
+	}
+	writeVirtual := func(name, uevent string, lowers ...string) {
+		dir := filepath.Join(sysDir, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "carrier"), []byte("1\n"), 0644); err != nil {
+			t.Fatalf("WriteFile(%s/carrier): %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte(uevent), 0644); err != nil {
+			t.Fatalf("WriteFile(%s/uevent): %v", name, err)
+		}
+		for _, lower := range lowers {
+			if err := os.Symlink(filepath.Join("..", lower), filepath.Join(dir, "lower_"+lower)); err != nil {
+				t.Fatalf("Symlink(%s/lower_%s): %v", name, lower, err)
+			}
+		}
+	}
+	writeVirtual("gcp.eth0.10", "DEVTYPE=vlan\nINTERFACE=gcp.eth0.10\n", "eth0")
+	writeVirtual("br0", "DEVTYPE=bridge\nINTERFACE=br0\n", "eth0")
+	writeVirtual("br0.30", "DEVTYPE=vlan\nINTERFACE=br0.30\n", "br0")
+	writeVirtual("veth0", "INTERFACE=veth0\n", "eth0")
+	writeVirtual("tun0", "INTERFACE=tun0\n")
+
+	t.Cleanup(collector.OverrideSysfsNetPath(sysDir))
+	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
+		return []net.Interface{
+			{Index: 1, Name: "lo", Flags: net.FlagLoopback | net.FlagUp},
+			{Index: 2, Name: "eth0", Flags: net.FlagUp},
+			{Index: 3, Name: "eth1", Flags: net.FlagUp},
+			{Index: 7, Name: "eth2", Flags: net.FlagUp},
+			{Index: 10, Name: "gcp.eth0.10", Flags: net.FlagUp},
+			{Index: 4, Name: "br0", Flags: net.FlagUp},
+			{Index: 12, Name: "br0.30", Flags: net.FlagUp},
+			{Index: 5, Name: "veth0", Flags: net.FlagUp},
+			{Index: 6, Name: "tun0", Flags: net.FlagUp},
+		}, nil
+	}))
+
+	c := &Collector{
+		DumpIPv4Addrs: func() ([]byte, error) { return nil, nil },
+	}
+	out, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatalf("Collect() err = %v, want nil", err)
+	}
+	var gotNames []string
+	for _, g := range out.Groups {
+		for _, id := range g.GetMetricsGroupIdentifiers() {
+			if id.GetDeviceElementIdentifierType() == pb.DeviceElementType_ELEMENT_INTERFACE_NAME {
+				gotNames = append(gotNames, id.GetDeviceElementIdentifier())
+			}
+		}
+	}
+	if diff := cmp.Diff([]string{"eth0", "eth1", "eth2", "gcp.eth0.10"}, gotNames); diff != "" {
+		t.Errorf("Collect() interface names diff (-want +got):\n%s", diff)
 	}
 }

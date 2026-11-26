@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,17 +55,64 @@ func (r *Reporter) expectedAtDue(due time.Time) map[string]bool {
 	return exp
 }
 
+const maxCollectorErrorBytes = 200
+
+// truncateError returns err.Error() as valid UTF-8, cut to at most
+// maxCollectorErrorBytes bytes without splitting a multi-byte character.
+func truncateError(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := strings.ToValidUTF8(err.Error(), "\uFFFD")
+	if len(s) <= maxCollectorErrorBytes {
+		return s
+	}
+	end := 0
+	for idx := range s {
+		if idx > maxCollectorErrorBytes {
+			break
+		}
+		end = idx
+	}
+	return s[:end]
+}
+
 // buildReport constructs a deterministic NetworkStatsReport from a completed or timed-out batch
 // and stamps envelope metadata via agentevent.StampEnvelope.
 func (r *Reporter) buildReport(due time.Time, batch map[string]collector.Result) (*pb.NetworkStatsReport, int64) {
 	r.seqNum++
 	seq := r.seqNum
 
+	exp := r.expectedAtDue(due)
+	statuses := make(map[string]agentevent.CollectorStatus, len(exp))
+
 	var groups []*pb.MetricsGroup
 	var minStart, maxEnd time.Time
 
 	for _, c := range r.collectors {
-		res, ok := batch[c.Name()]
+		name := c.Name()
+		res, ok := batch[name]
+		if exp[name] {
+			switch {
+			case !ok:
+				statuses[name] = agentevent.CollectorStatus{
+					Status: agentevent.CollectorStatusTimeout,
+					Error:  "collector timed out",
+				}
+			case errors.Is(res.Err, context.DeadlineExceeded):
+				statuses[name] = agentevent.CollectorStatus{
+					Status: agentevent.CollectorStatusTimeout,
+					Error:  truncateError(res.Err),
+				}
+			case res.Err != nil:
+				statuses[name] = agentevent.CollectorStatus{
+					Status: agentevent.CollectorStatusError,
+					Error:  truncateError(res.Err),
+				}
+			default:
+				statuses[name] = agentevent.CollectorStatus{Status: agentevent.CollectorStatusOK}
+			}
+		}
 		if !ok || res.Err != nil {
 			continue
 		}
@@ -98,10 +147,11 @@ func (r *Reporter) buildReport(due time.Time, batch map[string]collector.Result)
 	}.Build()
 
 	agentevent.StampEnvelope(rep, agentevent.EnvelopeOptions{
-		SeqNum:          seq,
-		PluginStart:     r.epoch,
-		CollectionStart: minStart,
-		ExecutionMode:   executionMode(),
+		SeqNum:            seq,
+		PluginStart:       r.epoch,
+		CollectionStart:   minStart,
+		ExecutionMode:     executionMode(),
+		CollectorStatuses: statuses,
 	})
 
 	return rep, seq

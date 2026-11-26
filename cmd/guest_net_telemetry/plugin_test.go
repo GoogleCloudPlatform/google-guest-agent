@@ -3,15 +3,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -23,15 +29,20 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector/agentevent"
 	ethcol "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector/ethtool"
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector/snmp"
+	"github.com/google/go-cmp/cmp"
 	"github.com/miekg/dns"
 	"github.com/prometheus/procfs"
 	"github.com/safchain/ethtool"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/testing/protocmp"
 
 	networkstatsreportpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_stats_report"
+	networktelemetryconfigpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_telemetry_config"
 	plugincommpb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
+	anypb "google.golang.org/protobuf/types/known/anypb"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 )
 
 const testIface0 = "eth0"
@@ -58,13 +69,22 @@ func setupHermeticSubpackageMocks(t *testing.T) {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Metadata-Flavor", "Google")
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
 
+	sysDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sysDir, testIface0, "device"), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink("gve", filepath.Join(sysDir, testIface0, "device", "driver")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	t.Cleanup(collector.OverrideSysfsNetPath(sysDir))
 	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
 		return []net.Interface{
-			{Name: testIface0, Flags: net.FlagUp, HardwareAddr: net.HardwareAddr{0x00, 0x15, 0x5d, 0x01, 0x02, 0x03}},
+			{Index: 2, Name: testIface0, Flags: net.FlagUp, HardwareAddr: net.HardwareAddr{0x00, 0x15, 0x5d, 0x01, 0x02, 0x03}},
 		}, nil
 	}))
 
@@ -119,7 +139,7 @@ func TestBuildNetworkStatsReport_EnvelopeSeqNum(t *testing.T) {
 
 	collectors := newCollectors()
 	epoch := collector.Now()
-	rep := NewReporter(collectors, DefaultConfig(collectors), epoch, nil)
+	rep := NewReporter(collectors, newPluginConfig(collectors, true), epoch, nil)
 
 	findReportSeqNum := func(r *networkstatsreportpb.NetworkStatsReport) (int64, bool) {
 		for _, g := range r.GetMetrics() {
@@ -150,6 +170,15 @@ func TestBuildNetworkStatsReport_EnvelopeSeqNum(t *testing.T) {
 	rep1, _ := rep.buildReport(epoch, batch)
 	if seq, ok := findReportSeqNum(rep1); !ok || seq != 1 {
 		t.Errorf("cycle 1 %s = (%d, %v), want (1, true)", agentevent.ReportSeqNumKey, seq, ok)
+	}
+	aeMetrics, ok := findAgentEventMetrics(rep1)
+	if !ok {
+		t.Fatalf("buildReport(cycle 1) report has no SOURCE_AGENT_EVENT group: %v", rep1)
+	}
+	for _, c := range collectors {
+		if got := aeMetrics[agentevent.CollectorStatusKeyPrefix+c.Name()].GetStringValue(); got != "ok" {
+			t.Errorf("buildReport(cycle 1) %s status = %q, want %q", c.Name(), got, "ok")
+		}
 	}
 
 	rep2, _ := rep.buildReport(epoch, batch)
@@ -581,7 +610,21 @@ func TestPluginServerLifecycleAndHandover(t *testing.T) {
 }
 
 func TestStartContextCancellation(t *testing.T) {
-	stubTelemetryPolicy(t, attrs(map[string]string{forceEnableMetadataKey: "true"}), attrs(nil))
+	stubTelemetryPolicy(t, attrs(nil), attrs(nil))
+	stubRemoteConfig(t, func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+		return networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+				Enabled: new(true),
+				CollectorConfigs: []*networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig{
+					networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+						Source:             new(networkstatsreportpb.SourceId_SOURCE_ETHTOOL),
+						Enabled:            new(true),
+						CollectionInterval: durationpb.New(DefaultInterval),
+					}.Build(),
+				},
+			}.Build(),
+		}.Build(), nil
+	})
 	oldClientNewClient := clientNewClient
 	oldRetryDelay := acsRetryDelay
 	t.Cleanup(func() {
@@ -734,82 +777,296 @@ func enabledIntervals(cfg PluginConfig) map[string]time.Duration {
 	return m
 }
 
+func TestFetchNetworkTelemetryConfig(t *testing.T) {
+	oldSend := sendAgentMessage
+	t.Cleanup(func() { sendAgentMessage = oldSend })
+
+	validCfg := networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+		V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+			Enabled:            new(true),
+			ConfigPollInterval: durationpb.New(5 * time.Minute),
+			CollectorConfigs: []*networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig{
+				networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+					Source:             new(networkstatsreportpb.SourceId_SOURCE_ETHTOOL),
+					Enabled:            new(true),
+					CollectionInterval: durationpb.New(30 * time.Second),
+				}.Build(),
+			},
+		}.Build(),
+	}.Build()
+	validAny, err := anypb.New(validCfg)
+	if err != nil {
+		t.Fatalf("anypb.New(validCfg) failed: %v", err)
+	}
+	wrongTypeAny, err := anypb.New(&networkstatsreportpb.NetworkStatsReport{})
+	if err != nil {
+		t.Fatalf("anypb.New(NetworkStatsReport) failed: %v", err)
+	}
+	emptyCfgAny, err := anypb.New(&networktelemetryconfigpb.NetworkTelemetryConfig{})
+	if err != nil {
+		t.Fatalf("anypb.New(empty NetworkTelemetryConfig) failed: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		respBody *anypb.Any
+		sendErr  error
+		want     *networktelemetryconfigpb.NetworkTelemetryConfig
+		wantErr  bool
+	}{
+		{
+			name:     "valid_v1_config",
+			respBody: validAny,
+			want:     validCfg,
+		},
+		{
+			name:    "send_error",
+			sendErr: errUnreachable,
+			wantErr: true,
+		},
+		{
+			name:    "not_found_is_no_config",
+			sendErr: status.Error(codes.NotFound, "No PushNotificationConfig registered for message_type"),
+			want:    nil,
+		},
+		{
+			name:    "empty_response_body",
+			wantErr: true,
+		},
+		{
+			name:     "unmarshal_type_mismatch",
+			respBody: wrongTypeAny,
+			wantErr:  true,
+		},
+		{
+			name:     "no_v1_is_no_config",
+			respBody: emptyCfgAny,
+			want:     nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sendAgentMessage = func(_ context.Context, channelID string, _ *agentcommunication.Client, msg *agentcommunicationpb.MessageBody) (*agentcommunicationpb.SendAgentMessageResponse, error) {
+				if channelID != "test-config-channel" || msg.GetLabels()[messageTypeLabel] != NetworkTelemetryConfigType {
+					t.Errorf("sendAgentMessage(channel %q, labels %v), want channel %q and %s=%s", channelID, msg.GetLabels(), "test-config-channel", messageTypeLabel, NetworkTelemetryConfigType)
+				}
+				if msg.GetLabels()["uuid"] == "" {
+					t.Errorf("sendAgentMessage() missing uuid label in %v", msg.GetLabels())
+				}
+				if msg.GetBody() == nil {
+					t.Errorf("sendAgentMessage() Body = nil, want non-nil Any (required by ACS)")
+				}
+				if tc.sendErr != nil {
+					return nil, tc.sendErr
+				}
+				return &agentcommunicationpb.SendAgentMessageResponse{
+					MessageBody: &agentcommunicationpb.MessageBody{Body: tc.respBody},
+				}, nil
+			}
+
+			got, err := fetchNetworkTelemetryConfig(t.Context(), nil, "test-config-channel")
+			if (err != nil) != tc.wantErr {
+				t.Errorf("fetchNetworkTelemetryConfig() with response body %v and send error %v: err = %v, wantErr = %v", tc.respBody, tc.sendErr, err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if diff := cmp.Diff(tc.want, got, protocmp.Transform()); diff != "" {
+				t.Errorf("fetchNetworkTelemetryConfig() with response body %v and send error %v diff (-want +got):\n%s", tc.respBody, tc.sendErr, diff)
+			}
+		})
+	}
+}
+
+func TestFetchRemoteConfig(t *testing.T) {
+	oldChannel := *configChannelID
+	oldNewClient := clientNewClient
+	oldSend := sendAgentMessage
+	t.Cleanup(func() {
+		*configChannelID = oldChannel
+		clientNewClient = oldNewClient
+		sendAgentMessage = oldSend
+	})
+
+	validCfg := networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+		V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+			Enabled: new(true),
+		}.Build(),
+	}.Build()
+	validAny, err := anypb.New(validCfg)
+	if err != nil {
+		t.Fatalf("anypb.New(validCfg) failed: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		channel   string
+		clientErr error
+		want      *networktelemetryconfigpb.NetworkTelemetryConfig
+		wantErr   bool
+	}{
+		{
+			name:    "empty_channel_skips_fetch",
+			channel: "",
+			want:    nil,
+		},
+		{
+			name:      "client_creation_error",
+			channel:   "compute.googleapis.com/network-guest-telemetry-config",
+			clientErr: errUnreachable,
+			wantErr:   true,
+		},
+		{
+			name:    "success",
+			channel: "compute.googleapis.com/network-guest-telemetry-config",
+			want:    validCfg,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			*configChannelID = tc.channel
+			clientNewClient = func(context.Context, bool, ...option.ClientOption) (*agentcommunication.Client, error) {
+				if tc.clientErr != nil {
+					return nil, tc.clientErr
+				}
+				return nil, nil
+			}
+			sendAgentMessage = func(context.Context, string, *agentcommunication.Client, *agentcommunicationpb.MessageBody) (*agentcommunicationpb.SendAgentMessageResponse, error) {
+				return &agentcommunicationpb.SendAgentMessageResponse{
+					MessageBody: &agentcommunicationpb.MessageBody{Body: validAny},
+				}, nil
+			}
+
+			got, err := fetchRemoteConfig(t.Context())
+			if (err != nil) != tc.wantErr {
+				t.Errorf("fetchRemoteConfig() with config channel %q and client error %v: err = %v, wantErr = %v", tc.channel, tc.clientErr, err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if diff := cmp.Diff(tc.want, got, protocmp.Transform()); diff != "" {
+				t.Errorf("fetchRemoteConfig() with config channel %q and client error %v diff (-want +got):\n%s", tc.channel, tc.clientErr, diff)
+			}
+		})
+	}
+}
+
+// effectiveConfig returns the config and read error from one refresh of empty configSources, as at
+// plugin startup.
+func effectiveConfig(ctx context.Context, cs []collector.Collector) (PluginConfig, error) {
+	var s configSources
+	err := s.refresh(ctx)
+	return s.config(cs), err
+}
+
 func TestEffectiveConfig(t *testing.T) {
 	mdsErr := errors.New("metadata server unreachable")
-	forced := map[string]string{forceEnableMetadataKey: "true"}
+	remoteErr := errors.New("GTCS config channel unreachable")
 	optedOut := map[string]string{disableGuestTelemetryMetadataKey: "true"}
-	forcedAndOptedOut := map[string]string{forceEnableMetadataKey: "true", disableGuestTelemetryMetadataKey: "true"}
+
+	remoteEthtool30s := func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+		return networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+				Enabled: new(true),
+				CollectorConfigs: []*networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig{
+					networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+						Source:             new(networkstatsreportpb.SourceId_SOURCE_ETHTOOL),
+						Enabled:            new(true),
+						CollectionInterval: durationpb.New(30 * time.Second),
+					}.Build(),
+				},
+			}.Build(),
+		}.Build(), nil
+	}
+	remoteDisabled := func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+		return networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: &networktelemetryconfigpb.NetworkTelemetryConfigV1{},
+		}.Build(), nil
+	}
+	remoteFailing := func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+		return nil, remoteErr
+	}
 
 	none := map[string]time.Duration{}
-	all := map[string]time.Duration{
-		collector.NameEthtool:    DefaultInterval,
-		collector.NameSNMP:       DefaultInterval,
-		collector.NameDHCP:       DefaultInterval,
-		collector.NameAgentEvent: DefaultInterval,
-	}
 	ethtoolOnly := map[string]time.Duration{collector.NameEthtool: DefaultInterval}
-	allButSNMP := map[string]time.Duration{
-		collector.NameEthtool:    DefaultInterval,
-		collector.NameDHCP:       DefaultInterval,
-		collector.NameAgentEvent: DefaultInterval,
-	}
-	allWithEthtool30s := map[string]time.Duration{
-		collector.NameEthtool:    30 * time.Second,
-		collector.NameSNMP:       DefaultInterval,
-		collector.NameDHCP:       DefaultInterval,
-		collector.NameAgentEvent: DefaultInterval,
+	ethtool30sOnly := map[string]time.Duration{collector.NameEthtool: 30 * time.Second}
+	ethtool30sAndSNMP60s := map[string]time.Duration{
+		collector.NameEthtool: 30 * time.Second,
+		collector.NameSNMP:    DefaultInterval,
 	}
 
 	tests := []struct {
 		name     string
 		instance func(context.Context, string) (string, error)
 		project  func(context.Context, string) (string, error)
+		remote   func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error)
 		flag     string
 		want     map[string]time.Duration
-		wantErr  bool
+		wantErr  error
 	}{
 		{name: "default_disables_all", instance: attrs(nil), project: attrs(nil), want: none},
-		{name: "instance_force_enable", instance: attrs(forced), project: attrs(nil), want: all},
-		{name: "project_force_enable", instance: attrs(nil), project: attrs(forced), want: all},
-		{name: "unparsable_force_enable_value", instance: attrs(map[string]string{forceEnableMetadataKey: "enable"}), project: attrs(nil), want: none},
-		{name: "opt_out_wins_over_force_enable", instance: attrs(forcedAndOptedOut), project: attrs(nil), want: none},
-		{name: "project_opt_out_wins_over_instance_force_enable", instance: attrs(forced), project: attrs(optedOut), want: none},
+		{name: "remote_enables_configured_collectors", instance: attrs(nil), project: attrs(nil), remote: remoteEthtool30s, want: ethtool30sOnly},
+		{name: "remote_disabled_disables_all", instance: attrs(nil), project: attrs(nil), remote: remoteDisabled, want: none},
+		{name: "opt_out_wins_over_remote", instance: attrs(optedOut), project: attrs(nil), remote: remoteEthtool30s, want: none},
+		{name: "project_opt_out_wins_over_remote", instance: attrs(nil), project: attrs(optedOut), remote: remoteEthtool30s, want: none},
+		{name: "flag_overrides_remote", instance: attrs(nil), project: attrs(nil), remote: remoteEthtool30s, flag: "snmp=60s", want: ethtool30sAndSNMP60s},
+		{name: "flag_disables_collector_on_remote", instance: attrs(nil), project: attrs(nil), remote: remoteEthtool30s, flag: "ethtool=off", want: none},
+		{name: "flag_changes_interval_on_remote", instance: attrs(nil), project: attrs(nil), remote: remoteEthtool30s, flag: "ethtool=60s", want: ethtoolOnly},
+		{name: "remote_error_falls_back_to_default", instance: attrs(nil), project: attrs(nil), remote: remoteFailing, want: none, wantErr: remoteErr},
 		{name: "flag_enables_listed_collector", instance: attrs(nil), project: attrs(nil), flag: "ethtool=60s", want: ethtoolOnly},
 		{name: "opt_out_wins_over_flag", instance: attrs(optedOut), project: attrs(nil), flag: "ethtool=60s", want: none},
-		{name: "flag_disables_collector_on_force_enable", instance: attrs(forced), project: attrs(nil), flag: "snmp=off", want: allButSNMP},
-		{name: "flag_changes_interval_on_force_enable", instance: attrs(forced), project: attrs(nil), flag: "ethtool=30s", want: allWithEthtool30s},
 		{name: "invalid_flag_ignored", instance: attrs(nil), project: attrs(nil), flag: "ethtool=1s", want: none},
-		{name: "invalid_flag_ignored_on_force_enable", instance: attrs(forced), project: attrs(nil), flag: "ethtool=1s", want: all},
-		{name: "lookup_errors", instance: errLookup(mdsErr), project: attrs(nil), want: none, wantErr: true},
-		{name: "opt_out_lookup_error_with_force_enable", instance: errLookup(mdsErr), project: attrs(forced), want: all, wantErr: true},
-		{name: "lookup_errors_with_flag", instance: errLookup(mdsErr), project: attrs(nil), flag: "ethtool=60s", want: ethtoolOnly, wantErr: true},
+		{name: "invalid_flag_ignored_on_remote", instance: attrs(nil), project: attrs(nil), remote: remoteEthtool30s, flag: "ethtool=1s", want: ethtool30sOnly},
+		{name: "lookup_errors", instance: errLookup(mdsErr), project: attrs(nil), want: none, wantErr: mdsErr},
+		{name: "opt_out_lookup_error_fails_closed_over_flag", instance: errLookup(mdsErr), project: attrs(nil), flag: "ethtool=60s", want: none, wantErr: mdsErr},
+		{name: "opt_out_lookup_error_fails_closed_over_remote", instance: errLookup(mdsErr), project: attrs(nil), remote: remoteEthtool30s, want: none, wantErr: mdsErr},
+		{name: "project_opt_out_lookup_error_fails_closed_over_remote", instance: attrs(nil), project: errLookup(mdsErr), remote: remoteEthtool30s, want: none, wantErr: mdsErr},
 		{name: "lookup_error_but_opted_out", instance: errLookup(mdsErr), project: attrs(optedOut), want: none},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			stubTelemetryPolicy(t, tc.instance, tc.project)
+			if tc.remote != nil {
+				stubRemoteConfig(t, tc.remote)
+			}
 			stubCollectorsFlag(t, tc.flag)
 
 			cfg, err := effectiveConfig(t.Context(), defaultCollectors())
 			if got := enabledIntervals(cfg); !maps.Equal(got, tc.want) {
 				t.Errorf("effectiveConfig() enabled collectors = %v, want %v", got, tc.want)
 			}
-			if gotErr := err != nil; gotErr != tc.wantErr {
+			if gotErr := err != nil; gotErr != (tc.wantErr != nil) {
 				t.Errorf("effectiveConfig() err = %v, want error: %v", err, tc.wantErr)
 			}
-			if tc.wantErr && !errors.Is(err, mdsErr) {
-				t.Errorf("effectiveConfig() err = %v, want wrapping %v", err, mdsErr)
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Errorf("effectiveConfig() err = %v, want wrapping %v", err, tc.wantErr)
 			}
 		})
 	}
 }
 
-// stubTelemetryPolicy replaces the metadata lookups used by effectiveConfig for the test.
+// stubTelemetryPolicy replaces the metadata and remote config lookups used by configSources for
+// the test.
 func stubTelemetryPolicy(t *testing.T, instance, project func(context.Context, string) (string, error)) {
 	t.Helper()
-	oldInstance, oldProject := instanceAttributeValue, projectAttributeValue
-	t.Cleanup(func() { instanceAttributeValue, projectAttributeValue = oldInstance, oldProject })
+	oldInstance, oldProject, oldRemote := instanceAttributeValue, projectAttributeValue, remoteConfig
+	t.Cleanup(func() {
+		instanceAttributeValue, projectAttributeValue, remoteConfig = oldInstance, oldProject, oldRemote
+	})
 	instanceAttributeValue, projectAttributeValue = instance, project
+	remoteConfig = func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+		return nil, nil
+	}
+}
+
+// stubRemoteConfig replaces the remote config lookup used by configSources for the test.
+func stubRemoteConfig(t *testing.T, fn func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error)) {
+	t.Helper()
+	old := remoteConfig
+	t.Cleanup(func() { remoteConfig = old })
+	remoteConfig = fn
 }
 
 // stubCollectorsFlag sets --collectors to value for the test.
@@ -890,20 +1147,104 @@ func expectNoSignal[T any](t *testing.T, ch <-chan T, what string) {
 	}
 }
 
+// logCapture records standard library log output safely across goroutines.
+type logCapture struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (c *logCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Write(p)
+}
+
+func (c *logCapture) retryDelays(t *testing.T) []time.Duration {
+	t.Helper()
+	c.mu.Lock()
+	raw := c.buf.String()
+	c.mu.Unlock()
+	const marker = "Retrying telemetry config read in "
+	var delays []time.Duration
+	for _, line := range strings.Split(raw, "\n") {
+		_, rest, ok := strings.Cut(line, marker)
+		if !ok {
+			continue
+		}
+		d, err := time.ParseDuration(strings.TrimSpace(rest))
+		if err != nil {
+			t.Fatalf("time.ParseDuration(%q) err = %v", rest, err)
+		}
+		delays = append(delays, d)
+	}
+	return delays
+}
+
+func captureLogs(t *testing.T) *logCapture {
+	t.Helper()
+	c := &logCapture{}
+	oldOut := log.Writer()
+	log.SetOutput(c)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+	return c
+}
+
 func TestStartTelemetryPolicy(t *testing.T) {
 	mdsErr := errors.New("metadata server unreachable")
-	forced := map[string]string{forceEnableMetadataKey: "true"}
+	// ethtoolRemote returns a remote config that enables only ethtool at interval and asks the
+	// plugin to re-read the config every poll.
+	ethtoolRemote := func(interval, poll time.Duration) *networktelemetryconfigpb.NetworkTelemetryConfig {
+		return networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+				Enabled:            new(true),
+				ConfigPollInterval: durationpb.New(poll),
+				CollectorConfigs: []*networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig{
+					networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+						Source:             new(networkstatsreportpb.SourceId_SOURCE_ETHTOOL),
+						Enabled:            new(true),
+						CollectionInterval: durationpb.New(interval),
+					}.Build(),
+				},
+			}.Build(),
+		}.Build()
+	}
+	ethtoolEnabledRemote := func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+		return ethtoolRemote(30*time.Second, 0), nil
+	}
 
-	// setup stubs metadata and collection runs, starts start() in the background and returns the
-	// run start signals (carrying each run's config), run stop signals, a cancel func, and
-	// start's result channel.
-	setup := func(t *testing.T, instance, project func(context.Context, string) (string, error)) (<-chan PluginConfig, <-chan struct{}, context.CancelFunc, <-chan error) {
+	// startOptions overrides the defaults used by setupWith. Zero values keep the defaults.
+	type startOptions struct {
+		// remote replaces the remote config lookup (default: no remote config).
+		remote func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error)
+		// refreshInterval overrides policyRefreshInterval (default: 5ms).
+		refreshInterval time.Duration
+		// retryBackoff overrides configRetryInitialBackoff (default: package value).
+		retryBackoff time.Duration
+	}
+
+	// setupWith stubs metadata, remote config and collection runs, starts start() in the
+	// background and returns the run start signals (carrying each run's config), run stop
+	// signals, a cancel func, and start's result channel. All stubs are installed before start()
+	// runs.
+	setupWith := func(t *testing.T, instance, project func(context.Context, string) (string, error), opts startOptions) (<-chan PluginConfig, <-chan struct{}, context.CancelFunc, <-chan error) {
 		t.Helper()
 		stubTelemetryPolicy(t, instance, project)
+		if opts.remote != nil {
+			stubRemoteConfig(t, opts.remote)
+		}
 
-		oldInterval, oldRun := policyRefreshInterval, collectionRun
-		t.Cleanup(func() { policyRefreshInterval, collectionRun = oldInterval, oldRun })
+		oldInterval, oldMinPoll, oldRetryBackoff, oldRun := policyRefreshInterval, minConfigPollInterval, configRetryInitialBackoff, collectionRun
+		t.Cleanup(func() {
+			policyRefreshInterval, minConfigPollInterval, configRetryInitialBackoff, collectionRun = oldInterval, oldMinPoll, oldRetryBackoff, oldRun
+		})
 		policyRefreshInterval = 5 * time.Millisecond
+		if opts.refreshInterval > 0 {
+			policyRefreshInterval = opts.refreshInterval
+		}
+		if opts.retryBackoff > 0 {
+			configRetryInitialBackoff = opts.retryBackoff
+		}
+		minConfigPollInterval = time.Millisecond
 		started := make(chan PluginConfig, 8)
 		stopped := make(chan struct{}, 8)
 		collectionRun = func(ctx context.Context, cfg PluginConfig) error {
@@ -926,27 +1267,15 @@ func TestStartTelemetryPolicy(t *testing.T) {
 		})
 		return started, stopped, cancel, done
 	}
+	// setup is setupWith with default options.
+	setup := func(t *testing.T, instance, project func(context.Context, string) (string, error)) (<-chan PluginConfig, <-chan struct{}, context.CancelFunc, <-chan error) {
+		t.Helper()
+		return setupWith(t, instance, project, startOptions{})
+	}
 
-	t.Run("NoForceEnableSkipsCollection", func(t *testing.T) {
+	t.Run("NoRemoteConfigSkipsCollection", func(t *testing.T) {
 		started, _, cancel, done := setup(t, attrs(nil), attrs(nil))
-		expectNoSignal(t, started, "collection start without force-enable")
-		cancel()
-		if err := <-done; err != nil {
-			t.Errorf("start() err = %v, want nil", err)
-		}
-	})
-
-	t.Run("ForceEnableRefreshStartsAndStopsCollection", func(t *testing.T) {
-		policy := newPolicyStub(nil)
-		started, stopped, cancel, done := setup(t, policy.lookup, attrs(nil))
-		expectNoSignal(t, started, "collection start without force-enable")
-
-		policy.set(forceEnableMetadataKey, "true")
-		awaitSignal(t, started, "collection start after force-enable")
-
-		policy.set(forceEnableMetadataKey, "")
-		awaitSignal(t, stopped, "collection stop after force-enable removed")
-
+		expectNoSignal(t, started, "collection start with no remote config")
 		cancel()
 		if err := <-done; err != nil {
 			t.Errorf("start() err = %v, want nil", err)
@@ -954,8 +1283,8 @@ func TestStartTelemetryPolicy(t *testing.T) {
 	})
 
 	t.Run("OptOutRefreshStopsAndResumesCollection", func(t *testing.T) {
-		policy := newPolicyStub(forced)
-		started, stopped, cancel, done := setup(t, policy.lookup, attrs(nil))
+		policy := newPolicyStub(nil)
+		started, stopped, cancel, done := setupWith(t, policy.lookup, attrs(nil), startOptions{remote: ethtoolEnabledRemote})
 		awaitSignal(t, started, "initial collection start")
 
 		policy.set(disableGuestTelemetryMetadataKey, "true")
@@ -973,8 +1302,8 @@ func TestStartTelemetryPolicy(t *testing.T) {
 	})
 
 	t.Run("RefreshLookupErrorKeepsCurrentState", func(t *testing.T) {
-		policy := newPolicyStub(forced)
-		started, stopped, _, _ := setup(t, policy.lookup, attrs(nil))
+		policy := newPolicyStub(nil)
+		started, stopped, _, _ := setupWith(t, policy.lookup, attrs(nil), startOptions{remote: ethtoolEnabledRemote})
 		awaitSignal(t, started, "initial collection start")
 
 		policy.setErr(mdsErr)
@@ -983,25 +1312,53 @@ func TestStartTelemetryPolicy(t *testing.T) {
 
 	t.Run("ConfigChangeRestartsCollection", func(t *testing.T) {
 		stubCollectorsFlag(t, "ethtool=60s")
-		policy := newPolicyStub(nil)
-		started, stopped, cancel, done := setup(t, policy.lookup, attrs(nil))
+		var mu sync.Mutex
+		var currentRemote *networktelemetryconfigpb.NetworkTelemetryConfig
+		setRemote := func(cfg *networktelemetryconfigpb.NetworkTelemetryConfig) {
+			mu.Lock()
+			defer mu.Unlock()
+			currentRemote = cfg
+		}
+		started, stopped, cancel, done := setupWith(t, attrs(nil), attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return currentRemote, nil
+			},
+		})
 		cfg := awaitSignal(t, started, "initial collection start")
 		if got := len(enabledIntervals(cfg)); got != 1 {
 			t.Fatalf("initial run has %d enabled collectors, want 1", got)
 		}
 
-		policy.set(forceEnableMetadataKey, "true")
-		awaitSignal(t, stopped, "collection stop after force-enable")
-		cfg = awaitSignal(t, started, "collection restart after force-enable")
-		if got, want := len(enabledIntervals(cfg)), len(defaultCollectors()); got != want {
-			t.Errorf("run after force-enable has %d enabled collectors, want %d", got, want)
+		setRemote(networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+				Enabled: new(true),
+				CollectorConfigs: []*networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig{
+					networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+						Source:             new(networkstatsreportpb.SourceId_SOURCE_ETHTOOL),
+						Enabled:            new(true),
+						CollectionInterval: durationpb.New(DefaultInterval),
+					}.Build(),
+					networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+						Source:             new(networkstatsreportpb.SourceId_SOURCE_SNMP),
+						Enabled:            new(true),
+						CollectionInterval: durationpb.New(30 * time.Second),
+					}.Build(),
+				},
+			}.Build(),
+		}.Build())
+		awaitSignal(t, stopped, "collection stop after remote config added")
+		cfg = awaitSignal(t, started, "collection restart after remote config added")
+		if got := len(enabledIntervals(cfg)); got != 2 {
+			t.Errorf("run after remote config added has %d enabled collectors, want 2", got)
 		}
 
-		policy.set(forceEnableMetadataKey, "")
-		awaitSignal(t, stopped, "collection stop after force-enable removed")
-		cfg = awaitSignal(t, started, "collection restart after force-enable removed")
+		setRemote(nil)
+		awaitSignal(t, stopped, "collection stop after remote config removed")
+		cfg = awaitSignal(t, started, "collection restart after remote config removed")
 		if got := len(enabledIntervals(cfg)); got != 1 {
-			t.Errorf("run after force-enable removed has %d enabled collectors, want 1", got)
+			t.Errorf("run after remote config removed has %d enabled collectors, want 1", got)
 		}
 
 		cancel()
@@ -1011,7 +1368,7 @@ func TestStartTelemetryPolicy(t *testing.T) {
 	})
 
 	t.Run("UnchangedConfigKeepsCollectionRunning", func(t *testing.T) {
-		started, stopped, _, _ := setup(t, attrs(forced), attrs(nil))
+		started, stopped, _, _ := setupWith(t, attrs(nil), attrs(nil), startOptions{remote: ethtoolEnabledRemote})
 		awaitSignal(t, started, "initial collection start")
 		expectNoSignal(t, stopped, "collection stop without a config change")
 	})
@@ -1019,8 +1376,8 @@ func TestStartTelemetryPolicy(t *testing.T) {
 	t.Run("PauseClearsSendFailuresAndReportsPaused", func(t *testing.T) {
 		t.Cleanup(reportSends.reset)
 		ps := &PluginServer{}
-		policy := newPolicyStub(forced)
-		started, stopped, _, _ := setup(t, policy.lookup, attrs(nil))
+		policy := newPolicyStub(nil)
+		started, stopped, _, _ := setupWith(t, policy.lookup, attrs(nil), startOptions{remote: ethtoolEnabledRemote})
 		awaitSignal(t, started, "initial collection start")
 		for range maxConsecutiveSendFailures {
 			reportSends.record(status.Error(codes.Unavailable, "ACS unavailable"))
@@ -1044,7 +1401,8 @@ func TestStartTelemetryPolicy(t *testing.T) {
 	})
 
 	t.Run("RunErrorIsReturned", func(t *testing.T) {
-		stubTelemetryPolicy(t, attrs(forced), attrs(nil))
+		stubTelemetryPolicy(t, attrs(nil), attrs(nil))
+		stubRemoteConfig(t, ethtoolEnabledRemote)
 		oldRun := collectionRun
 		t.Cleanup(func() { collectionRun = oldRun })
 		runErr := errors.New("ACS unreachable")
@@ -1052,6 +1410,381 @@ func TestStartTelemetryPolicy(t *testing.T) {
 
 		if err := start(t.Context()); !errors.Is(err, runErr) {
 			t.Errorf("start() err = %v, want %v", err, runErr)
+		}
+	})
+
+	t.Run("RemoteConfigRefreshStartsAndUpdatesCollection", func(t *testing.T) {
+		var mu sync.Mutex
+		var currentRemote *networktelemetryconfigpb.NetworkTelemetryConfig
+		var currentErr error
+		setRemote := func(cfg *networktelemetryconfigpb.NetworkTelemetryConfig, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			currentRemote = cfg
+			currentErr = err
+		}
+
+		started, stopped, cancel, done := setupWith(t, attrs(nil), attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return currentRemote, currentErr
+			},
+		})
+		expectNoSignal(t, started, "collection start with nil remote config")
+
+		setRemote(networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+				Enabled:            new(true),
+				ConfigPollInterval: durationpb.New(5 * time.Millisecond),
+				CollectorConfigs: []*networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig{
+					networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+						Source:             new(networkstatsreportpb.SourceId_SOURCE_ETHTOOL),
+						Enabled:            new(true),
+						CollectionInterval: durationpb.New(30 * time.Second),
+					}.Build(),
+				},
+			}.Build(),
+		}.Build(), nil)
+		cfg := awaitSignal(t, started, "collection start after remote config enables ethtool")
+		if got := enabledIntervals(cfg); !maps.Equal(got, map[string]time.Duration{collector.NameEthtool: 30 * time.Second}) {
+			t.Errorf("run after remote config enabled collectors = %v, want ethtool=30s", got)
+		}
+
+		// Transient remote fetch error keeps the current collection run active.
+		setRemote(nil, errors.New("GTCS transient failure"))
+		expectNoSignal(t, stopped, "collection stop on remote config error")
+
+		// Updating remote config interval restarts collection with the new interval.
+		setRemote(networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: networktelemetryconfigpb.NetworkTelemetryConfigV1_builder{
+				Enabled:            new(true),
+				ConfigPollInterval: durationpb.New(5 * time.Millisecond),
+				CollectorConfigs: []*networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig{
+					networktelemetryconfigpb.NetworkTelemetryConfigV1_CollectorConfig_builder{
+						Source:             new(networkstatsreportpb.SourceId_SOURCE_ETHTOOL),
+						Enabled:            new(true),
+						CollectionInterval: durationpb.New(45 * time.Second),
+					}.Build(),
+				},
+			}.Build(),
+		}.Build(), nil)
+		awaitSignal(t, stopped, "collection stop after remote config interval change")
+		cfg = awaitSignal(t, started, "collection restart after remote config interval change")
+		if got := enabledIntervals(cfg); !maps.Equal(got, map[string]time.Duration{collector.NameEthtool: 45 * time.Second}) {
+			t.Errorf("run after remote config update enabled collectors = %v, want ethtool=45s", got)
+		}
+
+		// Disabling telemetry in the remote config stops collection.
+		setRemote(networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: &networktelemetryconfigpb.NetworkTelemetryConfigV1{},
+		}.Build(), nil)
+		awaitSignal(t, stopped, "collection stop after remote config disables telemetry")
+		expectNoSignal(t, started, "collection restart while remote config disables telemetry")
+
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("PollIntervalOnlyChangeKeepsCollectionRunning", func(t *testing.T) {
+		var mu sync.Mutex
+		current := ethtoolRemote(30*time.Second, 5*time.Millisecond)
+		setRemote := func(cfg *networktelemetryconfigpb.NetworkTelemetryConfig) {
+			mu.Lock()
+			defer mu.Unlock()
+			current = cfg
+		}
+		started, stopped, cancel, done := setupWith(t, attrs(nil), attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return current, nil
+			},
+		})
+		awaitSignal(t, started, "initial collection start")
+
+		// Changing only the poll interval keeps the current collection run.
+		setRemote(ethtoolRemote(30*time.Second, 7*time.Millisecond))
+		expectNoSignal(t, stopped, "collection stop after poll interval change")
+
+		// The loop still picks up later collection changes at the new poll interval.
+		setRemote(ethtoolRemote(45*time.Second, 7*time.Millisecond))
+		awaitSignal(t, stopped, "collection stop after collector interval change")
+		cfg := awaitSignal(t, started, "collection restart after collector interval change")
+		if got := enabledIntervals(cfg); !maps.Equal(got, map[string]time.Duration{collector.NameEthtool: 45 * time.Second}) {
+			t.Errorf("run after collector interval change enabled collectors = %v, want ethtool=45s", got)
+		}
+
+		cancel()
+		awaitSignal(t, stopped, "collection stop on shutdown")
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("MetadataErrorDoesNotBlockRemoteUpdates", func(t *testing.T) {
+		// The metadata server fails after the opt-out has been read once, while the config channel
+		// works. Remote config changes, including disabling telemetry, still apply.
+		policy := newPolicyStub(nil)
+		var mu sync.Mutex
+		current := ethtoolRemote(30*time.Second, 0)
+		started, stopped, cancel, done := setupWith(t, policy.lookup, attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return current, nil
+			},
+		})
+		awaitSignal(t, started, "collection start from remote config")
+
+		policy.setErr(mdsErr)
+		mu.Lock()
+		current = networktelemetryconfigpb.NetworkTelemetryConfig_builder{
+			V1: &networktelemetryconfigpb.NetworkTelemetryConfigV1{},
+		}.Build()
+		mu.Unlock()
+		awaitSignal(t, stopped, "collection stop after remote config disables telemetry while metadata is unreachable")
+
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("UnreadOptOutPausesCollectionWithoutContactingGTCS", func(t *testing.T) {
+		// The metadata server is unreachable from startup, so the opt-out has never been read.
+		// Collection stays paused and the config channel is not contacted until it is.
+		policy := newPolicyStub(nil)
+		policy.setErr(mdsErr)
+		var remoteCalls atomic.Int32
+		started, stopped, cancel, done := setupWith(t, policy.lookup, attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				remoteCalls.Add(1)
+				return ethtoolRemote(30*time.Second, 0), nil
+			},
+		})
+		expectNoSignal(t, started, "collection start before the opt-out is read")
+		if n := remoteCalls.Load(); n != 0 {
+			t.Errorf("remote config fetched %d times before the opt-out was read, want 0", n)
+		}
+
+		policy.setErr(nil)
+		awaitSignal(t, started, "collection start after the opt-out is read")
+
+		cancel()
+		awaitSignal(t, stopped, "collection stop on shutdown")
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("RemoteErrorDoesNotBlockMetadataUpdates", func(t *testing.T) {
+		// The config channel stays unreachable while the metadata server works. Metadata opt-out
+		// changes still apply over --collectors.
+		stubCollectorsFlag(t, "ethtool=60s")
+		policy := newPolicyStub(nil)
+		started, stopped, cancel, done := setupWith(t, policy.lookup, attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				return nil, errors.New("GTCS config channel unreachable")
+			},
+		})
+		awaitSignal(t, started, "initial collection start from --collectors while the config channel is unreachable")
+
+		policy.set(disableGuestTelemetryMetadataKey, "true")
+		awaitSignal(t, stopped, "collection stop after opt-out while the config channel is unreachable")
+
+		policy.set(disableGuestTelemetryMetadataKey, "false")
+		awaitSignal(t, started, "collection restart after opt-in while the config channel is unreachable")
+
+		cancel()
+		awaitSignal(t, stopped, "collection stop on shutdown")
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("OptOutStartupErrorStartsAfterShortRetry", func(t *testing.T) {
+		var optOutCalls atomic.Int32
+		started, stopped, cancel, done := setupWith(t, func(_ context.Context, key string) (string, error) {
+			if key == disableGuestTelemetryMetadataKey && optOutCalls.Add(1) == 1 {
+				return "", mdsErr
+			}
+			return "", metadata.NotDefinedError(key)
+		}, attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				if n := optOutCalls.Load(); n < 2 {
+					t.Errorf("remoteConfig called with optOutCalls = %d, want >= 2", n)
+				}
+				return ethtoolRemote(30*time.Second, 0), nil
+			},
+			refreshInterval: time.Hour,
+			retryBackoff:    5 * time.Millisecond,
+		})
+
+		cfg := awaitSignal(t, started, "collection start after startup opt-out retry")
+		if got := enabledIntervals(cfg); !maps.Equal(got, map[string]time.Duration{collector.NameEthtool: 30 * time.Second}) {
+			t.Errorf("enabled collectors after startup opt-out retry = %v, want ethtool=30s", got)
+		}
+
+		cancel()
+		awaitSignal(t, stopped, "collection stop on shutdown")
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("RemoteStartupErrorAppliesConfigAfterShortRetry", func(t *testing.T) {
+		var remoteCalls atomic.Int32
+		started, stopped, cancel, done := setupWith(t, attrs(nil), attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				if remoteCalls.Add(1) == 1 {
+					return nil, errors.New("GTCS config channel unreachable")
+				}
+				return ethtoolRemote(45*time.Second, 0), nil
+			},
+			refreshInterval: time.Hour,
+			retryBackoff:    5 * time.Millisecond,
+		})
+
+		cfg := awaitSignal(t, started, "collection start after startup remote config retry")
+		if got := remoteCalls.Load(); got < 2 {
+			t.Errorf("remoteCalls = %d, want >= 2", got)
+		}
+		if got := enabledIntervals(cfg); !maps.Equal(got, map[string]time.Duration{collector.NameEthtool: 45 * time.Second}) {
+			t.Errorf("enabled collectors after startup remote retry = %v, want ethtool=45s", got)
+		}
+
+		cancel()
+		awaitSignal(t, stopped, "collection stop on shutdown")
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("StartupRetryBackoffDoublesAndCaps", func(t *testing.T) {
+		logs := captureLogs(t)
+		var mu sync.Mutex
+		var attemptTimes []time.Time
+
+		started, stopped, cancel, done := setupWith(t, attrs(nil), attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				mu.Lock()
+				attemptTimes = append(attemptTimes, time.Now())
+				attempt := len(attemptTimes)
+				mu.Unlock()
+				if attempt <= 4 {
+					return nil, errors.New("GTCS config channel unreachable")
+				}
+				return ethtoolRemote(30*time.Second, 0), nil
+			},
+			refreshInterval: 35 * time.Millisecond,
+			retryBackoff:    10 * time.Millisecond,
+		})
+
+		awaitSignal(t, started, "collection start after exponential backoff retries")
+
+		wantDelays := []time.Duration{
+			10 * time.Millisecond,
+			20 * time.Millisecond,
+			35 * time.Millisecond,
+			35 * time.Millisecond,
+		}
+		if got := logs.retryDelays(t); !slices.Equal(got, wantDelays) {
+			t.Errorf("startup retry delays = %v, want %v", got, wantDelays)
+		}
+
+		mu.Lock()
+		var elapsed time.Duration
+		if len(attemptTimes) >= 5 {
+			elapsed = attemptTimes[4].Sub(attemptTimes[0])
+		}
+		attempts := len(attemptTimes)
+		mu.Unlock()
+		if attempts < 5 {
+			t.Fatalf("remote attempts = %d, want >= 5", attempts)
+		}
+		if minElapsed := 10*time.Millisecond + 20*time.Millisecond + 35*time.Millisecond + 35*time.Millisecond; elapsed < minElapsed {
+			t.Errorf("elapsed time across 4 retries = %v, want >= %v", elapsed, minElapsed)
+		}
+
+		cancel()
+		awaitSignal(t, stopped, "collection stop on shutdown")
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
+		}
+	})
+
+	t.Run("RefreshErrorAfterSyncKeepsNormalInterval", func(t *testing.T) {
+		logs := captureLogs(t)
+		const normalInterval = 60 * time.Millisecond
+		var mu sync.Mutex
+		mode := 0
+		var syncedAt time.Time
+		errTicks := make(chan time.Time, 8)
+
+		started, stopped, cancel, done := setupWith(t, attrs(nil), attrs(nil), startOptions{
+			remote: func(context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+				mu.Lock()
+				m := mode
+				if m == 0 && syncedAt.IsZero() {
+					syncedAt = time.Now()
+				}
+				mu.Unlock()
+				switch m {
+				case 0:
+					return ethtoolRemote(30*time.Second, 0), nil
+				case 1:
+					select {
+					case errTicks <- time.Now():
+					default:
+					}
+					return nil, errors.New("transient GTCS error")
+				default:
+					return ethtoolRemote(45*time.Second, 0), nil
+				}
+			},
+			refreshInterval: normalInterval,
+			retryBackoff:    5 * time.Millisecond,
+		})
+
+		awaitSignal(t, started, "initial collection start")
+
+		mu.Lock()
+		mode = 1
+		mu.Unlock()
+		awaitSignal(t, errTicks, "first post-sync failed refresh")
+		secondErrAt := awaitSignal(t, errTicks, "second post-sync failed refresh")
+
+		select {
+		case <-stopped:
+			t.Fatal("unexpected collection stop during post-sync refresh error")
+		default:
+		}
+		if got := logs.retryDelays(t); len(got) != 0 {
+			t.Errorf("post-sync retry delays = %v, want none", got)
+		}
+		mu.Lock()
+		t0 := syncedAt
+		mu.Unlock()
+		if got := secondErrAt.Sub(t0); got < 2*normalInterval {
+			t.Errorf("time to second post-sync failed refresh = %v, want >= %v", got, 2*normalInterval)
+		}
+
+		mu.Lock()
+		mode = 2
+		mu.Unlock()
+		awaitSignal(t, stopped, "collection stop after remote config recovery")
+		cfg := awaitSignal(t, started, "collection restart after remote config recovery")
+		if got := enabledIntervals(cfg); !maps.Equal(got, map[string]time.Duration{collector.NameEthtool: 45 * time.Second}) {
+			t.Errorf("enabled collectors after recovery = %v, want ethtool=45s", got)
+		}
+
+		cancel()
+		awaitSignal(t, stopped, "collection stop on shutdown")
+		if err := <-done; err != nil {
+			t.Errorf("start() err = %v, want nil", err)
 		}
 	})
 }

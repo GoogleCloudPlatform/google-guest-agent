@@ -1,0 +1,55 @@
+edition = "2024";
+
+package cloud_cluster_guest_net_drivers_guest_agent_plugin_proto;
+
+import "google/protobuf/duration.proto";
+import "network_stats_report.proto";
+
+option features.default_symbol_visibility = STRICT;
+option go_package = "/network_telemetry_config";
+
+// Server-provided configuration for the guest network telemetry plugin.
+// Next ID: 2
+export message NetworkTelemetryConfig {
+  oneof config {
+    NetworkTelemetryConfigV1 v1 = 1;
+  }
+}
+
+// V1 configuration schema for the guest network telemetry plugin.
+// Next ID: 6
+message NetworkTelemetryConfigV1 {
+  // Master switch to enable or disable all telemetry collection and reporting.
+  bool enabled = 1;
+
+  // Polling interval for fetching configuration updates from the backend.
+  google.protobuf.Duration config_poll_interval = 2;
+
+  // Maximum wait time to batch collector outputs before sending a report.
+  google.protobuf.Duration report_batch_timeout = 3;
+
+  // Per-RPC timeout when sending a NetworkStatsReport over ACS.
+  google.protobuf.Duration report_send_timeout = 4;
+
+  // Explicit configuration for each telemetry collector submodule. The list is
+  // the complete collector configuration: a collector without an entry is
+  // disabled, even when `enabled` is true.
+  repeated CollectorConfig collector_configs = 5;
+
+  // Configuration for a single telemetry collector submodule.
+  // Next ID: 5
+  message CollectorConfig {
+    // Telemetry source identifier.
+    SourceId source = 1;
+
+    // Whether this collector is enabled. Must be set to true to enable the
+    // collector; unset or false disables it.
+    bool enabled = 2;
+
+    // Collection cadence for this collector.
+    google.protobuf.Duration collection_interval = 3;
+
+    // Per-run execution timeout for this collector.
+    google.protobuf.Duration collection_timeout = 4;
+  }
+}

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -112,6 +113,7 @@ func TestCheckMDSReachability(t *testing.T) {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
+			w.Header().Set("Metadata-Flavor", "Google")
 			w.WriteHeader(http.StatusOK)
 		}))
 		t.Cleanup(mockServer.Close)
@@ -122,8 +124,21 @@ func TestCheckMDSReachability(t *testing.T) {
 		}
 	})
 
+	t.Run("MissingResponseHeader", func(t *testing.T) {
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(mockServer.Close)
+
+		c := &Collector{MDSAddress: mockServer.URL}
+		if got := c.checkMDSReachability(t.Context()); got != "fail" {
+			t.Errorf("checkMDSReachability(missing Metadata-Flavor response header) = %q, want %q", got, "fail")
+		}
+	})
+
 	t.Run("Failure Status Code", func(t *testing.T) {
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Metadata-Flavor", "Google")
 			w.WriteHeader(http.StatusNotFound)
 		}))
 		t.Cleanup(mockServer.Close)
@@ -311,6 +326,7 @@ func TestCollectAndPanicRecovery(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		w.Header().Set("Metadata-Flavor", "Google")
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
@@ -360,4 +376,104 @@ func TestCollectAndPanicRecovery(t *testing.T) {
 			t.Errorf("DNSReachabilityKey = %q, want fail", out2.Groups[0].GetAgentMetrics()[DNSReachabilityKey].GetStringValue())
 		}
 	})
+}
+
+func TestCheckMDSReachability_InvalidRequest(t *testing.T) {
+	c := &Collector{MDSAddress: "http://\x7f"}
+	if got := c.checkMDSReachability(t.Context()); got != "error" {
+		t.Errorf("checkMDSReachability(invalid URL) = %q, want %q", got, "error")
+	}
+}
+
+func TestDNSAndNTPProbeErrorVsFail(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "EMFILE",
+			err:  fmt.Errorf("dial: %w", syscall.EMFILE),
+			want: "error",
+		},
+		{
+			name: "SocketSyscallError",
+			err:  &net.OpError{Op: "dial", Net: "udp", Err: &os.SyscallError{Syscall: "socket", Err: syscall.EACCES}},
+			want: "error",
+		},
+		{
+			name: "DeadlineExceeded",
+			err:  context.DeadlineExceeded,
+			want: "fail",
+		},
+		{
+			name: "ConnectionRefused",
+			err:  &net.OpError{Op: "dial", Net: "udp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}},
+			want: "fail",
+		},
+		{
+			name: "EPERMSendto",
+			err:  &net.OpError{Op: "write", Net: "udp", Err: &os.SyscallError{Syscall: "sendto", Err: syscall.EPERM}},
+			want: "fail",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Collector{
+				DNSExchange: func(context.Context, string, string) (*dns.Msg, error) { return nil, tc.err },
+				NTPQuery:    func(context.Context) error { return tc.err },
+			}
+			if got := c.checkDNSReachability(t.Context()); got != tc.want {
+				t.Errorf("checkDNSReachability(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+			if got := c.checkNTPReachability(t.Context()); got != tc.want {
+				t.Errorf("checkNTPReachability(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStampEnvelopeCollectorStatuses(t *testing.T) {
+	origSysinfo := syscallSysinfo
+	t.Cleanup(func() { syscallSysinfo = origSysinfo })
+	syscallSysinfo = func(si *syscall.Sysinfo_t) error {
+		si.Uptime = 100
+		return nil
+	}
+	epoch := time.Unix(1779383000, 0)
+	rep := &pb.NetworkStatsReport{}
+	StampEnvelope(rep, EnvelopeOptions{
+		SeqNum:          1,
+		PluginStart:     epoch,
+		CollectionStart: epoch,
+		CollectorStatuses: map[string]CollectorStatus{
+			collector.NameEthtool:    {Status: "ok", Error: "ignored"},
+			collector.NameSNMP:       {Status: "error", Error: "procfs failed"},
+			collector.NameDHCP:       {Status: "timeout", Error: "collector timed out"},
+			collector.NameAgentEvent: {Status: "error"},
+		},
+	})
+	if len(rep.GetMetrics()) != 1 {
+		t.Fatalf("StampEnvelope() produced %d metric groups, want 1", len(rep.GetMetrics()))
+	}
+	m := rep.GetMetrics()[0].GetAgentMetrics()
+	if got := m[CollectorStatusKeyPrefix+collector.NameEthtool].GetStringValue(); got != "ok" {
+		t.Errorf("StampEnvelope(%s, status=ok) status = %q, want %q", collector.NameEthtool, got, "ok")
+	}
+	if got, hasErr := m[CollectorErrorKeyPrefix+collector.NameEthtool]; hasErr {
+		t.Errorf("StampEnvelope(%s, status=ok) unexpectedly set %s = %v, want absent", collector.NameEthtool, CollectorErrorKeyPrefix+collector.NameEthtool, got)
+	}
+	if got, errGot := m[CollectorStatusKeyPrefix+collector.NameSNMP].GetStringValue(), m[CollectorErrorKeyPrefix+collector.NameSNMP].GetStringValue(); got != "error" || errGot != "procfs failed" {
+		t.Errorf("StampEnvelope(%s, status=error) status/error = (%q, %q), want (%q, %q)", collector.NameSNMP, got, errGot, "error", "procfs failed")
+	}
+	if got, errGot := m[CollectorStatusKeyPrefix+collector.NameDHCP].GetStringValue(), m[CollectorErrorKeyPrefix+collector.NameDHCP].GetStringValue(); got != "timeout" || errGot != "collector timed out" {
+		t.Errorf("StampEnvelope(%s, status=timeout) status/error = (%q, %q), want (%q, %q)", collector.NameDHCP, got, errGot, "timeout", "collector timed out")
+	}
+	if got := m[CollectorStatusKeyPrefix+collector.NameAgentEvent].GetStringValue(); got != "error" {
+		t.Errorf("StampEnvelope(%s, status=error, error=\"\") %s = %q, want %q", collector.NameAgentEvent, CollectorStatusKeyPrefix+collector.NameAgentEvent, got, "error")
+	}
+	if got, hasErr := m[CollectorErrorKeyPrefix+collector.NameAgentEvent]; hasErr {
+		t.Errorf("StampEnvelope(%s, status=error, error=\"\") unexpectedly set %s = %v, want absent", collector.NameAgentEvent, CollectorErrorKeyPrefix+collector.NameAgentEvent, got)
+	}
 }

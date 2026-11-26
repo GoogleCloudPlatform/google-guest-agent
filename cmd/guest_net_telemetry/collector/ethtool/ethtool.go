@@ -5,9 +5,11 @@ package ethtool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector"
@@ -43,7 +45,28 @@ var (
 	newClient = func() (Client, error) {
 		return ethtool.NewEthtool()
 	}
+
+	eopnotsuppMu     sync.Mutex
+	eopnotsuppLogged = make(map[string]bool)
+
+	// gveQueueFormatMu protects cachedGVEQueueFormat, which is intentionally
+	// process-wide: collectors are rebuilt on every config change, and GCE has one
+	// NIC type and queue format per instance, so one value serves every gve NIC.
+	gveQueueFormatMu     sync.Mutex
+	cachedGVEQueueFormat string
 )
+
+// markEOPNOTSUPPLogged records ifaceName and reports true the first time
+// EOPNOTSUPP is seen for that interface in the process lifetime.
+func markEOPNOTSUPPLogged(ifaceName string) bool {
+	eopnotsuppMu.Lock()
+	defer eopnotsuppMu.Unlock()
+	if eopnotsuppLogged[ifaceName] {
+		return false
+	}
+	eopnotsuppLogged[ifaceName] = true
+	return true
+}
 
 // Collector implements collector.Collector for SOURCE_ETHTOOL.
 type Collector struct {
@@ -66,7 +89,15 @@ func (c *Collector) Source() pb.SourceId {
 	return pb.SourceId_SOURCE_ETHTOOL
 }
 
+// gveQueueFormat returns the cached GVE queue format for the process, or reads
+// the kernel log and caches the first matched queue format.
 func (c *Collector) gveQueueFormat() (string, error) {
+	gveQueueFormatMu.Lock()
+	defer gveQueueFormatMu.Unlock()
+	if cachedGVEQueueFormat != "" {
+		return cachedGVEQueueFormat, nil
+	}
+
 	klogFn := syscallKlogctl
 	if c != nil && c.Klogctl != nil {
 		klogFn = c.Klogctl
@@ -82,18 +113,20 @@ func (c *Collector) gveQueueFormat() (string, error) {
 		return "", fmt.Errorf("failed to read kernel log via klogctl: %w", err)
 	}
 
-	allMatches := gveRegex.FindAllSubmatch(buf[:n], -1)
-	if len(allMatches) > 0 {
+	if allMatches := gveRegex.FindAllSubmatch(buf[:n], -1); len(allMatches) > 0 {
 		latestMatch := allMatches[len(allMatches)-1]
 		if len(latestMatch) > 1 {
-			return strings.TrimSpace(string(latestMatch[1])), nil
+			if format := strings.TrimSpace(string(latestMatch[1])); format != "" {
+				cachedGVEQueueFormat = format
+				return format, nil
+			}
 		}
 	}
 
 	return "GVE queue format not found in kernel logs", nil
 }
 
-func (c *Collector) extractStats(et Client, interfaceName, macAddr string) (*pb.MetricsGroup, error) {
+func (c *Collector) extractStats(et Client, interfaceName, macAddr string, queueFormat func() (string, error)) (*pb.MetricsGroup, error) {
 	startTime := collector.Now()
 	stats, err := et.Stats(interfaceName)
 	if err != nil {
@@ -114,11 +147,11 @@ func (c *Collector) extractStats(et Client, interfaceName, macAddr string) (*pb.
 	agentMetrics := make(map[string]*pb.MetricValue, len(stats)+2)
 
 	if driverName == "gve" {
-		queueFormat, err := c.gveQueueFormat()
+		qf, err := queueFormat()
 		if err != nil {
 			collector.Logf("Failed to get GVE queue format: %v", err)
 		} else {
-			agentMetrics[GveQueueFormatKey] = collector.Str(queueFormat)
+			agentMetrics[GveQueueFormatKey] = collector.Str(qf)
 		}
 	}
 
@@ -148,11 +181,14 @@ func (c *Collector) extractStats(et Client, interfaceName, macAddr string) (*pb.
 	return collector.NewGroup(pb.SourceId_SOURCE_ETHTOOL, ids, agentMetrics, startTime, endTime), nil
 }
 
-// Collect gathers ethtool metrics for all non-loopback interfaces.
+// Collect gathers ethtool metrics for device-backed NIC interfaces.
 // The context parameter is unused because underlying ethtool ioctl and klogctl
 // syscalls are synchronous kernel operations that do not support cancellation.
 func (c *Collector) Collect(_ context.Context) (collector.Output, error) {
-	ifaces := collector.NonLoopbackInterfaces()
+	ifaces, err := collector.Interfaces(collector.InterfaceNIC)
+	if err != nil {
+		return collector.Output{}, err
+	}
 	if len(ifaces) == 0 {
 		collector.Logf("No interfaces found to scan.")
 		return collector.Output{}, nil
@@ -169,11 +205,18 @@ func (c *Collector) Collect(_ context.Context) (collector.Output, error) {
 	}
 	defer et.Close()
 
+	queueFormat := sync.OnceValues(c.gveQueueFormat)
 	var groups []*pb.MetricsGroup
 	for _, iface := range ifaces {
 		mac := iface.HardwareAddr.String()
-		grp, err := c.extractStats(et, iface.Name, mac)
+		grp, err := c.extractStats(et, iface.Name, mac, queueFormat)
 		if err != nil {
+			if errors.Is(err, syscall.EOPNOTSUPP) {
+				if markEOPNOTSUPPLogged(iface.Name) {
+					collector.Logf("Ethtool stats not supported for %q (%v); skipping quietly", iface.Name, err)
+				}
+				continue
+			}
 			collector.Logf("Failed to extract ethtool stats for %q: %v", iface.Name, err)
 			continue
 		}

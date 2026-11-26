@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"sync"
 	"syscall"
@@ -43,6 +44,10 @@ const (
 	PluginUptimeSecKey = "plugin_uptime_sec"
 	// ExecutionModeKey distinguishes early_standalone from agent_managed reports.
 	ExecutionModeKey = "execution_mode"
+	// CollectorStatusKeyPrefix prefixes per-collector outcome metrics in SOURCE_AGENT_EVENT.
+	CollectorStatusKeyPrefix = "collector_status_"
+	// CollectorErrorKeyPrefix prefixes per-collector truncated error metrics in SOURCE_AGENT_EVENT.
+	CollectorErrorKeyPrefix = "collector_error_"
 
 	metadataServerIP = "169.254.169.254"
 	dnsServerAddr    = metadataServerIP + ":53"
@@ -52,12 +57,26 @@ const (
 	ntpClientHeader  = 0x1B // LI=0, VN=3, Mode=3 (Client)
 )
 
+// Canonical collector outcome values recorded under CollectorStatusKeyPrefix.
+const (
+	CollectorStatusOK      = "ok"
+	CollectorStatusError   = "error"
+	CollectorStatusTimeout = "timeout"
+)
+
+// CollectorStatus records the outcome of one expected collector in a report.
+type CollectorStatus struct {
+	Status string
+	Error  string
+}
+
 // EnvelopeOptions specifies report-level lifecycle metadata stamped onto SOURCE_AGENT_EVENT.
 type EnvelopeOptions struct {
-	SeqNum          int64
-	PluginStart     time.Time
-	CollectionStart time.Time
-	ExecutionMode   string
+	SeqNum            int64
+	PluginStart       time.Time
+	CollectionStart   time.Time
+	ExecutionMode     string
+	CollectorStatuses map[string]CollectorStatus
 }
 
 var (
@@ -188,6 +207,12 @@ func StampEnvelope(rep *pb.NetworkStatsReport, opts EnvelopeOptions) {
 	metrics[SystemUptimeSecKey] = collector.Int(SystemUptimeSec())
 	metrics[PluginUptimeSecKey] = collector.Int(pluginUptime)
 	metrics[ExecutionModeKey] = collector.Str(mode)
+	for name, cs := range opts.CollectorStatuses {
+		metrics[CollectorStatusKeyPrefix+name] = collector.Str(cs.Status)
+		if cs.Status != CollectorStatusOK && cs.Error != "" {
+			metrics[CollectorErrorKeyPrefix+name] = collector.Str(cs.Error)
+		}
+	}
 }
 
 func (c *Collector) kernelVersion() (string, error) {
@@ -210,6 +235,27 @@ func (c *Collector) kernelVersion() (string, error) {
 	return string(buf), nil
 }
 
+// probeFailureStatus distinguishes local execution failures (failed socket
+// creation or resource exhaustion like EMFILE) from reachability failures where
+// the target did not answer cleanly (including firewall EPERM/EACCES on connect/sendto).
+func probeFailureStatus(err error) string {
+	var syscallErr *os.SyscallError
+	if errors.As(err, &syscallErr) && syscallErr.Syscall == "socket" {
+		return "error"
+	}
+	for _, localErr := range []syscall.Errno{
+		syscall.EMFILE,
+		syscall.ENFILE,
+		syscall.ENOBUFS,
+		syscall.ENOMEM,
+	} {
+		if errors.Is(err, localErr) {
+			return "error"
+		}
+	}
+	return "fail"
+}
+
 func (c *Collector) checkMDSReachability(ctx context.Context) string {
 	addr := mdsAddress
 	if c != nil && c.MDSAddress != "" {
@@ -217,7 +263,7 @@ func (c *Collector) checkMDSReachability(ctx context.Context) string {
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", addr, nil)
 	if err != nil {
-		return "fail"
+		return "error"
 	}
 	req.Header.Add("Metadata-Flavor", "Google")
 
@@ -232,10 +278,10 @@ func (c *Collector) checkMDSReachability(ctx context.Context) string {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "fail"
+		return probeFailureStatus(err)
 	}
 	// Keep-alives are disabled, so the body is closed without draining it for reuse.
-	if err := resp.Body.Close(); err != nil || resp.StatusCode != http.StatusOK {
+	if err := resp.Body.Close(); err != nil || resp.StatusCode != http.StatusOK || resp.Header.Get("Metadata-Flavor") != "Google" {
 		return "fail"
 	}
 
@@ -248,7 +294,10 @@ func (c *Collector) checkDNSReachability(ctx context.Context) string {
 		dnsFn = c.DNSExchange
 	}
 	r, err := dnsFn(ctx, "metadata.google.internal.", dnsServerAddr)
-	if err != nil || r.Rcode != dns.RcodeSuccess || len(r.Answer) == 0 {
+	if err != nil {
+		return probeFailureStatus(err)
+	}
+	if r == nil || r.Rcode != dns.RcodeSuccess || len(r.Answer) == 0 {
 		return "fail"
 	}
 	return "pass"
@@ -260,7 +309,7 @@ func (c *Collector) checkNTPReachability(ctx context.Context) string {
 		ntpFn = c.NTPQuery
 	}
 	if err := ntpFn(ctx); err != nil {
-		return "fail"
+		return probeFailureStatus(err)
 	}
 	return "pass"
 }

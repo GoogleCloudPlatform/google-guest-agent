@@ -27,7 +27,7 @@ enum MetricId {
 }
 
 // Not used directly - provides mappings for `source` in `MetricsGroup`
-enum SourceId {
+export enum SourceId {
   SOURCE_ID_UNSPECIFIED = 0;
   SOURCE_ETHTOOL = 1;
   SOURCE_IP_S_LINK = 2;
@@ -59,7 +59,7 @@ message MetricsGroupIdentifier {
   DeviceElementType device_element_identifier_type = 1;
 
   // Device identifier (i.e. bus address/MAC address)
-  string device_element_identifier = 2;  // copybara:cpp_string_type
+  string device_element_identifier = 2;
 }
 
 // The representation for a single metric - that value can be any one
@@ -68,8 +68,7 @@ message MetricValue {
   oneof value {
     int64 int_value = 1;
     double double_value = 2;
-    string string_value = 3;  // copybara:cpp_string_type
-
+    string string_value = 3;
     bool bool_value = 4;
   }
 }

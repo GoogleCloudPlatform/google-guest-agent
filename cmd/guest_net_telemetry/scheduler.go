@@ -12,6 +12,9 @@ import (
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector"
 )
 
+// slowCollectorLogThreshold is the minimum collector duration logged when Collect succeeds.
+const slowCollectorLogThreshold = time.Second
+
 // nominalDue maps a ticker firing time t to the schedule point Epoch + n*Interval.
 // Because epoch is recorded before tickers are created and Go tickers never fire early,
 // t.Sub(epoch) for tick n is always >= n*Interval; Truncate tolerates positive delay up to a full interval.
@@ -130,6 +133,11 @@ func (s *Scheduler) executeCollectorOnce(
 	res.Err = err
 
 	wallTime := end.Sub(start)
-	logNoFatal("Collector %s (seq=%d) performance: wall_time=%v", col.Name(), seq, wallTime)
+	switch {
+	case err != nil:
+		logNoFatal("Collector %s (seq=%d) performance: wall_time=%v err=%v", col.Name(), seq, wallTime, err)
+	case wallTime >= slowCollectorLogThreshold:
+		logNoFatal("Collector %s (seq=%d) performance: wall_time=%v", col.Name(), seq, wallTime)
+	}
 	return res
 }

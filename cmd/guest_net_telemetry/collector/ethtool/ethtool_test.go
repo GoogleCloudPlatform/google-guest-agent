@@ -6,9 +6,14 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/collector"
+	"github.com/google/go-cmp/cmp"
 	"github.com/safchain/ethtool"
 
 	pb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_stats_report"
@@ -19,9 +24,13 @@ type mockClient struct {
 	drvInfo  ethtool.DrvInfo
 	statsErr error
 	drvErr   error
+	onStats  func(intf string)
 }
 
 func (m *mockClient) Stats(intf string) (map[string]uint64, error) {
+	if m.onStats != nil {
+		m.onStats(intf)
+	}
 	return m.stats, m.statsErr
 }
 
@@ -42,6 +51,7 @@ const (
 
 func TestGveQueueFormat(t *testing.T) {
 	t.Run("Match DQO RDA", func(t *testing.T) {
+		resetGVEQueueFormatCache(t)
 		c := &Collector{
 			Klogctl: func(action int, buf []byte) (int, error) {
 				if action == 10 {
@@ -59,6 +69,7 @@ func TestGveQueueFormat(t *testing.T) {
 	})
 
 	t.Run("Match DQO QPL", func(t *testing.T) {
+		resetGVEQueueFormatCache(t)
 		c := &Collector{
 			Klogctl: func(action int, buf []byte) (int, error) {
 				if action == 10 {
@@ -76,6 +87,7 @@ func TestGveQueueFormat(t *testing.T) {
 	})
 
 	t.Run("MatchLatest", func(t *testing.T) {
+		resetGVEQueueFormatCache(t)
 		c := &Collector{
 			Klogctl: func(action int, buf []byte) (int, error) {
 				if action == 10 {
@@ -94,6 +106,7 @@ func TestGveQueueFormat(t *testing.T) {
 	})
 
 	t.Run("NotFound", func(t *testing.T) {
+		resetGVEQueueFormatCache(t)
 		c := &Collector{
 			Klogctl: func(action int, buf []byte) (int, error) {
 				if action == 10 {
@@ -129,7 +142,7 @@ func TestExtractStats(t *testing.T) {
 		}
 
 		c := New()
-		got, err := c.extractStats(mockEt, testIface0, testMAC0)
+		got, err := c.extractStats(mockEt, testIface0, testMAC0, c.gveQueueFormat)
 		if err != nil {
 			t.Fatalf("extractStats() returned error: %v, want <nil>", err)
 		}
@@ -150,6 +163,7 @@ func TestExtractStats(t *testing.T) {
 	})
 
 	t.Run("GVE Driver Special Queue Format Mapping", func(t *testing.T) {
+		resetGVEQueueFormatCache(t)
 		c := &Collector{
 			Klogctl: func(action int, buf []byte) (int, error) {
 				if action == 10 {
@@ -166,7 +180,7 @@ func TestExtractStats(t *testing.T) {
 			drvInfo: ethtool.DrvInfo{Driver: "gve"},
 		}
 
-		got, err := c.extractStats(mockEt, testIface0, testMAC0)
+		got, err := c.extractStats(mockEt, testIface0, testMAC0, c.gveQueueFormat)
 		if err != nil {
 			t.Fatalf("extractStats() returned error: %v, want <nil>", err)
 		}
@@ -201,7 +215,7 @@ func TestExtractStats(t *testing.T) {
 		}
 
 		c := New()
-		got, err := c.extractStats(mockEt, testIface2, testMAC1)
+		got, err := c.extractStats(mockEt, testIface2, testMAC1, c.gveQueueFormat)
 		if err != nil {
 			t.Fatalf("extractStats() returned error: %v, want <nil>", err)
 		}
@@ -222,6 +236,7 @@ func TestExtractStats(t *testing.T) {
 	})
 
 	t.Run("GVE Driver High-Fidelity Mapping", func(t *testing.T) {
+		resetGVEQueueFormatCache(t)
 		mockGveStats := map[string]uint64{
 			"rx_packets":               630282,
 			"tx_packets":               245754,
@@ -261,7 +276,7 @@ func TestExtractStats(t *testing.T) {
 			},
 		}
 
-		got, err := c.extractStats(mockEt, testIface3, testMAC2)
+		got, err := c.extractStats(mockEt, testIface3, testMAC2, c.gveQueueFormat)
 		if err != nil {
 			t.Fatalf("extractStats() returned error: %v, want <nil>", err)
 		}
@@ -294,7 +309,7 @@ func TestExtractStats(t *testing.T) {
 		}
 
 		c := New()
-		if _, err := c.extractStats(mockEt, testIface0, testMAC0); err == nil {
+		if _, err := c.extractStats(mockEt, testIface0, testMAC0, c.gveQueueFormat); err == nil {
 			t.Fatalf("extractStats() with Stats error returned err = <nil>, want error")
 		}
 	})
@@ -306,7 +321,7 @@ func TestExtractStats(t *testing.T) {
 		}
 
 		c := New()
-		got, err := c.extractStats(mockEt, testIface0, testMAC0)
+		got, err := c.extractStats(mockEt, testIface0, testMAC0, c.gveQueueFormat)
 		if err != nil {
 			t.Fatalf("extractStats() returned error: %v, want <nil>", err)
 		}
@@ -321,7 +336,36 @@ func TestExtractStats(t *testing.T) {
 	})
 }
 
+func resetGVEQueueFormatCache(t *testing.T) {
+	t.Helper()
+	clear := func() {
+		gveQueueFormatMu.Lock()
+		cachedGVEQueueFormat = ""
+		gveQueueFormatMu.Unlock()
+	}
+	clear()
+	t.Cleanup(clear)
+}
+
+func setupFakeSysfsDrivers(t *testing.T, drivers map[string]string) string {
+	t.Helper()
+	sysDir := t.TempDir()
+	for ifName, drv := range drivers {
+		devDir := filepath.Join(sysDir, ifName, "device")
+		if err := os.MkdirAll(devDir, 0755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", devDir, err)
+		}
+		if err := os.Symlink(drv, filepath.Join(devDir, "driver")); err != nil {
+			t.Fatalf("Symlink(%s): %v", ifName, err)
+		}
+	}
+	t.Cleanup(collector.OverrideSysfsNetPath(sysDir))
+	return sysDir
+}
+
 func TestCollect(t *testing.T) {
+	resetGVEQueueFormatCache(t)
+	setupFakeSysfsDrivers(t, map[string]string{"eth0": "gve"})
 	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
 		return []net.Interface{
 			{Index: 2, Name: "eth0", Flags: net.FlagUp, HardwareAddr: net.HardwareAddr{0x00, 0x15, 0x5d, 0x01, 0x02, 0x03}},
@@ -368,4 +412,236 @@ func TestCollect(t *testing.T) {
 			t.Errorf("Collect() with failed client returned nil error, want non-nil")
 		}
 	})
+
+	t.Run("ListInterfacesError", func(t *testing.T) {
+		t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
+			return nil, errors.New("netlink failed")
+		}))
+		if _, err := c.Collect(t.Context()); err == nil {
+			t.Errorf("Collect() when NonLoopbackInterfaces fails = nil error, want non-nil")
+		}
+	})
+}
+
+func TestCollectFiltersNICs(t *testing.T) {
+	sysDir := setupFakeSysfsDrivers(t, map[string]string{
+		"eth0": "gve",
+		"eth1": "virtio_net",
+		"eth2": "idpf",
+	})
+	for ifName, uevent := range map[string]string{
+		"gcp.eth0.10": "DEVTYPE=vlan\nINTERFACE=gcp.eth0.10\n",
+		"br0":         "DEVTYPE=bridge\nINTERFACE=br0\n",
+		"br0.30":      "DEVTYPE=vlan\nINTERFACE=br0.30\n",
+		"veth0":       "INTERFACE=veth0\n",
+		"tun0":        "INTERFACE=tun0\n",
+	} {
+		dir := filepath.Join(sysDir, ifName)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte(uevent), 0644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", ifName, err)
+		}
+	}
+	if err := os.Symlink("../eth0", filepath.Join(sysDir, "gcp.eth0.10", "lower_eth0")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
+		return []net.Interface{
+			{Index: 1, Name: "lo", Flags: net.FlagLoopback | net.FlagUp},
+			{Index: 2, Name: "eth0", Flags: net.FlagUp},
+			{Index: 3, Name: "eth1", Flags: net.FlagUp},
+			{Index: 7, Name: "eth2", Flags: net.FlagUp},
+			{Index: 10, Name: "gcp.eth0.10", Flags: net.FlagUp},
+			{Index: 4, Name: "br0", Flags: net.FlagUp},
+			{Index: 12, Name: "br0.30", Flags: net.FlagUp},
+			{Index: 5, Name: "veth0", Flags: net.FlagUp},
+			{Index: 6, Name: "tun0", Flags: net.FlagUp},
+		}, nil
+	}))
+
+	var visited []string
+	c := &Collector{
+		NewClient: func() (Client, error) {
+			return &mockClient{
+				stats:   map[string]uint64{"rx_packets": 1},
+				drvInfo: ethtool.DrvInfo{Driver: "virtio_net"},
+				onStats: func(intf string) { visited = append(visited, intf) },
+			}, nil
+		},
+	}
+	out, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatalf("Collect() err = %v, want nil", err)
+	}
+	if diff := cmp.Diff([]string{"eth0", "eth1", "eth2"}, visited); diff != "" {
+		t.Errorf("Collect() visited interfaces diff (-want +got):\n%s", diff)
+	}
+	if len(out.Groups) != 3 {
+		t.Errorf("len(Collect().Groups) = %d, want 3", len(out.Groups))
+	}
+}
+
+func TestCollectLogsEOPNOTSUPPOncePerInterface(t *testing.T) {
+	eopnotsuppMu.Lock()
+	eopnotsuppLogged = make(map[string]bool)
+	eopnotsuppMu.Unlock()
+	t.Cleanup(func() {
+		eopnotsuppMu.Lock()
+		eopnotsuppLogged = make(map[string]bool)
+		eopnotsuppMu.Unlock()
+	})
+
+	setupFakeSysfsDrivers(t, map[string]string{"eth0": "gve"})
+	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
+		return []net.Interface{{Index: 2, Name: "eth0", Flags: net.FlagUp}}, nil
+	}))
+
+	var logs []string
+	t.Cleanup(collector.OverrideLogger(func(format string, v ...any) {
+		logs = append(logs, format)
+	}))
+
+	c := &Collector{
+		NewClient: func() (Client, error) {
+			return &mockClient{statsErr: syscall.EOPNOTSUPP}, nil
+		},
+	}
+	for range 3 {
+		if _, err := c.Collect(t.Context()); err != nil {
+			t.Fatalf("Collect() on EOPNOTSUPP err = %v, want nil", err)
+		}
+	}
+	unsupportedLogs := 0
+	for _, msg := range logs {
+		if strings.Contains(msg, "not supported") {
+			unsupportedLogs++
+		}
+	}
+	if unsupportedLogs != 1 {
+		t.Errorf("EOPNOTSUPP log count across 3 Collect calls = %d, want 1", unsupportedLogs)
+	}
+}
+
+func TestCollectCachesFirstGVEQueueFormatAcrossRuns(t *testing.T) {
+	resetGVEQueueFormatCache(t)
+	setupFakeSysfsDrivers(t, map[string]string{"eth0": "gve"})
+	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
+		return []net.Interface{{Index: 2, Name: "eth0", Flags: net.FlagUp}}, nil
+	}))
+
+	klogReads := 0
+	klogResponse := "gve 0000:00:04.0: Driver is running with DQO RDA queue format.\n"
+	c := &Collector{
+		NewClient: func() (Client, error) {
+			return &mockClient{
+				stats:   map[string]uint64{"rx_packets": 1},
+				drvInfo: ethtool.DrvInfo{Driver: "gve"},
+			}, nil
+		},
+		Klogctl: func(action int, buf []byte) (int, error) {
+			if action == syslogActionSizeBuffer {
+				return 4096, nil
+			}
+			klogReads++
+			copy(buf, klogResponse)
+			return len(klogResponse), nil
+		},
+	}
+
+	out1, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatalf("first Collect() err = %v", err)
+	}
+	if got := out1.Groups[0].GetAgentMetrics()[GveQueueFormatKey].GetStringValue(); got != "DQO RDA" {
+		t.Errorf("run 1 gve_queue_format = %q, want %q", got, "DQO RDA")
+	}
+
+	// Simulate dmesg -C or crafted /dev/kmsg line on subsequent runs.
+	klogResponse = "gve 0000:00:04.0: Driver is running with SPOOFED queue format.\n"
+	out2, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatalf("second Collect() err = %v", err)
+	}
+	if got := out2.Groups[0].GetAgentMetrics()[GveQueueFormatKey].GetStringValue(); got != "DQO RDA" {
+		t.Errorf("run 2 gve_queue_format = %q, want cached %q", got, "DQO RDA")
+	}
+	if klogReads != 1 {
+		t.Errorf("klogctl read count = %d, want 1 after first match", klogReads)
+	}
+}
+
+func TestCollectRetriesGVEQueueFormatOncePerRun(t *testing.T) {
+	resetGVEQueueFormatCache(t)
+	setupFakeSysfsDrivers(t, map[string]string{"eth0": "gve", "eth1": "gve"})
+	t.Cleanup(collector.OverrideNetInterfaces(func() ([]net.Interface, error) {
+		return []net.Interface{
+			{Index: 2, Name: "eth0", Flags: net.FlagUp},
+			{Index: 3, Name: "eth1", Flags: net.FlagUp},
+		}, nil
+	}))
+
+	klogReads := 0
+	klogResponse := ""
+	c := &Collector{
+		NewClient: func() (Client, error) {
+			return &mockClient{
+				stats:   map[string]uint64{"rx_packets": 1},
+				drvInfo: ethtool.DrvInfo{Driver: "gve"},
+			}, nil
+		},
+		Klogctl: func(action int, buf []byte) (int, error) {
+			if action == syslogActionSizeBuffer {
+				return 4096, nil
+			}
+			klogReads++
+			copy(buf, klogResponse)
+			return len(klogResponse), nil
+		},
+	}
+
+	// Run 1: no match yet -> reader called once (not twice for 2 NICs).
+	out1, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatalf("run 1 Collect() err = %v", err)
+	}
+	if klogReads != 1 {
+		t.Fatalf("run 1 klogctl read count = %d, want 1", klogReads)
+	}
+	for i, g := range out1.Groups {
+		if got := g.GetAgentMetrics()[GveQueueFormatKey].GetStringValue(); got != "GVE queue format not found in kernel logs" {
+			t.Errorf("run 1 group[%d] gve_queue_format = %q, want not-found sentinel", i, got)
+		}
+	}
+
+	// Run 2: match appears -> reader called once again, cached for both NICs.
+	klogResponse = "gve 0000:00:04.0: Driver is running with DQO QPL queue format.\n"
+	out2, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatalf("run 2 Collect() err = %v", err)
+	}
+	if klogReads != 2 {
+		t.Fatalf("run 2 klogctl read count = %d, want 2", klogReads)
+	}
+	for i, g := range out2.Groups {
+		if got := g.GetAgentMetrics()[GveQueueFormatKey].GetStringValue(); got != "DQO QPL" {
+			t.Errorf("run 2 group[%d] gve_queue_format = %q, want %q", i, got, "DQO QPL")
+		}
+	}
+
+	// Run 3: log cleared -> cached value persists without another read.
+	klogResponse = ""
+	out3, err := c.Collect(t.Context())
+	if err != nil {
+		t.Fatalf("run 3 Collect() err = %v", err)
+	}
+	if klogReads != 2 {
+		t.Errorf("run 3 klogctl read count = %d, want 2", klogReads)
+	}
+	for i, g := range out3.Groups {
+		if got := g.GetAgentMetrics()[GveQueueFormatKey].GetStringValue(); got != "DQO QPL" {
+			t.Errorf("run 3 group[%d] gve_queue_format = %q, want %q", i, got, "DQO QPL")
+		}
+	}
 }

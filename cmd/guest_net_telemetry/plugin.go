@@ -47,8 +47,10 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	networkstatsreportpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_stats_report"
+	networktelemetryconfigpb "github.com/GoogleCloudPlatform/google-guest-agent/cmd/guest_net_telemetry/proto/network_telemetry_config"
 	plugincommpb "github.com/GoogleCloudPlatform/google-guest-agent/pkg/proto/plugin_comm"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	// grpc_import:plugin_comm_proto_grpc
@@ -77,20 +79,17 @@ const (
 	// disableGuestTelemetryMetadataKey disables guest telemetry when set to a true value on the
 	// instance or project, matching the guest agent core plugin.
 	disableGuestTelemetryMetadataKey = "disable-guest-telemetry"
-	// forceEnableMetadataKey enables the plugin, which is otherwise disabled by DefaultConfig,
-	// when set to a true value on the instance or project. It exists for testing until the
-	// config service supplies the plugin config.
-	forceEnableMetadataKey = "force-enable-network-telemetry-agent"
 )
 
 var (
-	gtcsChannelID = flag.String("channel", "compute.googleapis.com/network-guest-telemetry", "GTCS channel ID")
-	endpoint      = flag.String("endpoint", "", "ACS endpoint override")
-	protocol      = flag.String("protocol", "", "protocol to use uds/tcp")
-	address       = flag.String("address", "", "address to start server listening on")
-	logfile       = flag.String("errorlogfile", "", "plugin error log file")
-	standalone    = flag.Bool("standalone", false, "run as standalone daemon without guest agent")
-	errLog        *log.Logger
+	gtcsChannelID   = flag.String("channel", "compute.googleapis.com/network-guest-telemetry", "GTCS channel ID")
+	configChannelID = flag.String("config_channel", "compute.googleapis.com/network-guest-telemetry-config", "GTCS config channel ID")
+	endpoint        = flag.String("endpoint", "", "ACS endpoint override")
+	protocol        = flag.String("protocol", "", "protocol to use uds/tcp")
+	address         = flag.String("address", "", "address to start server listening on")
+	logfile         = flag.String("errorlogfile", "", "plugin error log file")
+	standalone      = flag.Bool("standalone", false, "run as standalone daemon without guest agent")
+	errLog          *log.Logger
 
 	newCollectors = defaultCollectors
 
@@ -127,9 +126,18 @@ var (
 	projectAttributeValue  = metadata.ProjectAttributeValueWithContext
 	// metadataCheckTimeout bounds each disable-guest-telemetry metadata lookup.
 	metadataCheckTimeout = 5 * time.Second
-	// policyRefreshInterval is how often a running plugin re-reads disable-guest-telemetry.
+	// configFetchTimeout bounds each remote NetworkTelemetryConfig request over ACS.
+	configFetchTimeout = 15 * time.Second
+	// remoteConfig fetches the remote NetworkTelemetryConfig from the GTCS config channel.
+	remoteConfig = fetchRemoteConfig
+	// policyRefreshInterval is how often a running plugin re-reads its policy and remote config
+	// when no remote config_poll_interval is set.
 	policyRefreshInterval = time.Hour
-	collectionRun         = runCollection
+	// configRetryInitialBackoff is the initial delay before retrying a failed startup config
+	// read. Each consecutive failure doubles it up to refreshInterval(cfg). It must stay longer
+	// than configFetchTimeout, so a read that times out finishes before the next retry is due.
+	configRetryInitialBackoff = 20 * time.Second
+	collectionRun             = runCollection
 
 	// sendRetryInitialBackoff and sendRetryMaxBackoff bound the wait between retries of a
 	// failed report send.
@@ -255,55 +263,146 @@ func attributeIsTrue(ctx context.Context, lookup func(context.Context, string) (
 	return isTrue, nil
 }
 
-// attributeIsTrueOnInstanceOrProject reports whether the metadata attribute key is true on the
-// instance or the project. A true value at either level wins even if the other lookup fails.
-func attributeIsTrueOnInstanceOrProject(ctx context.Context, key string) (bool, error) {
-	instanceTrue, instanceErr := attributeIsTrue(ctx, instanceAttributeValue, key)
+// telemetryDisabled reports whether disable-guest-telemetry is true on the instance or the
+// project. A true value at either level disables telemetry even if the other lookup fails.
+func telemetryDisabled(ctx context.Context) (bool, error) {
+	instanceTrue, instanceErr := attributeIsTrue(ctx, instanceAttributeValue, disableGuestTelemetryMetadataKey)
 	if instanceTrue {
 		return true, nil
 	}
-	projectTrue, projectErr := attributeIsTrue(ctx, projectAttributeValue, key)
+	projectTrue, projectErr := attributeIsTrue(ctx, projectAttributeValue, disableGuestTelemetryMetadataKey)
 	if projectTrue {
 		return true, nil
 	}
 	var errs []error
 	if instanceErr != nil {
-		errs = append(errs, fmt.Errorf("instance attribute %q: %w", key, instanceErr))
+		errs = append(errs, fmt.Errorf("instance attribute %q: %w", disableGuestTelemetryMetadataKey, instanceErr))
 	}
 	if projectErr != nil {
-		errs = append(errs, fmt.Errorf("project attribute %q: %w", key, projectErr))
+		errs = append(errs, fmt.Errorf("project attribute %q: %w", disableGuestTelemetryMetadataKey, projectErr))
 	}
 	return false, errors.Join(errs...)
 }
 
-// telemetryDisabled reports whether disable-guest-telemetry is true on the instance or the
-// project. A true value at either level disables telemetry even if the other lookup fails.
-func telemetryDisabled(ctx context.Context) (bool, error) {
-	return attributeIsTrueOnInstanceOrProject(ctx, disableGuestTelemetryMetadataKey)
+func acsClientOptions() []option.ClientOption {
+	if *endpoint == "" {
+		return nil
+	}
+	return []option.ClientOption{option.WithEndpoint(*endpoint)}
 }
 
-// effectiveConfig returns the plugin config for cs, built in layers:
-//
-//  1. disable-guest-telemetry set to true on the instance or project disables every collector,
-//     regardless of the layers below.
-//  2. The base config is forceEnableConfig if force-enable-network-telemetry-agent is true on
-//     the instance or project, and DefaultConfig otherwise.
-//  3. A valid --collectors flag overrides the listed collectors on top of the base config. An
-//     invalid flag is logged and ignored.
-//
-// The returned config is the best available even when err is non-nil: a failed
-// disable-guest-telemetry lookup counts as not opted out, matching the ISV extension, and a
-// failed force-enable lookup leaves DefaultConfig as the base. err reports lookup failures that
-// could have changed the config, so a caller that already has a config can keep it instead.
-func effectiveConfig(ctx context.Context, cs []collector.Collector) (PluginConfig, error) {
-	disabled, disableErr := telemetryDisabled(ctx)
-	if disabled {
-		return newPluginConfig(cs, false), nil
+// fetchNetworkTelemetryConfig queries the GTCS config channel over ACS for the plugin's
+// NetworkTelemetryConfig. It returns (nil, nil) if GTCS has no config this plugin can use.
+func fetchNetworkTelemetryConfig(ctx context.Context, acsClient *agentcommunication.Client, channelID string) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+	// ACS requires a non-nil Body on SendAgentMessage, even though GTCS only reads the label.
+	reqBody := &agentcommunicationpb.MessageBody{
+		Labels: map[string]string{
+			messageTypeLabel: NetworkTelemetryConfigType,
+			"uuid":           uuid.New().String(),
+		},
+		Body: &anypb.Any{},
 	}
-	forced, forceErr := attributeIsTrueOnInstanceOrProject(ctx, forceEnableMetadataKey)
+	resp, err := sendAgentMessage(ctx, channelID, acsClient, reqBody)
+	if status.Code(err) == codes.NotFound {
+		// GTCS has no config registered for this message type.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sending config request to channel %q: %w", channelID, err)
+	}
+	body := resp.GetMessageBody().GetBody()
+	if body == nil {
+		return nil, fmt.Errorf("empty config response body from channel %q", channelID)
+	}
+	cfg := &networktelemetryconfigpb.NetworkTelemetryConfig{}
+	if err := body.UnmarshalTo(cfg); err != nil {
+		return nil, fmt.Errorf("unmarshaling NetworkTelemetryConfig from channel %q: %w", channelID, err)
+	}
+	if cfg.GetV1() == nil {
+		// A config without v1 (for example, one with only a newer version) has nothing this plugin
+		// can use, which is the same as having no config.
+		return nil, nil
+	}
+	return cfg, nil
+}
+
+// fetchRemoteConfig connects to ACS and fetches the NetworkTelemetryConfig from *configChannelID.
+// It returns (nil, nil) if *configChannelID is empty or GTCS has no config this plugin can use.
+func fetchRemoteConfig(ctx context.Context) (*networktelemetryconfigpb.NetworkTelemetryConfig, error) {
+	if *configChannelID == "" {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, configFetchTimeout)
+	defer cancel()
+	acsClient, err := clientNewClient(ctx, false, acsClientOptions()...)
+	if err != nil {
+		return nil, fmt.Errorf("creating ACS client for config fetch: %w", err)
+	}
+	if acsClient != nil {
+		defer func() {
+			if err := acsClient.Close(); err != nil {
+				logNoFatal("Failed to close ACS config client: %v", err)
+			}
+		}()
+	}
+	return fetchNetworkTelemetryConfig(ctx, acsClient, *configChannelID)
+}
+
+// configSources holds the last successfully read value of each input to the plugin config. A
+// failed read keeps that input's previous value, so a failure in one source (the metadata server
+// or the GTCS config channel) does not hide updates from the others.
+type configSources struct {
+	// optOutRead reports whether disable-guest-telemetry has been read successfully. Until it
+	// has, telemetry is treated as opted out (fail closed).
+	optOutRead bool
+	// disabled reports whether disable-guest-telemetry is true on the instance or project.
+	disabled bool
+	// remote is the last NetworkTelemetryConfig fetched from the GTCS config channel, or nil if
+	// there is none.
+	remote *networktelemetryconfigpb.NetworkTelemetryConfig
+}
+
+// optedOut reports whether telemetry is disabled or the opt-out has not been read yet.
+func (s *configSources) optedOut() bool {
+	return !s.optOutRead || s.disabled
+}
+
+// refresh re-reads the config inputs and records the values that were read successfully. While
+// telemetry is opted out, including before disable-guest-telemetry has been read successfully,
+// the other inputs are not read. The returned error reports the reads that failed.
+func (s *configSources) refresh(ctx context.Context) error {
+	var errs []error
+	if disabled, err := telemetryDisabled(ctx); err != nil {
+		errs = append(errs, err)
+	} else {
+		s.optOutRead, s.disabled = true, disabled
+	}
+	if s.optedOut() {
+		return errors.Join(errs...)
+	}
+	if remote, err := remoteConfig(ctx); err != nil {
+		errs = append(errs, err)
+	} else {
+		s.remote = remote
+	}
+	return errors.Join(errs...)
+}
+
+// config returns the plugin config for cs from the recorded inputs, built in layers:
+//
+//  1. disable-guest-telemetry set to true on the instance or project, or not read successfully
+//     yet, disables every collector, regardless of the layers below.
+//  2. A remote NetworkTelemetryConfig fetched from the GTCS config channel, when there is one,
+//     applied over DefaultConfig.
+//  3. A valid --collectors flag overrides the listed collectors on top of the config. An
+//     invalid flag is logged and ignored.
+func (s *configSources) config(cs []collector.Collector) PluginConfig {
+	if s.optedOut() {
+		return newPluginConfig(cs, false)
+	}
 	cfg := DefaultConfig(cs)
-	if forced {
-		cfg = forceEnableConfig(cs)
+	if s.remote != nil {
+		cfg = ApplyRemoteConfig(cfg, s.remote)
 	}
 	if *collectorsFlag != "" {
 		if overridden, err := ApplyCollectorOverrides(cfg, *collectorsFlag); err != nil {
@@ -312,7 +411,7 @@ func effectiveConfig(ctx context.Context, cs []collector.Collector) (PluginConfi
 			cfg = overridden
 		}
 	}
-	return cfg, errors.Join(disableErr, forceErr)
+	return cfg
 }
 
 // PluginServer implements the plugin RPC server interface.
@@ -402,7 +501,7 @@ func buildNetworkStatsReport(ctx context.Context, collectors ...collector.Collec
 		collectors = newCollectors()
 	}
 	epoch := collector.Now()
-	cfg := DefaultConfig(collectors)
+	cfg := newPluginConfig(collectors, true)
 	rep := NewReporter(collectors, cfg, epoch, nil)
 
 	batch := make(map[string]collector.Result, len(collectors))
@@ -532,34 +631,75 @@ func (h *sendHealth) failing() error {
 	return fmt.Errorf("last %d NetworkStatsReport sends failed: %w", h.consecutiveFailures, h.lastErr)
 }
 
+func refreshInterval(cfg PluginConfig) time.Duration {
+	if cfg.ConfigPollInterval > 0 {
+		return cfg.ConfigPollInterval
+	}
+	return policyRefreshInterval
+}
+
 // start is the plugin worker loop. It runs one period at a time, each with a fixed config:
 //
 //   - If the config enables at least one collector, a collection run (ACS client, Scheduler
 //     and Reporter) is active for the period.
 //   - Otherwise nothing is collected or sent.
 //
-// The config comes from effectiveConfig. It is read once at startup and again every
-// policyRefreshInterval; any change ends the period, so the next period runs with the new
-// config. At startup, a failed read falls back to the best available config (see
-// effectiveConfig); a failed read on refresh keeps the current config so transient metadata
-// server errors do not change collection.
+// The config comes from configSources. It is read at startup and re-read periodically. Until a
+// refresh reads every input without error, failed refreshes retry with exponential backoff
+// starting at configRetryInitialBackoff and capped at refreshInterval(cfg); afterwards,
+// refreshes run every refreshInterval(cfg). A change to anything but the config poll interval
+// ends the period, so the next period runs with the new config; a change to only the poll
+// interval adjusts the refresh timer without restarting collection. An input that fails to read
+// keeps its last known value, so an error in one source neither changes collection nor hides
+// updates from the others.
 func start(ctx context.Context) error {
 	logNoFatal("Starting telemetry plugin worker loop with context: %v", ctx)
 	// cs is only used to name the collectors in the config; each run creates its own.
 	cs := newCollectors()
-	cfg, err := effectiveConfig(ctx, cs)
-	if err != nil {
-		logNoFatal("Unable to read telemetry metadata; using best available config: %v", err)
+	// sources keeps the last successfully read config inputs for the lifetime of start.
+	var sources configSources
+	// synced becomes true once a refresh reads every input without error.
+	var synced bool
+	if err := sources.refresh(ctx); err != nil {
+		logNoFatal("Unable to read telemetry config; using best available config: %v", err)
+	} else {
+		synced = true
+	}
+	cfg := sources.config(cs)
+
+	// nextRefreshDelay returns the delay before the next config refresh, advancing exponential
+	// backoff while startup has not synced yet.
+	retryDelay := configRetryInitialBackoff
+	nextRefreshDelay := func() time.Duration {
+		limit := refreshInterval(cfg)
+		if synced {
+			return limit
+		}
+		d := min(retryDelay, limit)
+		logNoFatal("Retrying telemetry config read in %v", d)
+		if d > limit/2 {
+			retryDelay = limit
+		} else {
+			retryDelay = d * 2
+		}
+		return d
 	}
 
 	// ticker drives the periodic re-read of the config for the lifetime of start.
-	ticker := time.NewTicker(policyRefreshInterval)
+	currentRefresh := nextRefreshDelay()
+	ticker := time.NewTicker(currentRefresh)
 	defer ticker.Stop()
+	updateTicker := func() {
+		if d := nextRefreshDelay(); d != currentRefresh {
+			currentRefresh = d
+			ticker.Reset(currentRefresh)
+		}
+	}
 	// The paused state only describes a running worker loop.
 	defer collectionPaused.Store(false)
 
-	// Each outer iteration is one period spent with a single config. It ends when a refresh
-	// returns a different config.
+	// Each outer iteration is one period spent with a single collection config. It ends when a
+	// refresh returns a config that changes collection.
 	for {
 		// Enter the period. runCtx scopes this period's collection run so it can be stopped
 		// without cancelling ctx. runDone receives collectionRun's return value when the run
@@ -577,10 +717,10 @@ func start(ctx context.Context) error {
 			logNoFatal("No collectors are enabled; collection paused")
 		}
 
-		// Wait until a refresh returns a different config, or until start must return.
-		// want is the config from the most recent successful refresh.
+		// Wait until a refresh returns a config that changes collection, or until start must
+		// return. want is the config from the most recent refresh.
 		want := cfg
-		for want.equal(cfg) {
+		for want.sameCollection(cfg) {
 			select {
 			case <-ctx.Done():
 				// The plugin is stopping. Cancel this period's run and, if one was started, wait
@@ -597,13 +737,19 @@ func start(ctx context.Context) error {
 				cancelRun()
 				return err
 			case <-ticker.C:
-				// Periodic refresh. On a read error, keep waiting with the current config.
-				next, err := effectiveConfig(ctx, cs)
-				if err != nil {
-					logNoFatal("Unable to refresh telemetry metadata; keeping current config: %v", err)
-					continue
+				// Periodic refresh. Inputs that fail to read keep their last known values, and
+				// the config is rebuilt from the latest value of every input.
+				if err := sources.refresh(ctx); err != nil {
+					logNoFatal("Unable to refresh telemetry config; using last known values: %v", err)
+				} else {
+					synced = true
 				}
-				want = next
+				want = sources.config(cs)
+				if want.sameCollection(cfg) {
+					// At most the poll interval changed, which does not need a new run.
+					cfg.ConfigPollInterval = want.ConfigPollInterval
+					updateTicker()
+				}
 			}
 		}
 
@@ -617,6 +763,7 @@ func start(ctx context.Context) error {
 			}
 		}
 		cfg = want
+		updateTicker()
 	}
 }
 
@@ -624,9 +771,8 @@ func start(ctx context.Context) error {
 // cancelled. Each run uses fresh collectors and a new epoch, so resuming after a config change
 // behaves like a plugin restart.
 func runCollection(ctx context.Context, cfg PluginConfig) error {
-	var opts []option.ClientOption
+	opts := acsClientOptions()
 	if *endpoint != "" {
-		opts = append(opts, option.WithEndpoint(*endpoint))
 		logNoFatal("Endpoint: %q with opts: %v", *endpoint, opts)
 	}
 	logNoFatal("Setting up ACS client...")
