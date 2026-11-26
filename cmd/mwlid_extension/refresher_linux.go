@@ -18,7 +18,10 @@ limitations under the License.
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 const (
 	// contentDirPrefix is used as prefix to create certificate directories on
@@ -36,4 +39,11 @@ func (j *RefresherJob) generateTmpDirNames(opts outputOpts, now string) (string,
 	contentDir := fmt.Sprintf("%s-%s", opts.contentDirPrefix, now)
 	tempSymlink := fmt.Sprintf("%s-%s", opts.tempSymlinkPrefix, now)
 	return contentDir, tempSymlink
+}
+
+// ensureSecureDir creates dir and its parents if they don't exist. On Linux the
+// secrets directory lives under /run, which only root can write to, so the
+// standard permissions are sufficient.
+func ensureSecureDir(dir string) error {
+	return os.MkdirAll(dir, 0755)
 }
